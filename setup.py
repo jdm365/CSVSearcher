@@ -6,7 +6,7 @@ import os
 
 MODULE_NAME = "bm25"
 
-os.environ["CC"]  = "clang"
+## os.environ["CC"]  = "clang"
 os.environ["CXX"] = "clang++"
 
 COMPILER_FLAGS = [
