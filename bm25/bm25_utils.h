@@ -1,8 +1,8 @@
 #include <vector>
 #include <string>
-#include <unordered_map>
-#include <queue>
 #include <cstdint>
+
+#include "robin_hood.h"
 
 std::vector<std::string> tokenize_whitespace(
 		std::string& document
@@ -22,9 +22,9 @@ void tokenize_ngram_batch(
 		);
 void init_members(
 	std::vector<std::vector<std::string>>& tokenized_documents,
-	std::unordered_map<std::string, std::vector<uint32_t>>& inverted_index,
-	std::vector<std::unordered_map<std::string, uint32_t>>& term_freqs,
-	std::unordered_map<std::string, uint32_t>& doc_term_freqs,
+	robin_hood::unordered_map<std::string, std::vector<uint32_t>>& inverted_index,
+	std::vector<robin_hood::unordered_map<std::string, uint16_t>>& term_freqs,
+	robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs,
 	std::vector<uint16_t>& doc_sizes,
 	float& avg_doc_size,
 	uint32_t& num_docs,
@@ -32,15 +32,12 @@ void init_members(
 	float max_df
 	);
 
-typedef std::pair<uint32_t, float> score_pair_t;
-typedef std::priority_queue<score_pair_t, std::vector<score_pair_t>, std::greater<score_pair_t>> min_heap_t;
-
 class _BM25 {
 	public:
 
-		std::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
-		std::vector<std::unordered_map<std::string, uint32_t>> term_freqs;
-		std::unordered_map<std::string, uint32_t> doc_term_freqs;
+		robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
+		std::vector<robin_hood::unordered_map<std::string, uint16_t>> term_freqs;
+		robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
 
 		float avg_doc_size;
