@@ -1,0 +1,40 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-v",
+      "-std=c++17",
+      "-fopenmp",
+      "-I../",
+      "-I/usr/include",
+      "-I/usr/local/include",
+      "-pthread",
+      "-o",
+      "bm25",
+      "main.cpp"
+    ],
+    "directory": "/home/jdm365/BM25/bm25/gen_compile_commands",
+    "file": "/home/jdm365/BM25/bm25/gen_compile_commands/main.cpp",
+    "output": "/home/jdm365/BM25/bm25/gen_compile_commands/bm25"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-v",
+      "-std=c++17",
+      "-fopenmp",
+      "-I../",
+      "-I/usr/include",
+      "-I/usr/local/include",
+      "-pthread",
+      "-o",
+      "bm25",
+      "../bm25_utils.cpp"
+    ],
+    "directory": "/home/jdm365/BM25/bm25/gen_compile_commands",
+    "file": "/home/jdm365/BM25/bm25/bm25_utils.cpp",
+    "output": "/home/jdm365/BM25/bm25/gen_compile_commands/bm25"
+  }
+]

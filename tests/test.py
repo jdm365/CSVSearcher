@@ -19,13 +19,13 @@ if __name__ == '__main__':
             )
 
     init = perf_counter()
-    records = model.get_topk_docs(query, k=10)
+    ## records = model.get_topk_docs(query, k=10)
     print(f"Time to get top 10: {perf_counter() - init:.5f} seconds")
 
     ## print(pd.DataFrame(records))
 
     init = perf_counter()
-    records = model.get_topk_docs(query, k=10)
+    ## records = model.get_topk_docs(query, k=10)
     print(f"Time to get top 10: {perf_counter() - init:.5f} seconds")
 
     sleep(10)

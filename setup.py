@@ -18,6 +18,13 @@ COMPILER_FLAGS = [
     "-ffast-math",
 ]
 
+SANITIZER_FLAGS = [
+    "-fsanitize=address",
+    "-fsanitize=leak",
+    "-fsanitize=undefined",
+    "-fsanitize=thread",
+]
+
 
 extensions = [
     Extension(
@@ -26,7 +33,8 @@ extensions = [
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=[np.get_include(), "bm25"],
-        extra_link_args=["-fopenmp", "-lstdc++", "-llmdb"],
+        ## extra_link_args=["-fopenmp", "-lstdc++", "-llmdb"],
+        extra_link_args=["-fopenmp", "-lstdc++", "-lleveldb"],
         ##link boost libraries
     ),
 ]

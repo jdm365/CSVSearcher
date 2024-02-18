@@ -134,10 +134,6 @@ cdef class BM25:
                 1.2,
                 0.4
                 )
-
-        ## delete vector_documents
-        vector_documents.clear()
-        vector_documents.shrink_to_fit()
         
 
     def get_topk_docs(self, str query, int k = 10):

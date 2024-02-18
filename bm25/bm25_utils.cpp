@@ -9,22 +9,116 @@
 #include <sstream>
 #include <omp.h>
 
+// #include "bm25_utils.h"
 #include "bm25_utils.h"
 #include "robin_hood.h"
 
-#include "lmdb++.h"
+// #include "lmdb++.h"
+#include <leveldb/db.h>
 
 
-static std::vector<int> line_offsets;
-static void write_vector_to_file(
-		const std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& vec,
-		const std::string& filename
+void _BM25::init_dbs() {
+	// Create the directory if it does not exist
+	std::filesystem::create_directory(DIR_NAME);
+
+	leveldb::Options options;
+	options.create_if_missing = true;
+	leveldb::Status status;
+
+	// const size_t cacheSize = 100 * 1048576; // 100 MB
+	// options.block_cache = leveldb::NewLRUCache(cacheSize);
+
+	status = leveldb::DB::Open(options, DIR_NAME + "/" + DOC_TERM_FREQS_DB_NAME, &doc_term_freqs_db);
+	if (!status.ok()) {
+		std::cerr << "Unable to open doc_term_freqs_db" << std::endl;
+		std::cerr << status.ToString() << std::endl;
+	}
+
+	status = leveldb::DB::Open(options, DIR_NAME + "/" + INVERTED_INDEX_DB_NAME, &inverted_index_db);
+	if (!status.ok()) {
+		std::cerr << "Unable to open inverted_index_db" << std::endl;
+		std::cerr << status.ToString() << std::endl;
+	}
+}
+
+void _BM25::create_doc_term_freqs_db(
+		const robin_hood::unordered_flat_map<std::string, uint32_t>& doc_term_freqs
+		) {
+	// Create term frequencies db
+	leveldb::WriteOptions write_options;
+	leveldb::Status status;
+
+	for (const auto& pair : doc_term_freqs) {
+		status = doc_term_freqs_db->Put(write_options, pair.first, std::to_string(pair.second));
+		if (!status.ok()) {
+			std::cerr << "Unable to put key-value pair in term_freqs_db" << std::endl;
+			std::cerr << status.ToString() << std::endl;
+		}
+	}
+}
+
+void _BM25::create_inverted_index_db(
+		const robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index
+		) {
+	// Create inverted index db
+	leveldb::WriteOptions write_options;
+	leveldb::Status status;
+
+	for (const auto& pair : inverted_index) {
+		std::string value;
+		for (const auto& doc_id : pair.second) {
+			value += std::to_string(doc_id) + " ";
+		}
+		status = inverted_index_db->Put(write_options, pair.first, value);
+		if (!status.ok()) {
+			std::cerr << "Unable to put key-value pair in inverted_index_db" << std::endl;
+			std::cerr << status.ToString() << std::endl;
+		}
+	}
+}
+
+uint32_t _BM25::get_doc_term_freq_db(const std::string& term) {
+	leveldb::ReadOptions read_options;
+	std::string value;
+	leveldb::Status status = doc_term_freqs_db->Get(read_options, term, &value);
+	if (!status.ok()) {
+		// std::cerr << "Unable to get value from doc_term_freqs_db" << std::endl;
+		// std::cerr << status.ToString() << std::endl;
+		// If term not found, return 0
+		return 0;
+	}
+	return std::stoi(value);
+}
+
+std::vector<uint32_t> _BM25::get_inverted_index_db(const std::string& term) {
+	leveldb::ReadOptions read_options;
+	std::string value;
+
+	leveldb::Status status = inverted_index_db->Get(read_options, term, &value);
+	if (!status.ok()) {
+		// std::cerr << "Unable to get value from inverted_index_db" << std::endl;
+		// std::cerr << status.ToString() << std::endl;
+		// If term not found, return empty vector
+		return std::vector<uint32_t>();
+	}
+	std::istringstream iss(value);
+	std::vector<uint32_t> doc_ids;
+	uint32_t doc_id;
+	while (iss >> doc_id) {
+		doc_ids.push_back(doc_id);
+	}
+	return doc_ids;
+}
+
+
+void _BM25::write_term_freqs_to_file(
+		const std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& vec
 		) {
 	// Create memmap index to get specific line later
-	std::ofstream file(filename);
+	std::ofstream file(DIR_NAME + "/" + TERM_FREQS_FILE_NAME);
 	int offset = 0;
 	for (const auto& map : vec) {
-		line_offsets.push_back(offset);
+		term_freq_line_offsets.push_back(offset);
 		for (const auto& pair : map) {
 			file << pair.first << " " << pair.second;
 			file << "\t";
@@ -35,13 +129,12 @@ static void write_vector_to_file(
 	file.close();
 }
 
-static uint16_t read_specific_line_frequency(
-		const std::string& filename,
+uint16_t _BM25::get_term_freq_from_file(
 		int line_num,
 		const std::string& term
 		) {
-	std::ifstream file(filename);
-	file.seekg(line_offsets[line_num]);
+	std::ifstream file(DIR_NAME + "/" + TERM_FREQS_FILE_NAME);
+	file.seekg(term_freq_line_offsets[line_num]);
 	std::string line;
 	std::getline(file, line);
 	std::istringstream iss(line);
@@ -57,148 +150,8 @@ static uint16_t read_specific_line_frequency(
 }
 
 
-static void store_map(const robin_hood::unordered_flat_map<std::string, uint32_t>& map) {
-    // Create the directory if it does not exist
-    std::filesystem::create_directory(DB_NAME);
-
-	// Create db 
-    auto env = lmdb::env::create();
-    env.open(DB_NAME.c_str(), 0, 0664);
-
-	env.set_mapsize(100LL * 1024 * 1024 * 1024);
-
-    auto wtxn = lmdb::txn::begin(env);
-    auto db   = lmdb::dbi::open(wtxn, nullptr);
-
-    for (const auto& pair : map) {
-		std::string value = std::to_string(pair.second);
-        db.put(
-				wtxn, 
-				pair.first.c_str(), 
-				value.c_str()
-				);
-    }
-
-    wtxn.commit();
-}
-
-static uint32_t read_doc_frequency(const std::string& term) {
-    auto env = lmdb::env::create();
-    env.open(DB_NAME.c_str(), 0, 0664);
-    auto rtxn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-    auto db   = lmdb::dbi::open(rtxn, nullptr);
-
-    lmdb::val value;
-    if (db.get(rtxn, lmdb::val(term.c_str()), value)) {
-        uint32_t freq;
-		// Will be a string
-		// Use std::stoi to convert to int
-		std::string value_str(reinterpret_cast<const char*>(value.data()), value.size());
-		freq = std::stoi(value_str);
-        return freq;
-    }
-
-    return 0;
-}
-
-/*
-static std::string serialize_vector(const std::vector<uint32_t>& vec) {
-	int size = vec.size() * sizeof(uint32_t);
-	return std::string(
-			reinterpret_cast<const char*>(vec.data()),
-			size
-			);
-}
-
-static std::vector<uint32_t> deserialize_vector(std::string data) {
-	std::vector<uint32_t> vec;
-	vec.resize(data.size() / sizeof(uint32_t));
-	std::memcpy(vec.data(), data.data(), data.size());
-	return vec;
-}
-*/
-static std::string serialize_vector(const std::vector<uint32_t>& vec) {
-	std::string data;
-	for (const auto& val : vec) {
-		data.append(std::to_string(val));
-		data.append(",");
-	}
-	return data;
-}
-
-static std::vector<uint32_t> deserialize_vector(std::string data) {
-	std::vector<uint32_t> vec;
-	std::istringstream iss(data);
-	std::string token;
-	while (std::getline(iss, token, ',')) {
-		vec.push_back(std::stoi(token));
-	}
-	return vec;
-}
-
-static void write_inverted_index(
-		const robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index
-		) {
-	// Create the directory if it does not exist
-	std::filesystem::create_directory(INVERTED_INDEX_DB_NAME);
-
-	// Create db
-	auto env = lmdb::env::create();
-	env.open(INVERTED_INDEX_DB_NAME.c_str(), 0, 0664);
-
-	env.set_mapsize(100LL * 1024 * 1024 * 1024);
-
-	auto wtxn = lmdb::txn::begin(env, nullptr, 0);
-	auto db   = lmdb::dbi::open(wtxn, nullptr, 0);
-
-	for (const auto& pair : inverted_index) {
-        const auto& key_str = pair.first;
-        const auto& values = pair.second;
-
-		std::string data = serialize_vector(values);
-
-        db.put(
-				wtxn, 
-				key_str.c_str(),
-				data.c_str()
-				);
-    }
-
-    wtxn.commit();
-
-}
-
-static std::vector<uint32_t> read_inverted_index(const std::string& term) {
-	auto env = lmdb::env::create();
-	env.open(INVERTED_INDEX_DB_NAME.c_str(), 0, 0664);
-
-	auto rtxn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-    auto db = lmdb::dbi::open(rtxn, nullptr);
-
-	lmdb::val query(term.c_str());
-	lmdb::val db_data;
-	std::vector<uint32_t> value;
-
-    // Attempt to get the data for the specified key
-    if (db.get(rtxn, query, db_data)) {
-		std::string value_string = std::string(
-				reinterpret_cast<const char*>(db_data.data()),
-				db_data.size()
-				);
-		value = deserialize_vector(
-				value_string
-				);
-		return value;
-    }
-
-    rtxn.abort();
-    return value;
-
-}
-
-
 std::vector<std::string> tokenize_whitespace(
-		std::string& document
+		const std::string& document
 		) {
 	std::vector<std::string> tokenized_document;
 
@@ -248,7 +201,7 @@ void tokenize_whitespace_batch(
 		std::vector<std::vector<std::string>>& tokenized_documents
 		) {
 	tokenized_documents.reserve(documents.size());
-	for (std::string& doc : documents) {
+	for (const std::string& doc : documents) {
 		tokenized_documents.push_back(tokenize_whitespace(doc));
 	}
 }
@@ -269,21 +222,38 @@ void tokenize_ngram_batch(
 	}
 }
 
-void init_members(
-	std::vector<std::vector<std::string>>& tokenized_documents,
-	// robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index,
-	robin_hood::unordered_flat_set<std::string>& large_dfs,
-	std::vector<uint16_t>& doc_sizes,
-	float& avg_doc_size,
-	uint32_t& num_docs,
-	int min_df,
-	float max_df
-	) {
+_BM25::_BM25(
+		std::vector<std::string>& documents,
+		bool whitespace_tokenization,
+		int ngram_size,
+		int min_df,
+		float max_df,
+		float k1,
+		float b
+		) : whitespace_tokenization(whitespace_tokenization), 
+			ngram_size(ngram_size), 
+			min_df(min_df), 
+			max_df(max_df), 
+			k1(k1), 
+			b(b) {
+
+	init_dbs();
+	std::vector<std::vector<std::string>> tokenized_documents;
+
+	if (whitespace_tokenization) {
+		tokenize_whitespace_batch(documents, tokenized_documents);
+	} 
+	else {
+		tokenize_ngram_batch(documents, tokenized_documents, ngram_size);
+	}
+
 	robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>> inverted_index;
 
 	std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>> term_freqs;
 	robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
+
 	term_freqs.reserve(tokenized_documents.size());
+	doc_term_freqs.reserve(tokenized_documents.size());
 	doc_sizes.reserve(tokenized_documents.size());
 
 	int max_number_of_occurrences = (int)(max_df * tokenized_documents.size());
@@ -306,7 +276,7 @@ void init_members(
 
 	// Filter terms by min_df and max_df
 	for (const robin_hood::pair<std::string, uint32_t>& term_count : doc_term_freqs) {
-		if (term_count.second > 5000) {
+		if (term_count.second > INIT_MAX_DF) {
 			large_dfs.insert(term_count.first);
 		}
 
@@ -340,10 +310,10 @@ void init_members(
 	}
 
 	// Write term_freqs to disk
-	write_vector_to_file(term_freqs, "term_freqs.bin");
+	write_term_freqs_to_file(term_freqs);
 
 	// Write doc_term_freqs to lmdb
-	store_map(doc_term_freqs);
+	create_doc_term_freqs_db(doc_term_freqs);
 	inverted_index.reserve(doc_term_freqs.size());
 
 	for (uint32_t doc_id = 0; doc_id < tokenized_documents.size(); ++doc_id) {
@@ -356,7 +326,7 @@ void init_members(
 		}
 	}
 	// Write inverted index to disk
-	write_inverted_index(inverted_index);
+	create_inverted_index_db(inverted_index);
 
 	avg_doc_size = 0.0f;
 	#pragma omp parallel for reduction(+:avg_doc_size)
@@ -366,44 +336,9 @@ void init_members(
 	avg_doc_size /= num_docs;
 }
 
-
-
-_BM25::_BM25(
-		std::vector<std::string>& documents,
-		bool whitespace_tokenization,
-		int ngram_size,
-		int min_df,
-		float max_df,
-		float k1,
-		float b
-		) : whitespace_tokenization(whitespace_tokenization), 
-			ngram_size(ngram_size), 
-			min_df(min_df), 
-			max_df(max_df), 
-			k1(k1), 
-			b(b) {
-	std::vector<std::vector<std::string>> tokenized_documents;
-
-	if (whitespace_tokenization) {
-		tokenize_whitespace_batch(documents, tokenized_documents);
-	} 
-	else {
-		tokenize_ngram_batch(documents, tokenized_documents, ngram_size);
-	}
-
-	init_members(
-			tokenized_documents, 
-			large_dfs,
-			doc_sizes, 
-			avg_doc_size, 
-			num_docs, 
-			min_df, 
-			max_df
-			);
-}
-
 inline float _BM25::_compute_idf(const std::string& term) {
-	uint32_t df = read_doc_frequency(term);
+	// uint32_t df = read_doc_frequency(term);
+	uint32_t df = get_doc_term_freq_db(term);
 	return log((num_docs - df + 0.5) / (df + 0.5));
 }
 
@@ -412,7 +347,7 @@ inline float _BM25::_compute_bm25(
 		uint32_t doc_id,
 		float idf
 		) {
-	float tf  = read_specific_line_frequency("term_freqs.bin", doc_id, term);
+	float tf = get_term_freq_from_file(doc_id, term);
 	float doc_size = doc_sizes[doc_id];
 
 	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
@@ -432,19 +367,19 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 
 	// Gather docs that contain at least one term from the query
 	// Try using dynamic max_df for performance
-	int local_max_df = 5000;
+	int local_max_df = INIT_MAX_DF;
 	robin_hood::unordered_set<uint32_t> candidate_docs;
 
 	while (candidate_docs.size() == 0) {
 		for (const std::string& term : tokenized_query) {
 
-			if (local_max_df == 5000) {
+			if (local_max_df == INIT_MAX_DF) {
 				if (large_dfs.find(term) != large_dfs.end()) {
 					continue;
 				}
 			}
-			std::vector<uint32_t> doc_ids = read_inverted_index(term);
-			
+			std::vector<uint32_t> doc_ids = get_inverted_index_db(term);
+
 			if (doc_ids.size() == 0) {
 				continue;
 			}
