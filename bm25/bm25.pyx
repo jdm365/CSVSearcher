@@ -19,6 +19,7 @@ from libcpp cimport bool
 cimport numpy as np
 import numpy as np
 np.import_array()
+import gc
 
 from time import perf_counter
 import sys
@@ -133,6 +134,9 @@ cdef class BM25:
         ## Call self.data_index[0] once
         self.data_index[0]
 
+        del documents
+        gc.collect()
+
 
     def __cinit__(
             self, 
@@ -154,13 +158,14 @@ cdef class BM25:
                 self.min_df,
                 self.max_df,
                 1.2,
-                0.75
+                0.4
                 )
 
     def get_topk_docs(self, str query, int k = 10):
         cdef list scores   = []
         cdef list topk_ids = []
         cdef vector[pair[uint32_t, float]] results
+        cdef list output
 
         results = self.bm25.query(query.lower().encode("utf-8"), k)
 
@@ -169,6 +174,10 @@ cdef class BM25:
         for i in range(k):
             topk_ids.append(results[i].first)
             scores.append(results[i].second)
-
-        return [dict(zip(self.cols, self.data_index[i])) for i in topk_ids]
-
+            
+        output = []
+        for idx, data_idx in enumerate(topk_ids):
+            doc = dict(zip(self.cols, self.data_index[data_idx]))
+            doc["score"] = scores[idx]
+            output.append(doc)
+        return output 

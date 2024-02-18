@@ -5,10 +5,42 @@
 #include <cstdint>
 #include <cmath>
 #include <omp.h>
-#include <chrono>
 
 #include "bm25_utils.h"
 #include "robin_hood.h"
+
+#include "lmdb++.h"
+
+void store_map(const robin_hood::unordered_flat_map<std::string, uint16_t>& map) {
+    auto env = lmdb::env::create();
+    env.open("term_freqs.db", 0, 0664);
+
+    auto wtxn = lmdb::txn::begin(env, nullptr, 0);
+    auto db   = lmdb::dbi::open(wtxn, nullptr, 0);
+
+    for (const auto& pair : map) {
+        db.put(wtxn, lmdb::val(pair.first.c_str()), lmdb::val(&pair.second, sizeof(pair.second)));
+    }
+
+    wtxn.commit();
+}
+
+uint16_t read_frequency(const std::string& term) {
+    auto env = lmdb::env::create();
+    env.open("term_freqs.db", 0, 0664);
+    auto rtxn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+    auto db = lmdb::dbi::open(rtxn, nullptr);
+
+    lmdb::val value;
+    if (db.get(rtxn, lmdb::val(term.c_str()), value)) {
+        // Assuming value's data is directly the bytes of uint16_t
+        uint16_t freq;
+        memcpy(&freq, value.data(), sizeof(freq));
+        return freq;
+    }
+
+    return 0;
+}
 
 std::vector<std::string> tokenize_whitespace(
 		std::string& document
@@ -84,8 +116,8 @@ void tokenize_ngram_batch(
 
 void init_members(
 	std::vector<std::vector<std::string>>& tokenized_documents,
-	robin_hood::unordered_map<std::string, std::vector<uint32_t>>& inverted_index,
-	std::vector<robin_hood::unordered_map<std::string, uint16_t>>& term_freqs,
+	robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index,
+	std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& term_freqs,
 	robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs,
 	std::vector<uint16_t>& doc_sizes,
 	float& avg_doc_size,
@@ -97,8 +129,6 @@ void init_members(
 	doc_sizes.reserve(tokenized_documents.size());
 
 	int max_number_of_occurrences = (int)(max_df * tokenized_documents.size());
-
-	auto start = std::chrono::high_resolution_clock::now();
 
 	// Accumulate document frequencies
 	for (const std::vector<std::string>& doc : tokenized_documents) {
@@ -113,11 +143,6 @@ void init_members(
 			++doc_term_freqs[term];
 		}
 	}
-
-	auto end = std::chrono::high_resolution_clock::now();
-
-	std::chrono::duration<double> elapsed_seconds = end - start;
-	std::cout << "Elapsed time for getting doc_term_freqs: " << elapsed_seconds.count() << "s\n";
 
 	robin_hood::unordered_set<std::string> blacklisted_terms;
 
@@ -142,8 +167,6 @@ void init_members(
 		uint16_t doc_size = doc.size();
 		doc_sizes[doc_id] = doc_size;
 
-		avg_doc_size += doc_size;
-
 		robin_hood::unordered_map<std::string, uint16_t> term_freq;
 		for (const std::string& term : doc) {
 			if (blacklisted_terms.find(term) != blacklisted_terms.end()) {
@@ -167,6 +190,11 @@ void init_members(
 		}
 	}
 
+	avg_doc_size = 0.0f;
+	#pragma omp parallel for reduction(+:avg_doc_size)
+	for (int doc_id = 0; doc_id < num_docs; ++doc_id) {
+		avg_doc_size += (float)doc_sizes[doc_id];
+	}
 	avg_doc_size /= num_docs;
 }
 
@@ -207,13 +235,41 @@ _BM25::_BM25(
 			max_df
 			);
 
+	// Calc memory size of documents
+	uint64_t total_memory_usage_docs = 0;
+	for (const std::string& doc : documents) {
+		total_memory_usage_docs += sizeof(char) * doc.size();
+	}
+	std::cout << "Total memory usage of documents: " << total_memory_usage_docs / (1024 * 1024) << " MB" << std::endl;
+	std::cout << "String size: " << sizeof(std::string) << std::endl;
+	std::cout << "Char size:   " << sizeof(char) << std::endl;
+
 	// Calc total memory usage
 	uint64_t total_memory_usage = 0;
-	total_memory_usage += sizeof(std::string) * documents.size();
-	// total_memory_usage += sizeof(robin_hood::unordered_map<std::string, std::vector<uint32_t>>) * inverted_index.size();
-	total_memory_usage += sizeof(robin_hood::unordered_map<std::string, robin_hood::unordered_set<uint32_t>>) * inverted_index.size();
-	total_memory_usage += sizeof(robin_hood::unordered_map<std::string, uint32_t>) * term_freqs.size();
-	total_memory_usage += sizeof(robin_hood::unordered_map<std::string, uint32_t>) * doc_term_freqs.size();
+	// total_memory_usage += sizeof(robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>) * inverted_index.size();
+	for (const robin_hood::pair<std::string, std::vector<uint32_t>>& term : inverted_index) {
+		total_memory_usage += sizeof(char) * term.first.size();
+		total_memory_usage += sizeof(uint32_t) * term.second.size();
+	}
+	std::cout << "Total memory usage after inverted_index: " << total_memory_usage / (1024 * 1024) << " MB" << std::endl;
+
+	// total_memory_usage += sizeof(robin_hood::unordered_flat_map<std::string, uint32_t>) * term_freqs.size();
+	for (int idx = 0; idx < term_freqs.size(); ++idx) {
+		const robin_hood::unordered_map<std::string, uint16_t>& term_freq = term_freqs[idx];
+		for (const robin_hood::pair<std::string, uint16_t>& term : term_freq) {
+			total_memory_usage += sizeof(char) * term.first.size();
+			total_memory_usage += sizeof(uint16_t);
+		}
+	}
+	std::cout << "Total memory usage after term_freqs: " << total_memory_usage / (1024 * 1024) << " MB" << std::endl;
+
+	// total_memory_usage += sizeof(robin_hood::unordered_map<std::string, uint32_t>) * doc_term_freqs.size();
+	for (const robin_hood::pair<std::string, uint32_t>& term : doc_term_freqs) {
+		total_memory_usage += sizeof(char) * term.first.size();
+		total_memory_usage += sizeof(uint32_t);
+	}
+	std::cout << "Total memory usage after doc_term_freqs: " << total_memory_usage / (1024 * 1024) << " MB" << std::endl;
+
 	total_memory_usage += sizeof(uint16_t) * doc_sizes.size();
 	total_memory_usage += sizeof(float) * 2;
 	total_memory_usage += sizeof(uint32_t);
@@ -234,6 +290,7 @@ inline float _BM25::_compute_bm25(
 	float idf = _compute_idf(term);
 	float tf  = term_freqs[doc_id][term];
 	float doc_size = doc_sizes[doc_id];
+
 	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
 }
 
@@ -264,7 +321,7 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	*/
 
 	// Try using dynamic max_df for performance
-	int local_max_df = 1000;
+	int local_max_df = 5000;
 	robin_hood::unordered_set<uint32_t> candidate_docs;
 
 	while (candidate_docs.size() == 0) {
@@ -281,9 +338,9 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 				candidate_docs.insert(doc_id);
 			}
 		}
-		local_max_df *= 10;
+		local_max_df *= 5;
 
-		if (local_max_df > num_docs) {
+		if (local_max_df > num_docs || local_max_df > (int)max_df * num_docs) {
 			break;
 		}
 	}

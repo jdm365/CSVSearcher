@@ -16,8 +16,6 @@ COMPILER_FLAGS = [
     "-Wextra",
     "-march=native",
     "-ffast-math",
-    "-fopenmp",
-    "-lstdc++",
 ]
 
 
@@ -28,7 +26,7 @@ extensions = [
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=[np.get_include(), "bm25"],
-        extra_link_args=["-fopenmp", "-lstdc++"],
+        extra_link_args=["-fopenmp", "-lstdc++", "-llmdb"],
         ##link boost libraries
     ),
 ]

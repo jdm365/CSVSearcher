@@ -22,8 +22,8 @@ void tokenize_ngram_batch(
 		);
 void init_members(
 	std::vector<std::vector<std::string>>& tokenized_documents,
-	robin_hood::unordered_map<std::string, std::vector<uint32_t>>& inverted_index,
-	std::vector<robin_hood::unordered_map<std::string, uint16_t>>& term_freqs,
+	robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index,
+	std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& term_freqs,
 	robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs,
 	std::vector<uint16_t>& doc_sizes,
 	float& avg_doc_size,
@@ -35,8 +35,8 @@ void init_members(
 class _BM25 {
 	public:
 
-		robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
-		std::vector<robin_hood::unordered_map<std::string, uint16_t>> term_freqs;
+		robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>> inverted_index;
+		std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>> term_freqs;
 		robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
 

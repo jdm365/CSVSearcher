@@ -8,6 +8,7 @@
       "-fopenmp",
       "-Iinclude",
       "-I../",
+      "-I/usr/include",
       "-o",
       "bm25",
       "main.cpp"
@@ -25,6 +26,7 @@
       "-fopenmp",
       "-Iinclude",
       "-I../",
+      "-I/usr/include",
       "-o",
       "bm25",
       "../bm25_utils.cpp"
@@ -72,6 +74,8 @@
       "include",
       "-I",
       "../",
+      "-I",
+      "/usr/include",
       "-internal-isystem",
       "/usr/lib/llvm-14/bin/../include/c++/v1",
       "-internal-isystem",
@@ -101,12 +105,12 @@
       "-x",
       "c++",
       "-o",
-      "/tmp/main-19bf10.o",
+      "/tmp/main-cc561f.o",
       "main.cpp"
     ],
     "directory": "/home/jdm365/BM25/bm25/gen_compile_commands",
     "file": "/home/jdm365/BM25/bm25/gen_compile_commands/main.cpp",
-    "output": "/tmp/main-19bf10.o"
+    "output": "/tmp/main-cc561f.o"
   },
   {
     "arguments": [
@@ -147,6 +151,8 @@
       "include",
       "-I",
       "../",
+      "-I",
+      "/usr/include",
       "-internal-isystem",
       "/usr/lib/llvm-14/bin/../include/c++/v1",
       "-internal-isystem",
@@ -176,11 +182,11 @@
       "-x",
       "c++",
       "-o",
-      "/tmp/bm25_utils-3e0a21.o",
+      "/tmp/bm25_utils-e2c998.o",
       "../bm25_utils.cpp"
     ],
     "directory": "/home/jdm365/BM25/bm25/gen_compile_commands",
     "file": "/home/jdm365/BM25/bm25/bm25_utils.cpp",
-    "output": "/tmp/bm25_utils-3e0a21.o"
+    "output": "/tmp/bm25_utils-e2c998.o"
   }
 ]
