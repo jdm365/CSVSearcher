@@ -26,33 +26,6 @@ import sys
 
 
 cdef extern from "bm25_utils.h":
-    vector[string] tokenize_whitespace(
-            string& document
-            )
-    vector[string] tokenize_ngram(
-            string& document, 
-            int ngram_size
-            )
-    void tokenize_whitespace_batch(
-            vector[string]& documents,
-            vector[vector[string]]& tokenized_documents
-            )
-    void tokenize_ngram_batch(
-            vector[string]& documents,
-            vector[vector[string]]& tokenized_documents,
-            int ngram_size
-            ) nogil
-    void init_members(
-        vector[vector[string]]& tokenized_documents,
-        unordered_map[string, vector[uint32_t]]& inverted_index,
-        vector[unordered_map[string, uint32_t]]& term_freqs,
-        unordered_map[string, uint32_t]& doc_term_freqs,
-        vector[uint16_t]& doc_sizes,
-        float& avg_doc_size,
-        uint32_t& num_docs,
-        int min_df,
-        float max_df
-        )
     cdef cppclass _BM25:
         _BM25(
                 vector[string]& documents,
@@ -70,7 +43,7 @@ cdef extern from "bm25_utils.h":
 cdef class BM25:
     cdef _BM25* bm25
     cdef object data_index
-    cdef list cols
+    cdef list  cols
     cdef bool  whitespace_tokenization
     cdef int   ngram_size
     cdef int   min_df
@@ -147,6 +120,7 @@ cdef class BM25:
 
     cdef void _build_inverted_index(self, list documents):
         cdef vector[string] vector_documents
+        vector_documents.reserve(len(documents))
 
         for idx, doc in enumerate(documents):
             vector_documents.push_back(doc.encode("utf-8"))
@@ -160,6 +134,11 @@ cdef class BM25:
                 1.2,
                 0.4
                 )
+
+        ## delete vector_documents
+        vector_documents.clear()
+        vector_documents.shrink_to_fit()
+        
 
     def get_topk_docs(self, str query, int k = 10):
         cdef list scores   = []

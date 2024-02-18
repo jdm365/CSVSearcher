@@ -1,5 +1,5 @@
 CXX = clang++
-CXXFLAGS = -std=c++11 -stdlib=libc++ -fopenmp -Iinclude -Llib -lstdc++
+CXXFLAGS = -std=c++17 -stdlib=libc++ -fopenmp -Iinclude -Llib -lstdc++
 SRCS = main.cpp ../bm25_utils.cpp
 INCLUDES = ../ -I/usr/include
 TARGET = bm25

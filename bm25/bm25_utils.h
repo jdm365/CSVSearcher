@@ -4,6 +4,9 @@
 
 #include "robin_hood.h"
 
+static const std::string DB_NAME = "term_freqs.mdb";
+static const std::string INVERTED_INDEX_DB_NAME = "INVERTED_INDEX";
+
 std::vector<std::string> tokenize_whitespace(
 		std::string& document
 		);
@@ -22,9 +25,8 @@ void tokenize_ngram_batch(
 		);
 void init_members(
 	std::vector<std::vector<std::string>>& tokenized_documents,
-	robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index,
-	std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& term_freqs,
-	robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs,
+	// robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index,
+	robin_hood::unordered_flat_set<std::string>& large_dfs,
 	std::vector<uint16_t>& doc_sizes,
 	float& avg_doc_size,
 	uint32_t& num_docs,
@@ -34,10 +36,7 @@ void init_members(
 
 class _BM25 {
 	public:
-
-		robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>> inverted_index;
-		std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>> term_freqs;
-		robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
+		robin_hood::unordered_flat_set<std::string> large_dfs;
 		std::vector<uint16_t> doc_sizes;
 
 		float avg_doc_size;
@@ -65,7 +64,8 @@ class _BM25 {
 				);
 		float _compute_bm25(
 				const std::string& term,
-				uint32_t doc_id
+				uint32_t doc_id,
+				float idf
 				);
 
 

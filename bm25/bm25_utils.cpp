@@ -1,9 +1,12 @@
 #include <iostream>
+#include <filesystem>
 #include <vector>
 #include <queue>
 #include <string>
 #include <cstdint>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 #include <omp.h>
 
 #include "bm25_utils.h"
@@ -11,36 +14,188 @@
 
 #include "lmdb++.h"
 
-void store_map(const robin_hood::unordered_flat_map<std::string, uint16_t>& map) {
-    auto env = lmdb::env::create();
-    env.open("term_freqs.db", 0, 0664);
 
-    auto wtxn = lmdb::txn::begin(env, nullptr, 0);
-    auto db   = lmdb::dbi::open(wtxn, nullptr, 0);
+static std::vector<int> line_offsets;
+static void write_vector_to_file(
+		const std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& vec,
+		const std::string& filename
+		) {
+	// Create memmap index to get specific line later
+	std::ofstream file(filename);
+	int offset = 0;
+	for (const auto& map : vec) {
+		line_offsets.push_back(offset);
+		for (const auto& pair : map) {
+			file << pair.first << " " << pair.second;
+			file << "\t";
+		}
+		file << std::endl;
+		offset = file.tellp();
+	}
+	file.close();
+}
+
+static uint16_t read_specific_line_frequency(
+		const std::string& filename,
+		int line_num,
+		const std::string& term
+		) {
+	std::ifstream file(filename);
+	file.seekg(line_offsets[line_num]);
+	std::string line;
+	std::getline(file, line);
+	std::istringstream iss(line);
+	std::string token;
+	while (iss >> token) {
+		if (token == term) {
+			uint16_t freq;
+			iss >> freq;
+			return freq;
+		}
+	}
+	return 0;
+}
+
+
+static void store_map(const robin_hood::unordered_flat_map<std::string, uint32_t>& map) {
+    // Create the directory if it does not exist
+    std::filesystem::create_directory(DB_NAME);
+
+	// Create db 
+    auto env = lmdb::env::create();
+    env.open(DB_NAME.c_str(), 0, 0664);
+
+	env.set_mapsize(100LL * 1024 * 1024 * 1024);
+
+    auto wtxn = lmdb::txn::begin(env);
+    auto db   = lmdb::dbi::open(wtxn, nullptr);
 
     for (const auto& pair : map) {
-        db.put(wtxn, lmdb::val(pair.first.c_str()), lmdb::val(&pair.second, sizeof(pair.second)));
+		std::string value = std::to_string(pair.second);
+        db.put(
+				wtxn, 
+				pair.first.c_str(), 
+				value.c_str()
+				);
     }
 
     wtxn.commit();
 }
 
-uint16_t read_frequency(const std::string& term) {
+static uint32_t read_doc_frequency(const std::string& term) {
     auto env = lmdb::env::create();
-    env.open("term_freqs.db", 0, 0664);
+    env.open(DB_NAME.c_str(), 0, 0664);
     auto rtxn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-    auto db = lmdb::dbi::open(rtxn, nullptr);
+    auto db   = lmdb::dbi::open(rtxn, nullptr);
 
     lmdb::val value;
     if (db.get(rtxn, lmdb::val(term.c_str()), value)) {
-        // Assuming value's data is directly the bytes of uint16_t
-        uint16_t freq;
-        memcpy(&freq, value.data(), sizeof(freq));
+        uint32_t freq;
+		// Will be a string
+		// Use std::stoi to convert to int
+		std::string value_str(reinterpret_cast<const char*>(value.data()), value.size());
+		freq = std::stoi(value_str);
         return freq;
     }
 
     return 0;
 }
+
+/*
+static std::string serialize_vector(const std::vector<uint32_t>& vec) {
+	int size = vec.size() * sizeof(uint32_t);
+	return std::string(
+			reinterpret_cast<const char*>(vec.data()),
+			size
+			);
+}
+
+static std::vector<uint32_t> deserialize_vector(std::string data) {
+	std::vector<uint32_t> vec;
+	vec.resize(data.size() / sizeof(uint32_t));
+	std::memcpy(vec.data(), data.data(), data.size());
+	return vec;
+}
+*/
+static std::string serialize_vector(const std::vector<uint32_t>& vec) {
+	std::string data;
+	for (const auto& val : vec) {
+		data.append(std::to_string(val));
+		data.append(",");
+	}
+	return data;
+}
+
+static std::vector<uint32_t> deserialize_vector(std::string data) {
+	std::vector<uint32_t> vec;
+	std::istringstream iss(data);
+	std::string token;
+	while (std::getline(iss, token, ',')) {
+		vec.push_back(std::stoi(token));
+	}
+	return vec;
+}
+
+static void write_inverted_index(
+		const robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index
+		) {
+	// Create the directory if it does not exist
+	std::filesystem::create_directory(INVERTED_INDEX_DB_NAME);
+
+	// Create db
+	auto env = lmdb::env::create();
+	env.open(INVERTED_INDEX_DB_NAME.c_str(), 0, 0664);
+
+	env.set_mapsize(100LL * 1024 * 1024 * 1024);
+
+	auto wtxn = lmdb::txn::begin(env, nullptr, 0);
+	auto db   = lmdb::dbi::open(wtxn, nullptr, 0);
+
+	for (const auto& pair : inverted_index) {
+        const auto& key_str = pair.first;
+        const auto& values = pair.second;
+
+		std::string data = serialize_vector(values);
+
+        db.put(
+				wtxn, 
+				key_str.c_str(),
+				data.c_str()
+				);
+    }
+
+    wtxn.commit();
+
+}
+
+static std::vector<uint32_t> read_inverted_index(const std::string& term) {
+	auto env = lmdb::env::create();
+	env.open(INVERTED_INDEX_DB_NAME.c_str(), 0, 0664);
+
+	auto rtxn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+    auto db = lmdb::dbi::open(rtxn, nullptr);
+
+	lmdb::val query(term.c_str());
+	lmdb::val db_data;
+	std::vector<uint32_t> value;
+
+    // Attempt to get the data for the specified key
+    if (db.get(rtxn, query, db_data)) {
+		std::string value_string = std::string(
+				reinterpret_cast<const char*>(db_data.data()),
+				db_data.size()
+				);
+		value = deserialize_vector(
+				value_string
+				);
+		return value;
+    }
+
+    rtxn.abort();
+    return value;
+
+}
+
 
 std::vector<std::string> tokenize_whitespace(
 		std::string& document
@@ -116,15 +271,18 @@ void tokenize_ngram_batch(
 
 void init_members(
 	std::vector<std::vector<std::string>>& tokenized_documents,
-	robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index,
-	std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& term_freqs,
-	robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs,
+	// robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index,
+	robin_hood::unordered_flat_set<std::string>& large_dfs,
 	std::vector<uint16_t>& doc_sizes,
 	float& avg_doc_size,
 	uint32_t& num_docs,
 	int min_df,
 	float max_df
 	) {
+	robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>> inverted_index;
+
+	std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>> term_freqs;
+	robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 	term_freqs.reserve(tokenized_documents.size());
 	doc_sizes.reserve(tokenized_documents.size());
 
@@ -148,6 +306,10 @@ void init_members(
 
 	// Filter terms by min_df and max_df
 	for (const robin_hood::pair<std::string, uint32_t>& term_count : doc_term_freqs) {
+		if (term_count.second > 5000) {
+			large_dfs.insert(term_count.first);
+		}
+
 		if ((int)term_count.second < min_df || (int)term_count.second > max_number_of_occurrences) {
 			blacklisted_terms.insert(term_count.first);
 			doc_term_freqs.erase(term_count.first);
@@ -177,7 +339,11 @@ void init_members(
 		term_freqs[doc_id] = term_freq;
 	}
 
+	// Write term_freqs to disk
+	write_vector_to_file(term_freqs, "term_freqs.bin");
 
+	// Write doc_term_freqs to lmdb
+	store_map(doc_term_freqs);
 	inverted_index.reserve(doc_term_freqs.size());
 
 	for (uint32_t doc_id = 0; doc_id < tokenized_documents.size(); ++doc_id) {
@@ -189,6 +355,8 @@ void init_members(
 			inverted_index[term].push_back(doc_id);
 		}
 	}
+	// Write inverted index to disk
+	write_inverted_index(inverted_index);
 
 	avg_doc_size = 0.0f;
 	#pragma omp parallel for reduction(+:avg_doc_size)
@@ -225,70 +393,26 @@ _BM25::_BM25(
 
 	init_members(
 			tokenized_documents, 
-			inverted_index, 
-			term_freqs, 
-			doc_term_freqs, 
+			large_dfs,
 			doc_sizes, 
 			avg_doc_size, 
 			num_docs, 
 			min_df, 
 			max_df
 			);
-
-	// Calc memory size of documents
-	uint64_t total_memory_usage_docs = 0;
-	for (const std::string& doc : documents) {
-		total_memory_usage_docs += sizeof(char) * doc.size();
-	}
-	std::cout << "Total memory usage of documents: " << total_memory_usage_docs / (1024 * 1024) << " MB" << std::endl;
-	std::cout << "String size: " << sizeof(std::string) << std::endl;
-	std::cout << "Char size:   " << sizeof(char) << std::endl;
-
-	// Calc total memory usage
-	uint64_t total_memory_usage = 0;
-	// total_memory_usage += sizeof(robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>) * inverted_index.size();
-	for (const robin_hood::pair<std::string, std::vector<uint32_t>>& term : inverted_index) {
-		total_memory_usage += sizeof(char) * term.first.size();
-		total_memory_usage += sizeof(uint32_t) * term.second.size();
-	}
-	std::cout << "Total memory usage after inverted_index: " << total_memory_usage / (1024 * 1024) << " MB" << std::endl;
-
-	// total_memory_usage += sizeof(robin_hood::unordered_flat_map<std::string, uint32_t>) * term_freqs.size();
-	for (int idx = 0; idx < term_freqs.size(); ++idx) {
-		const robin_hood::unordered_map<std::string, uint16_t>& term_freq = term_freqs[idx];
-		for (const robin_hood::pair<std::string, uint16_t>& term : term_freq) {
-			total_memory_usage += sizeof(char) * term.first.size();
-			total_memory_usage += sizeof(uint16_t);
-		}
-	}
-	std::cout << "Total memory usage after term_freqs: " << total_memory_usage / (1024 * 1024) << " MB" << std::endl;
-
-	// total_memory_usage += sizeof(robin_hood::unordered_map<std::string, uint32_t>) * doc_term_freqs.size();
-	for (const robin_hood::pair<std::string, uint32_t>& term : doc_term_freqs) {
-		total_memory_usage += sizeof(char) * term.first.size();
-		total_memory_usage += sizeof(uint32_t);
-	}
-	std::cout << "Total memory usage after doc_term_freqs: " << total_memory_usage / (1024 * 1024) << " MB" << std::endl;
-
-	total_memory_usage += sizeof(uint16_t) * doc_sizes.size();
-	total_memory_usage += sizeof(float) * 2;
-	total_memory_usage += sizeof(uint32_t);
-	total_memory_usage += sizeof(int) * 4;
-
-	std::cout << "Total memory usage: " << total_memory_usage / (1024 * 1024) << " MB" << std::endl;
 }
 
 inline float _BM25::_compute_idf(const std::string& term) {
-	uint32_t df = doc_term_freqs[term];
+	uint32_t df = read_doc_frequency(term);
 	return log((num_docs - df + 0.5) / (df + 0.5));
 }
 
 inline float _BM25::_compute_bm25(
 		const std::string& term,
-		uint32_t doc_id
+		uint32_t doc_id,
+		float idf
 		) {
-	float idf = _compute_idf(term);
-	float tf  = term_freqs[doc_id][term];
+	float tf  = read_specific_line_frequency("term_freqs.bin", doc_id, term);
 	float doc_size = doc_sizes[doc_id];
 
 	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
@@ -307,34 +431,29 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	}
 
 	// Gather docs that contain at least one term from the query
-	/*
-	robin_hood::unordered_set<uint32_t> candidate_docs;
-	for (const std::string& term : tokenized_query) {
-		if (inverted_index.find(term) == inverted_index.end()) {
-			continue;
-		}
-
-		for (const uint32_t& doc_id : inverted_index[term]) {
-			candidate_docs.insert(doc_id);
-		}
-	}
-	*/
-
 	// Try using dynamic max_df for performance
 	int local_max_df = 5000;
 	robin_hood::unordered_set<uint32_t> candidate_docs;
 
 	while (candidate_docs.size() == 0) {
 		for (const std::string& term : tokenized_query) {
-			if (inverted_index.find(term) == inverted_index.end()) {
+
+			if (local_max_df == 5000) {
+				if (large_dfs.find(term) != large_dfs.end()) {
+					continue;
+				}
+			}
+			std::vector<uint32_t> doc_ids = read_inverted_index(term);
+			
+			if (doc_ids.size() == 0) {
 				continue;
 			}
 
-			if (inverted_index[term].size() > local_max_df) {
+			if (doc_ids.size() > local_max_df) {
 				continue;
 			}
 
-			for (const uint32_t& doc_id : inverted_index[term]) {
+			for (const uint32_t& doc_id : doc_ids) {
 				candidate_docs.insert(doc_id);
 			}
 		}
@@ -364,20 +483,28 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		_compare> top_k_docs;
 
 	// Compute BM25 scores for each candidate doc
+	std::vector<float> idfs(tokenized_query.size());
+
+	int idx = 0;
 	for (const uint32_t& doc_id : candidate_docs) {
 		float score = 0;
-		for (const std::string& term : tokenized_query) {
-			score += _compute_bm25(term, doc_id);
+		for (int jdx = 0; jdx < tokenized_query.size(); ++jdx) {
+			const std::string& term = tokenized_query[jdx];
+			if (idx == 0) {
+				idfs[jdx] = _compute_idf(term);
+			}
+			score += _compute_bm25(term, doc_id, idfs[jdx]);
 		}
 
 		top_k_docs.push(std::make_pair(doc_id, score));
 		if (top_k_docs.size() > k) {
 			top_k_docs.pop();
 		}
+		++idx;
 	}
 
 	std::vector<std::pair<uint32_t, float>> result(top_k_docs.size());
-	int idx = top_k_docs.size() - 1;
+	idx = top_k_docs.size() - 1;
 	while (!top_k_docs.empty()) {
 		result[idx] = top_k_docs.top();
 		top_k_docs.pop();

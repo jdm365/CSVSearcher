@@ -3,7 +3,7 @@
     "arguments": [
       "/usr/bin/clang++",
       "-c",
-      "-std=c++11",
+      "-std=c++17",
       "-stdlib=libc++",
       "-fopenmp",
       "-Iinclude",
@@ -21,7 +21,7 @@
     "arguments": [
       "/usr/bin/clang++",
       "-c",
-      "-std=c++11",
+      "-std=c++17",
       "-stdlib=libc++",
       "-fopenmp",
       "-Iinclude",
@@ -90,7 +90,7 @@
       "/include",
       "-internal-externc-isystem",
       "/usr/include",
-      "-std=c++11",
+      "-std=c++17",
       "-fdeprecated-macro",
       "-fdebug-compilation-dir=/home/jdm365/BM25/bm25/gen_compile_commands",
       "-ferror-limit",
@@ -100,17 +100,18 @@
       "-fgnuc-version=4.2.1",
       "-fcxx-exceptions",
       "-fexceptions",
+      "-fcolor-diagnostics",
       "-faddrsig",
       "-D__GCC_HAVE_DWARF2_CFI_ASM=1",
       "-x",
       "c++",
       "-o",
-      "/tmp/main-cc561f.o",
+      "/tmp/main-60c33e.o",
       "main.cpp"
     ],
     "directory": "/home/jdm365/BM25/bm25/gen_compile_commands",
     "file": "/home/jdm365/BM25/bm25/gen_compile_commands/main.cpp",
-    "output": "/tmp/main-cc561f.o"
+    "output": "/tmp/main-60c33e.o"
   },
   {
     "arguments": [
@@ -167,7 +168,7 @@
       "/include",
       "-internal-externc-isystem",
       "/usr/include",
-      "-std=c++11",
+      "-std=c++17",
       "-fdeprecated-macro",
       "-fdebug-compilation-dir=/home/jdm365/BM25/bm25/gen_compile_commands",
       "-ferror-limit",
@@ -177,16 +178,17 @@
       "-fgnuc-version=4.2.1",
       "-fcxx-exceptions",
       "-fexceptions",
+      "-fcolor-diagnostics",
       "-faddrsig",
       "-D__GCC_HAVE_DWARF2_CFI_ASM=1",
       "-x",
       "c++",
       "-o",
-      "/tmp/bm25_utils-e2c998.o",
+      "/tmp/bm25_utils-d41451.o",
       "../bm25_utils.cpp"
     ],
     "directory": "/home/jdm365/BM25/bm25/gen_compile_commands",
     "file": "/home/jdm365/BM25/bm25/bm25_utils.cpp",
-    "output": "/tmp/bm25_utils-e2c998.o"
+    "output": "/tmp/bm25_utils-d41451.o"
   }
 ]

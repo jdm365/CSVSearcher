@@ -10,7 +10,7 @@ MODULE_NAME = "bm25"
 os.environ["CXX"] = "clang++"
 
 COMPILER_FLAGS = [
-    "-std=c++11",
+    "-std=c++17",
     "-O3",
     "-Wall",
     "-Wextra",
