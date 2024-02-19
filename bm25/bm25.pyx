@@ -28,7 +28,8 @@ import sys
 cdef extern from "bm25_utils.h":
     cdef cppclass _BM25:
         _BM25(
-                vector[string]& documents,
+                ## vector[string]& documents,
+                vector[string] documents,
                 bool  whitespace_tokenization,
                 int   ngram_size,
                 int   min_df,
@@ -59,6 +60,12 @@ cdef class BM25:
             int min_df = 1,
             float max_df = 0.1,
             ):
+        self.whitespace_tokenization = whitespace_tokenization
+        self.ngram_size = ngram_size
+
+        self.min_df = min_df
+        self.max_df = max_df
+
         if documents != []:
             pass
 
@@ -91,24 +98,18 @@ cdef class BM25:
                             )
 
             print(f"Built data index in {perf_counter() - init:.2f} seconds")
+
+            init = perf_counter()
+            self._build_inverted_index(documents)
+            print(f"Built index in {perf_counter() - init:.2f} seconds")
+
+            del documents
+            gc.collect()
         else:
             raise ValueError("Either documents or csv_file and text_column must be provided")
 
-        self.whitespace_tokenization = whitespace_tokenization
-        self.ngram_size = ngram_size
-
-        self.min_df = min_df
-        self.max_df = max_df
-
-        init = perf_counter()
-        self._build_inverted_index(documents)
-        print(f"Built index in {perf_counter() - init:.2f} seconds")
-
-        ## Call self.data_index[0] once
+        ## Call self.data_index[0] once. First call is slow.
         self.data_index[0]
-
-        del documents
-        gc.collect()
 
 
     def __cinit__(
@@ -134,6 +135,9 @@ cdef class BM25:
                 1.2,
                 0.4
                 )
+
+        vector_documents.clear()
+        vector_documents.shrink_to_fit()
         
 
     def get_topk_docs(self, str query, int k = 10):

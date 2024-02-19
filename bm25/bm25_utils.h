@@ -52,7 +52,8 @@ class _BM25 {
 		std::vector<int> term_freq_line_offsets;
 
 		_BM25(
-				std::vector<std::string>& documents,
+				// std::vector<std::string>& documents,
+				std::vector<std::string> documents,
 				bool whitespace_tokenization,
 				int ngram_size,
 				int min_df,
@@ -68,10 +69,14 @@ class _BM25 {
 		void init_dbs();
 
 		void create_doc_term_freqs_db(
-				const robin_hood::unordered_flat_map<std::string, uint32_t>& doc_term_freqs
+				const robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs
 				);
 		void create_inverted_index_db(
-				const robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index
+				const robin_hood::unordered_map<std::string, std::vector<uint32_t>>& inverted_index
+				);
+		void write_row_to_inverted_index_db(
+				const std::string& term,
+				uint32_t doc_id
 				);
 		uint32_t get_doc_term_freq_db(
 				const std::string& term
@@ -81,7 +86,8 @@ class _BM25 {
 				);
 
 		void write_term_freqs_to_file(
-				const std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& term_freqs
+				// const std::vector<robin_hood::unordered_map<std::string, uint16_t>>& term_freqs
+				const std::vector<std::vector<std::pair<std::string, uint16_t>>>& term_freqs
 				);
 		uint16_t get_term_freq_from_file(
 				int line_num,

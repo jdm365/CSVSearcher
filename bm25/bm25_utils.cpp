@@ -8,12 +8,11 @@
 #include <fstream>
 #include <sstream>
 #include <omp.h>
+#include <unistd.h>
 
-// #include "bm25_utils.h"
 #include "bm25_utils.h"
 #include "robin_hood.h"
 
-// #include "lmdb++.h"
 #include <leveldb/db.h>
 
 
@@ -42,7 +41,7 @@ void _BM25::init_dbs() {
 }
 
 void _BM25::create_doc_term_freqs_db(
-		const robin_hood::unordered_flat_map<std::string, uint32_t>& doc_term_freqs
+		const robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs
 		) {
 	// Create term frequencies db
 	leveldb::WriteOptions write_options;
@@ -58,7 +57,7 @@ void _BM25::create_doc_term_freqs_db(
 }
 
 void _BM25::create_inverted_index_db(
-		const robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>>& inverted_index
+		const robin_hood::unordered_map<std::string, std::vector<uint32_t>>& inverted_index
 		) {
 	// Create inverted index db
 	leveldb::WriteOptions write_options;
@@ -75,6 +74,25 @@ void _BM25::create_inverted_index_db(
 			std::cerr << status.ToString() << std::endl;
 		}
 	}
+}
+
+void _BM25::write_row_to_inverted_index_db(
+		const std::string& term,
+		uint32_t new_doc_id
+		) {
+	// Write new doc_id to inverted index db
+	leveldb::WriteOptions write_options;
+	leveldb::ReadOptions read_options;
+	leveldb::Status status;
+
+	std::string value;
+	status = inverted_index_db->Get(read_options, term, &value);
+	if (!status.ok()) {
+		std::cerr << "Unable to get value from inverted_index_db" << std::endl;
+		std::cerr << status.ToString() << std::endl;
+	}
+	value += std::to_string(new_doc_id) + " ";
+	status = inverted_index_db->Put(write_options, term, value);
 }
 
 uint32_t _BM25::get_doc_term_freq_db(const std::string& term) {
@@ -112,7 +130,8 @@ std::vector<uint32_t> _BM25::get_inverted_index_db(const std::string& term) {
 
 
 void _BM25::write_term_freqs_to_file(
-		const std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>>& vec
+		// const std::vector<robin_hood::unordered_map<std::string, uint16_t>>& vec
+		const std::vector<std::vector<std::pair<std::string, uint16_t>>>& vec
 		) {
 	// Create memmap index to get specific line later
 	std::ofstream file(DIR_NAME + "/" + TERM_FREQS_FILE_NAME);
@@ -202,7 +221,7 @@ void tokenize_whitespace_batch(
 		) {
 	tokenized_documents.reserve(documents.size());
 	for (const std::string& doc : documents) {
-		tokenized_documents.push_back(tokenize_whitespace(doc));
+		tokenized_documents.emplace_back(tokenize_whitespace(doc));
 	}
 }
 
@@ -223,7 +242,8 @@ void tokenize_ngram_batch(
 }
 
 _BM25::_BM25(
-		std::vector<std::string>& documents,
+		// std::vector<std::string>& documents,
+		std::vector<std::string> documents,
 		bool whitespace_tokenization,
 		int ngram_size,
 		int min_df,
@@ -247,21 +267,15 @@ _BM25::_BM25(
 		tokenize_ngram_batch(documents, tokenized_documents, ngram_size);
 	}
 
-	robin_hood::unordered_flat_map<std::string, std::vector<uint32_t>> inverted_index;
+	std::cout << "Finished tokenizing documents" << std::endl;
+	sleep(10);
 
-	std::vector<robin_hood::unordered_flat_map<std::string, uint16_t>> term_freqs;
 	robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
-
-	term_freqs.reserve(tokenized_documents.size());
 	doc_term_freqs.reserve(tokenized_documents.size());
-	doc_sizes.reserve(tokenized_documents.size());
-
-	int max_number_of_occurrences = (int)(max_df * tokenized_documents.size());
 
 	// Accumulate document frequencies
 	for (const std::vector<std::string>& doc : tokenized_documents) {
 		robin_hood::unordered_set<std::string> unique_terms;
-		unique_terms.reserve(doc.size());
 
 		for (const std::string& term : doc) {
 			unique_terms.insert(term);
@@ -272,6 +286,13 @@ _BM25::_BM25(
 		}
 	}
 
+	std::cout << "Finished accumulating document frequencies" << std::endl;
+	sleep(10);
+
+	// std::vector<robin_hood::unordered_map<std::string, uint16_t>> term_freqs;
+	std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
+
+	int max_number_of_occurrences = (int)(max_df * tokenized_documents.size());
 	robin_hood::unordered_set<std::string> blacklisted_terms;
 
 	// Filter terms by min_df and max_df
@@ -286,14 +307,17 @@ _BM25::_BM25(
 		}
 	}
 
-	// Filter terms by min_df and max_df
-	doc_sizes.resize(tokenized_documents.size());
-	term_freqs.resize(tokenized_documents.size());
+	std::cout << "Finished filtering terms by min_df and max_df" << std::endl;
+	sleep(10);
 
+	// Filter terms by min_df and max_df
 	num_docs = tokenized_documents.size();
 
+	doc_sizes.resize(num_docs);
+	term_freqs.resize(num_docs);
+
 	#pragma omp parallel for schedule(static)
-	for (uint32_t doc_id = 0; doc_id < tokenized_documents.size(); ++doc_id) {
+	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		const std::vector<std::string>& doc = tokenized_documents[doc_id];
 
 		uint16_t doc_size = doc.size();
@@ -306,14 +330,27 @@ _BM25::_BM25(
 			}
 			++term_freq[term];
 		}
-		term_freqs[doc_id] = term_freq;
+		std::vector<std::pair<std::string, uint16_t>> term_freq_vector;
+		term_freq_vector.reserve(term_freq.size());
+		for (const robin_hood::pair<std::string, uint16_t>& term_count : term_freq) {
+			term_freq_vector.emplace_back(term_count.first, term_count.second);
+		}
+		term_freqs[doc_id] = term_freq_vector;
 	}
+
+	std::cout << "Got term frequencies" << std::endl;
+	sleep(10);
 
 	// Write term_freqs to disk
 	write_term_freqs_to_file(term_freqs);
 
 	// Write doc_term_freqs to lmdb
 	create_doc_term_freqs_db(doc_term_freqs);
+
+	std::cout << "Finished writing term frequencies to disk" << std::endl;
+	sleep(10);
+
+	robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
 	inverted_index.reserve(doc_term_freqs.size());
 
 	for (uint32_t doc_id = 0; doc_id < tokenized_documents.size(); ++doc_id) {
@@ -327,6 +364,23 @@ _BM25::_BM25(
 	}
 	// Write inverted index to disk
 	create_inverted_index_db(inverted_index);
+	/*
+	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
+		const std::vector<std::string>& doc = tokenized_documents[doc_id];
+		for (const std::string& term : doc) {
+			if (blacklisted_terms.find(term) != blacklisted_terms.end()) {
+				continue;
+			}
+			write_row_to_inverted_index_db(term, doc_id);
+		}
+		if (doc_id % 10000 == 0) {
+			std::cout << "Finished writing " << doc_id << "/" << num_docs << " rows to inverted index" << std::endl;
+		}
+	}
+	*/
+
+	std::cout << "Finished writing inverted index to disk" << std::endl;
+	sleep(10);
 
 	avg_doc_size = 0.0f;
 	#pragma omp parallel for reduction(+:avg_doc_size)
