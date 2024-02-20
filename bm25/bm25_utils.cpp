@@ -15,6 +15,7 @@
 
 #include <leveldb/db.h>
 #include <leveldb/cache.h>
+#include <leveldb/write_batch.h>
 
 
 void _BM25::init_dbs() {
@@ -55,12 +56,24 @@ void _BM25::create_doc_term_freqs_db(
 	leveldb::WriteOptions write_options;
 	leveldb::Status status;
 
+	/*
 	for (const auto& pair : doc_term_freqs) {
 		status = doc_term_freqs_db->Put(write_options, pair.first, std::to_string(pair.second));
 		if (!status.ok()) {
 			std::cerr << "Unable to put key-value pair in term_freqs_db" << std::endl;
 			std::cerr << status.ToString() << std::endl;
 		}
+	}
+	*/
+	leveldb::WriteBatch batch;
+	for (const auto& pair : doc_term_freqs) {
+		batch.Put(pair.first, std::to_string(pair.second));
+	}
+
+	status = doc_term_freqs_db->Write(write_options, &batch);
+	if (!status.ok()) {
+		std::cerr << "Unable to write batch to doc_term_freqs_db" << std::endl;
+		std::cerr << status.ToString() << std::endl;
 	}
 }
 
@@ -71,6 +84,7 @@ void _BM25::create_inverted_index_db(
 	leveldb::WriteOptions write_options;
 	leveldb::Status status;
 
+	/*
 	for (const auto& pair : inverted_index) {
 		std::string value;
 		for (const auto& doc_id : pair.second) {
@@ -81,6 +95,21 @@ void _BM25::create_inverted_index_db(
 			std::cerr << "Unable to put key-value pair in inverted_index_db" << std::endl;
 			std::cerr << status.ToString() << std::endl;
 		}
+	}
+	*/
+	leveldb::WriteBatch batch;
+	for (const auto& pair : inverted_index) {
+		std::string value;
+		for (const auto& doc_id : pair.second) {
+			value += std::to_string(doc_id) + " ";
+		}
+		batch.Put(pair.first, value);
+	}
+
+	status = inverted_index_db->Write(write_options, &batch);
+	if (!status.ok()) {
+		std::cerr << "Unable to write batch to inverted_index_db" << std::endl;
+		std::cerr << status.ToString() << std::endl;
 	}
 }
 
@@ -143,20 +172,21 @@ void _BM25::write_term_freqs_to_file(
 	// Create memmap index to get specific line later
 	term_freq_line_offsets.reserve(vec.size());
 
-	std::ofstream file(DIR_NAME + "/" + TERM_FREQS_FILE_NAME);
+	// Use pure C to write to file
+	FILE* file = fopen((DIR_NAME + "/" + TERM_FREQS_FILE_NAME).c_str(), "w");
 	int offset = 0;
 
 	for (const auto& map : vec) {
 		term_freq_line_offsets.push_back(offset);
 
 		for (const auto& pair : map) {
-			file << pair.first << " " << pair.second << "\t";
+			fprintf(file, "%s %d\t", pair.first.c_str(), pair.second);
 		}
 
-		file << "\n";
-		offset = file.tellp();
+		fprintf(file, "\n");
+		offset = ftell(file);
 	}
-	file.close();
+	fclose(file);
 }
 
 uint16_t _BM25::get_term_freq_from_file(
@@ -179,6 +209,16 @@ uint16_t _BM25::get_term_freq_from_file(
 	return 0;
 }
 
+
+static void tokenize_whitespace_inplace(const std::string& str, const std::function<void(const std::string&)>& callback) {
+    size_t start = 0;
+    size_t end = 0;
+
+    while ((start = str.find_first_not_of(' ', end)) != std::string::npos) {
+        end = str.find(' ', start);
+        callback(str.substr(start, end - start));
+    }
+}
 
 std::vector<std::string> tokenize_whitespace(
 		const std::string& document
@@ -266,6 +306,7 @@ _BM25::_BM25(
 			k1(k1), 
 			b(b),
 			whitespace_tokenization(whitespace_tokenization) {
+	auto overall_start = std::chrono::high_resolution_clock::now();
 
 	init_dbs();
 	/*
@@ -279,15 +320,16 @@ _BM25::_BM25(
 	}
 	*/
 
-	std::cout << "Finished tokenizing documents" << std::endl;
 	if (DEBUG) {
 		sleep(10);
 	}
 
+	auto start = std::chrono::high_resolution_clock::now();
 	robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 	doc_term_freqs.reserve(documents.size());
 
 	// Accumulate document frequencies
+	/*
 	for (const std::string& _doc : documents) {
 		std::vector<std::string> doc = tokenize_whitespace(_doc);
 
@@ -301,12 +343,29 @@ _BM25::_BM25(
 			++doc_term_freqs[term];
 		}
 	}
+	*/
+	for (const std::string& _doc : documents) {
+		robin_hood::unordered_set<std::string> unique_terms;
 
-	std::cout << "Finished accumulating document frequencies" << std::endl;
+		// Tokenize and process each term in the current document
+		tokenize_whitespace_inplace(_doc, [&](const std::string& term) {
+			unique_terms.insert(term);
+		});
+
+		// Update global frequencies based on the local counts
+		for (const auto& term : unique_terms) {
+			++doc_term_freqs[term];
+		}
+	}
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> elapsed_seconds = end - start;
+
+	std::cout << "Finished accumulating document frequencies in " << elapsed_seconds.count() << "s" << std::endl;
 	if (DEBUG) {
 		sleep(10);
 	}
 
+	start = std::chrono::high_resolution_clock::now();
 	std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
 
 	int max_number_of_occurrences = (int)(max_df * documents.size());
@@ -323,8 +382,10 @@ _BM25::_BM25(
 			doc_term_freqs.erase(term_count.first);
 		}
 	}
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
 
-	std::cout << "Finished filtering terms by min_df and max_df" << std::endl;
+	std::cout << "Finished filtering terms by min_df and max_df in " << elapsed_seconds.count() << "s" << std::endl;
 	if (DEBUG) {
 		sleep(10);
 	}
@@ -335,6 +396,7 @@ _BM25::_BM25(
 	doc_sizes.resize(num_docs);
 	term_freqs.resize(num_docs);
 
+	start = std::chrono::high_resolution_clock::now();
 	// #pragma omp parallel for schedule(static)
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		std::vector<std::string> doc = tokenize_whitespace(documents[doc_id]);
@@ -356,19 +418,28 @@ _BM25::_BM25(
 		}
 		term_freqs[doc_id] = term_freq_vector;
 	}
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
 
-	std::cout << "Got term frequencies" << std::endl;
+	std::cout << "Got term frequencies in " << elapsed_seconds.count() << "s" << std::endl;
 	if (DEBUG) {
 		sleep(10);
 	}
 
+	start = std::chrono::high_resolution_clock::now();
 	// Write term_freqs to disk
 	write_term_freqs_to_file(term_freqs);
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
+	std::cout << "Finished writing term frequencies to disk in " << elapsed_seconds.count() << "s" << std::endl;
 
-	// Write doc_term_freqs to lmdb
+	start = std::chrono::high_resolution_clock::now();
+	// Write doc_term_freqs to leveldb
 	create_doc_term_freqs_db(doc_term_freqs);
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
 
-	std::cout << "Finished writing term frequencies to disk" << std::endl;
+	std::cout << "Finished writing doc term frequencies to disk in " << elapsed_seconds.count() << "s" << std::endl;
 	if (DEBUG) {
 		sleep(10);
 	}
@@ -376,6 +447,7 @@ _BM25::_BM25(
 	robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
 	inverted_index.reserve(doc_term_freqs.size());
 
+	start = std::chrono::high_resolution_clock::now();
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		std::vector<std::string> doc = tokenize_whitespace(documents[doc_id]);
 		for (const std::string& term : doc) {
@@ -385,8 +457,15 @@ _BM25::_BM25(
 			inverted_index[term].push_back(doc_id);
 		}
 	}
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
+	std::cout << "Finished creating inverted index in " << elapsed_seconds.count() << "s" << std::endl;
+
+	start = std::chrono::high_resolution_clock::now();
 	// Write inverted index to disk
 	create_inverted_index_db(inverted_index);
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
 	/*
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		const std::vector<std::string>& doc = tokenized_documents[doc_id];
@@ -402,7 +481,7 @@ _BM25::_BM25(
 	}
 	*/
 
-	std::cout << "Finished writing inverted index to disk" << std::endl;
+	std::cout << "Finished writing inverted index to disk in " << elapsed_seconds.count() << "s" << std::endl;
 	if (DEBUG) {
 		sleep(10);
 	}
@@ -413,6 +492,10 @@ _BM25::_BM25(
 		avg_doc_size += (float)doc_sizes[doc_id];
 	}
 	avg_doc_size /= num_docs;
+
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - overall_start;
+	std::cout << "Finished creating BM25 index in " << elapsed_seconds.count() << "s" << std::endl;
 }
 
 inline float _BM25::_compute_idf(const std::string& term) {
