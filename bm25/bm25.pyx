@@ -28,8 +28,8 @@ import sys
 cdef extern from "bm25_utils.h":
     cdef cppclass _BM25:
         _BM25(
-                ## vector[string]& documents,
-                vector[string] documents,
+                vector[string]& documents,
+                ## vector[string] documents,
                 bool  whitespace_tokenization,
                 int   ngram_size,
                 int   min_df,

@@ -14,18 +14,26 @@
 #include "robin_hood.h"
 
 #include <leveldb/db.h>
+#include <leveldb/cache.h>
 
 
 void _BM25::init_dbs() {
-	// Create the directory if it does not exist
-	std::filesystem::create_directory(DIR_NAME);
+	if (std::filesystem::exists(DIR_NAME)) {
+		// Remove the directory if it exists
+		std::filesystem::remove_all(DIR_NAME);
+		std::filesystem::create_directory(DIR_NAME);
+	}
+	else {
+		// Create the directory if it does not exist
+		std::filesystem::create_directory(DIR_NAME);
+	}
 
 	leveldb::Options options;
 	options.create_if_missing = true;
 	leveldb::Status status;
 
-	// const size_t cacheSize = 100 * 1048576; // 100 MB
-	// options.block_cache = leveldb::NewLRUCache(cacheSize);
+	const size_t cacheSize = 100 * 1048576; // 100 MB
+	options.block_cache = leveldb::NewLRUCache(cacheSize);
 
 	status = leveldb::DB::Open(options, DIR_NAME + "/" + DOC_TERM_FREQS_DB_NAME, &doc_term_freqs_db);
 	if (!status.ok()) {
@@ -130,19 +138,22 @@ std::vector<uint32_t> _BM25::get_inverted_index_db(const std::string& term) {
 
 
 void _BM25::write_term_freqs_to_file(
-		// const std::vector<robin_hood::unordered_map<std::string, uint16_t>>& vec
 		const std::vector<std::vector<std::pair<std::string, uint16_t>>>& vec
 		) {
 	// Create memmap index to get specific line later
+	term_freq_line_offsets.reserve(vec.size());
+
 	std::ofstream file(DIR_NAME + "/" + TERM_FREQS_FILE_NAME);
 	int offset = 0;
+
 	for (const auto& map : vec) {
 		term_freq_line_offsets.push_back(offset);
+
 		for (const auto& pair : map) {
-			file << pair.first << " " << pair.second;
-			file << "\t";
+			file << pair.first << " " << pair.second << "\t";
 		}
-		file << std::endl;
+
+		file << "\n";
 		offset = file.tellp();
 	}
 	file.close();
@@ -221,7 +232,7 @@ void tokenize_whitespace_batch(
 		) {
 	tokenized_documents.reserve(documents.size());
 	for (const std::string& doc : documents) {
-		tokenized_documents.emplace_back(tokenize_whitespace(doc));
+		tokenized_documents.push_back(tokenize_whitespace(doc));
 	}
 }
 
@@ -242,22 +253,22 @@ void tokenize_ngram_batch(
 }
 
 _BM25::_BM25(
-		// std::vector<std::string>& documents,
-		std::vector<std::string> documents,
+		std::vector<std::string>& documents,
 		bool whitespace_tokenization,
 		int ngram_size,
 		int min_df,
 		float max_df,
 		float k1,
 		float b
-		) : whitespace_tokenization(whitespace_tokenization), 
-			ngram_size(ngram_size), 
+		) : ngram_size(ngram_size), 
 			min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
-			b(b) {
+			b(b),
+			whitespace_tokenization(whitespace_tokenization) {
 
 	init_dbs();
+	/*
 	std::vector<std::vector<std::string>> tokenized_documents;
 
 	if (whitespace_tokenization) {
@@ -266,15 +277,20 @@ _BM25::_BM25(
 	else {
 		tokenize_ngram_batch(documents, tokenized_documents, ngram_size);
 	}
+	*/
 
 	std::cout << "Finished tokenizing documents" << std::endl;
-	sleep(10);
+	if (DEBUG) {
+		sleep(10);
+	}
 
 	robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
-	doc_term_freqs.reserve(tokenized_documents.size());
+	doc_term_freqs.reserve(documents.size());
 
 	// Accumulate document frequencies
-	for (const std::vector<std::string>& doc : tokenized_documents) {
+	for (const std::string& _doc : documents) {
+		std::vector<std::string> doc = tokenize_whitespace(_doc);
+
 		robin_hood::unordered_set<std::string> unique_terms;
 
 		for (const std::string& term : doc) {
@@ -287,12 +303,13 @@ _BM25::_BM25(
 	}
 
 	std::cout << "Finished accumulating document frequencies" << std::endl;
-	sleep(10);
+	if (DEBUG) {
+		sleep(10);
+	}
 
-	// std::vector<robin_hood::unordered_map<std::string, uint16_t>> term_freqs;
 	std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
 
-	int max_number_of_occurrences = (int)(max_df * tokenized_documents.size());
+	int max_number_of_occurrences = (int)(max_df * documents.size());
 	robin_hood::unordered_set<std::string> blacklisted_terms;
 
 	// Filter terms by min_df and max_df
@@ -308,17 +325,19 @@ _BM25::_BM25(
 	}
 
 	std::cout << "Finished filtering terms by min_df and max_df" << std::endl;
-	sleep(10);
+	if (DEBUG) {
+		sleep(10);
+	}
 
 	// Filter terms by min_df and max_df
-	num_docs = tokenized_documents.size();
+	num_docs = documents.size();
 
 	doc_sizes.resize(num_docs);
 	term_freqs.resize(num_docs);
 
-	#pragma omp parallel for schedule(static)
+	// #pragma omp parallel for schedule(static)
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
-		const std::vector<std::string>& doc = tokenized_documents[doc_id];
+		std::vector<std::string> doc = tokenize_whitespace(documents[doc_id]);
 
 		uint16_t doc_size = doc.size();
 		doc_sizes[doc_id] = doc_size;
@@ -339,7 +358,9 @@ _BM25::_BM25(
 	}
 
 	std::cout << "Got term frequencies" << std::endl;
-	sleep(10);
+	if (DEBUG) {
+		sleep(10);
+	}
 
 	// Write term_freqs to disk
 	write_term_freqs_to_file(term_freqs);
@@ -348,13 +369,15 @@ _BM25::_BM25(
 	create_doc_term_freqs_db(doc_term_freqs);
 
 	std::cout << "Finished writing term frequencies to disk" << std::endl;
-	sleep(10);
+	if (DEBUG) {
+		sleep(10);
+	}
 
 	robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
 	inverted_index.reserve(doc_term_freqs.size());
 
-	for (uint32_t doc_id = 0; doc_id < tokenized_documents.size(); ++doc_id) {
-		const std::vector<std::string>& doc = tokenized_documents[doc_id];
+	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
+		std::vector<std::string> doc = tokenize_whitespace(documents[doc_id]);
 		for (const std::string& term : doc) {
 			if (blacklisted_terms.find(term) != blacklisted_terms.end()) {
 				continue;
@@ -380,7 +403,9 @@ _BM25::_BM25(
 	*/
 
 	std::cout << "Finished writing inverted index to disk" << std::endl;
-	sleep(10);
+	if (DEBUG) {
+		sleep(10);
+	}
 
 	avg_doc_size = 0.0f;
 	#pragma omp parallel for reduction(+:avg_doc_size)
@@ -416,7 +441,8 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		tokenized_query = tokenize_whitespace(query);
 	} 
 	else {
-		tokenized_query = tokenize_ngram(query, ngram_size);
+		// tokenized_query = tokenize_ngram(query, ngram_size);
+		;
 	}
 
 	// Gather docs that contain at least one term from the query
@@ -424,6 +450,8 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	int local_max_df = INIT_MAX_DF;
 	robin_hood::unordered_set<uint32_t> candidate_docs;
 
+	std::vector<float> idfs(tokenized_query.size(), 0.0f);
+	int _idx = 0;
 	while (candidate_docs.size() == 0) {
 		for (const std::string& term : tokenized_query) {
 
@@ -445,6 +473,8 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 			for (const uint32_t& doc_id : doc_ids) {
 				candidate_docs.insert(doc_id);
 			}
+			idfs[_idx] = _compute_idf(term);
+			++_idx;
 		}
 		local_max_df *= 5;
 
@@ -472,17 +502,14 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		_compare> top_k_docs;
 
 	// Compute BM25 scores for each candidate doc
-	std::vector<float> idfs(tokenized_query.size());
 
 	int idx = 0;
 	for (const uint32_t& doc_id : candidate_docs) {
 		float score = 0;
-		for (int jdx = 0; jdx < tokenized_query.size(); ++jdx) {
-			const std::string& term = tokenized_query[jdx];
-			if (idx == 0) {
-				idfs[jdx] = _compute_idf(term);
-			}
+		int jdx = 0;
+		for (const std::string& term : tokenized_query) {
 			score += _compute_bm25(term, doc_id, idfs[jdx]);
+			++jdx;
 		}
 
 		top_k_docs.push(std::make_pair(doc_id, score));

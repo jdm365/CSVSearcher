@@ -21,7 +21,6 @@
         ],
         "extra_link_args": [
             "-fopenmp",
-            "-lstdc++",
             "-lleveldb"
         ],
         "include_dirs": [

@@ -1,11 +1,14 @@
-## CXX = clang++ -v
+## CXX = clang++
 CXX = g++
 CXXFLAGS = -std=c++17 -fopenmp
 SRCS = main.cpp ../bm25_utils.cpp
-INCLUDES = -I../ -I/usr/include -I/usr/local/include
+INCLUDES = -I../ -I/usr/include -I/usr/local/include -I/usr/lib/llvm-14/include -I/usr/lib/llvm-14/lib
 TARGET = bm25
-LIBS = -lstdc++ -lleveldb -lc++ -pthread -L/usr/lib/x86_64-linux-gnu
+LIBS = -lstdc++ -lleveldb -lc++ -pthread -L/usr/lib/x86_64-linux-gnu -L/usr/lib/llvm-14/lib -L/usr/lib
+## LIBS = -lleveldb -lc++ -pthread -L/usr/lib/x86_64-linux-gnu -L/usr/lib/llvm-14/lib -L/usr/lib
 EXTRA_CLANG_LINKER_FLAGS = -stdlib=libc++
+## EXTRA_CLANG_LINKER_FLAGS = -libstdc++
+
 
 ifeq ($(CXX), clang++)
 	CXXFLAGS += $(EXTRA_CLANG_LINKER_FLAGS)

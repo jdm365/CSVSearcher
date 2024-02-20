@@ -11,6 +11,7 @@ static const std::string INVERTED_INDEX_DB_NAME = "INVERTED_INDEX";
 static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
 
 #define INIT_MAX_DF 5000
+#define DEBUG 0
 
 std::vector<std::string> tokenize_whitespace(
 		const std::string& document
@@ -52,8 +53,7 @@ class _BM25 {
 		std::vector<int> term_freq_line_offsets;
 
 		_BM25(
-				// std::vector<std::string>& documents,
-				std::vector<std::string> documents,
+				std::vector<std::string>& documents,
 				bool whitespace_tokenization,
 				int ngram_size,
 				int min_df,

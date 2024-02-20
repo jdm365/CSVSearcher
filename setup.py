@@ -2,20 +2,18 @@ from distutils.core import setup
 from Cython.Build import cythonize
 from distutils.extension import Extension
 import numpy as np
-import os
 
 MODULE_NAME = "bm25"
 
-## os.environ["CC"]  = "clang"
-os.environ["CXX"] = "clang++"
-
 COMPILER_FLAGS = [
     "-std=c++17",
+    "-stdlib=libc++",
     "-O3",
     "-Wall",
     "-Wextra",
     "-march=native",
     "-ffast-math",
+    "-fPIC",
 ]
 
 SANITIZER_FLAGS = [
@@ -33,13 +31,11 @@ extensions = [
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=[np.get_include(), "bm25"],
-        ## extra_link_args=["-fopenmp", "-lstdc++", "-llmdb"],
-        extra_link_args=["-fopenmp", "-lstdc++", "-lleveldb"],
-        ##link boost libraries
+        extra_link_args=["-fopenmp", "-lc++", "-lc++abi", "-lleveldb", "-L/usr/local/lib", "-lsnappy"],
     ),
 ]
 
 setup(
-    name="text_processing",
+    name=MODULE_NAME,
     ext_modules=cythonize(extensions),
 )
