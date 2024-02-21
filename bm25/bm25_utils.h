@@ -1,6 +1,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <bitset>
 
 #include "robin_hood.h"
 #include <leveldb/db.h>
@@ -16,33 +17,45 @@ static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
 std::vector<std::string> tokenize_whitespace(
 		const std::string& document
 		);
-std::vector<std::string> tokenize_ngram(
-		std::string& document, 
-		int ngram_size
-		);
 void tokenize_whitespace_batch(
 		std::vector<std::string>& documents,
 		std::vector<std::vector<std::string>>& tokenized_documents
 		);
-void tokenize_ngram_batch(
-		std::vector<std::string>& documents,
-		std::vector<std::vector<std::string>>& tokenized_documents,
-		int ngram_size
-		);
+
+struct SmallStringSet {
+	std::bitset<16> bitset;
+	std::vector<std::string> vec;
+
+	void insert(const std::string& str) {
+		if (bitset.size() < 16) {
+			if (!bitset.test(str.size())) {
+				bitset.set(str.size());
+				vec.push_back(str);
+			}
+		} else {
+			vec.push_back(str);
+		}
+	}
+
+	// Define iterator to get all elements with (auto x : set)
+	typedef std::vector<std::string>::iterator iterator;
+	iterator begin() { return vec.begin(); }
+	iterator end() { return vec.end(); }
+};
 
 class _BM25 {
 	public:
+		std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
 		std::vector<uint16_t> doc_sizes;
 		robin_hood::unordered_flat_set<std::string> large_dfs;
 
 		uint32_t num_docs;
-		int      ngram_size;
 		int      min_df;
 		float    avg_doc_size;
 		float    max_df;
 		float    k1;
 		float    b;
-		bool     whitespace_tokenization;
+		bool     cache_term_freqs;
 
 		// LevelDB Management
 		// Two databases: one for term frequencies, one for inverted index
@@ -54,13 +67,13 @@ class _BM25 {
 
 		_BM25(
 				std::vector<std::string>& documents,
-				bool whitespace_tokenization,
-				int ngram_size,
-				int min_df,
+				int   min_df,
 				float max_df,
 				float k1,
-				float b
+				float b,
+				bool cache_term_freqs
 				);
+
 		~_BM25() {
 			delete doc_term_freqs_db;
 			delete inverted_index_db;
@@ -85,10 +98,7 @@ class _BM25 {
 				const std::string& term
 				);
 
-		void write_term_freqs_to_file(
-				// const std::vector<robin_hood::unordered_map<std::string, uint16_t>>& term_freqs
-				const std::vector<std::vector<std::pair<std::string, uint16_t>>>& term_freqs
-				);
+		void write_term_freqs_to_file();
 		uint16_t get_term_freq_from_file(
 				int line_num,
 				const std::string& term

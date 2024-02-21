@@ -4,6 +4,8 @@ cimport cython
 
 from libc.stdint cimport uint64_t, uint32_t, uint16_t
 from libc.stdlib cimport malloc, free
+from libc.stdio cimport FILE, fopen, fclose, fgets
+from libc.string cimport strlen, strtok
 from cpython.array cimport array
 from libc.math cimport log
 from typing import List
@@ -20,6 +22,7 @@ cimport numpy as np
 import numpy as np
 np.import_array()
 import gc
+import re
 
 from time import perf_counter
 import sys
@@ -29,13 +32,11 @@ cdef extern from "bm25_utils.h":
     cdef cppclass _BM25:
         _BM25(
                 vector[string]& documents,
-                ## vector[string] documents,
-                bool  whitespace_tokenization,
-                int   ngram_size,
                 int   min_df,
                 float max_df,
                 float k1,
-                float b
+                float b,
+                bool  cache_term_freqs
                 ) nogil
         vector[pair[uint32_t, float]] query(string& term, uint32_t doc_id)
 
@@ -45,23 +46,21 @@ cdef class BM25:
     cdef _BM25* bm25
     cdef object data_index
     cdef list  cols
-    cdef bool  whitespace_tokenization
-    cdef int   ngram_size
     cdef int   min_df
     cdef float max_df
+    cdef bool  cache_term_freqs
+
 
     def __init__(
             self, 
             List[str] documents = [], 
             str csv_file = '', 
             str text_column = '',
-            bool whitespace_tokenization = True,
-            int ngram_size = 3,
             int min_df = 1,
-            float max_df = 0.1,
+            float max_df = 1,
+            bool cache_term_freqs = True
             ):
-        self.whitespace_tokenization = whitespace_tokenization
-        self.ngram_size = ngram_size
+        self.cache_term_freqs = cache_term_freqs
 
         self.min_df = min_df
         self.max_df = max_df
@@ -78,6 +77,7 @@ cdef class BM25:
                     return_dict=False,
                     has_header=True
                     )
+            print(f"Built data index in {perf_counter() - init:.2f} seconds")
 
             ## Extract documents from the csv file
             ## Find column index
@@ -87,6 +87,15 @@ cdef class BM25:
 
                 self.cols = header
 
+            remove_commas = lambda x: x.group(0).replace(",", "")
+            pattern = r'"[^\"]*"'
+            compiled = re.compile(pattern)
+
+            def clean(x):
+                return re.sub(compiled, remove_commas, x).replace("\"", "")\
+                        .lower().split(",")
+
+            init = perf_counter()
             documents = []
             with open(csv_file, "r", encoding="utf-8") as f:
                 for idx, line in enumerate(f):
@@ -94,14 +103,26 @@ cdef class BM25:
                         continue
 
                     documents.append(
-                            line.strip().split(",")[text_column_index].lower()
+                            clean(line)[text_column_index]
                             )
+            print(f"Extracted documents in {perf_counter() - init:.2f} seconds")
 
-            print(f"Built data index in {perf_counter() - init:.2f} seconds")
 
             init = perf_counter()
             self._build_inverted_index(documents)
             print(f"Built index in {perf_counter() - init:.2f} seconds")
+            '''
+            self.bm25 = new _BM25(
+                    csv_file.encode("utf-8"),
+                    text_column_index,
+                    self.whitespace_tokenization,
+                    self.ngram_size,
+                    self.min_df,
+                    self.max_df,
+                    1.2,
+                    0.4
+                    )
+            '''
 
             del documents
             gc.collect()
@@ -128,12 +149,11 @@ cdef class BM25:
 
         self.bm25 = new _BM25(
                 vector_documents,
-                self.whitespace_tokenization,
-                self.ngram_size,
                 self.min_df,
                 self.max_df,
                 1.2,
-                0.4
+                0.4,
+                self.cache_term_freqs
                 )
 
         vector_documents.clear()
@@ -150,13 +170,28 @@ cdef class BM25:
 
         k = min(k, len(results))
 
-        for i in range(k):
-            topk_ids.append(results[i].first)
-            scores.append(results[i].second)
+        for idx in range(k):
+            topk_ids.append(results[idx].first)
+            scores.append(results[idx].second)
             
         output = []
+        ## fields = self.data_index[topk_ids]
+        fields = self.data_index.mget(topk_ids)
         for idx, data_idx in enumerate(topk_ids):
-            doc = dict(zip(self.cols, self.data_index[data_idx]))
+            ## doc = dict(zip(self.cols, self.data_index[data_idx]))
+            doc = dict(zip(self.cols, fields[idx]))
             doc["score"] = scores[idx]
             output.append(doc)
         return output 
+
+
+    def query(self, str query):
+        results = self.bm25.query(query.lower().encode("utf-8"), 10)
+
+        scores  = []
+        indices = []
+        for idx, score in results:
+            scores.append(score)
+            indices.append(idx)
+
+        return scores, indices
