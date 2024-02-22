@@ -1,4 +1,3 @@
-#include <cinttypes>
 #include <iostream>
 #include <filesystem>
 #include <vector>
@@ -19,6 +18,60 @@
 #include <leveldb/write_batch.h>
 
 
+
+void _BM25::get_csv_line_offsets() {
+	FILE* file = fopen(csv_file.c_str(), "r");
+	if (file == NULL) {
+		std::cerr << "Unable to open file: " << csv_file << std::endl;
+		exit(1);
+	}
+
+	// Read the file line by line
+	char* line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	int line_num = 0;
+
+	// get column names and append to columns vector
+	read = getline(&line, &len, file);
+	std::istringstream iss(line);
+	std::string value;
+	while (std::getline(iss, value, ',')) {
+		columns.push_back(value);
+	}
+
+	while ((read = getline(&line, &len, file)) != -1) {
+		csv_line_offsets.push_back(ftell(file) - read);
+		++line_num;
+	}
+	fclose(file);
+}
+
+std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num) {
+	std::ifstream file(csv_file);
+	std::string line;
+	std::string value;
+
+	file.seekg(csv_line_offsets[line_num]);
+	std::getline(file, line);
+	std::istringstream iss(line);
+	std::getline(iss, value);
+	file.close();
+
+	// Create effective json by combining column names with values split by commas
+	std::vector<std::pair<std::string, std::string>> row;
+	for (int i = 0; i < columns.size(); ++i) {
+		std::string column = columns[i];
+		std::string val;
+		std::istringstream iss(line);
+		for (int j = 0; j < i; ++j) {
+			std::getline(iss, val, ',');
+		}
+		std::getline(iss, val, ',');
+		row.push_back(std::make_pair(column, val));
+	}
+	return row;
+}
 
 void _BM25::init_dbs() {
 	if (std::filesystem::exists(DIR_NAME)) {
@@ -123,6 +176,10 @@ uint32_t _BM25::get_doc_term_freq_db(const std::string& term) {
 }
 
 std::vector<uint32_t> _BM25::get_inverted_index_db(const std::string& term) {
+	if (cache_inverted_index) {
+		return inverted_index[term];
+	}
+
 	leveldb::ReadOptions read_options;
 	std::string value;
 
@@ -243,16 +300,22 @@ void tokenize_whitespace_batch(
 
 _BM25::_BM25(
 		std::vector<std::string>& documents,
+		std::string csv_file,
 		int min_df,
 		float max_df,
 		float k1,
 		float b,
-		bool  cache_term_freqs
+		bool  cache_term_freqs,
+		bool  cache_inverted_index
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
 			b(b),
-			cache_term_freqs(cache_term_freqs) {
+			cache_term_freqs(cache_term_freqs),
+			cache_inverted_index(cache_inverted_index),
+			csv_file(csv_file) {
+	
+	get_csv_line_offsets();
 
 	auto overall_start = std::chrono::high_resolution_clock::now();
 
@@ -368,7 +431,7 @@ _BM25::_BM25(
 		std::cout << "Finished writing doc term frequencies to disk in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
-	robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
+	// robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
 	inverted_index.reserve(doc_term_freqs.size());
 
 	start = std::chrono::high_resolution_clock::now();
@@ -390,7 +453,10 @@ _BM25::_BM25(
 	start = std::chrono::high_resolution_clock::now();
 
 	// Write inverted index to disk
-	create_inverted_index_db(inverted_index);
+	if (!cache_inverted_index) {
+		create_inverted_index_db(inverted_index);
+		inverted_index.clear();
+	}
 
 	end = std::chrono::high_resolution_clock::now();
 	elapsed_seconds = end - start;
@@ -462,7 +528,7 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 				candidate_docs.insert(doc_id);
 			}
 		}
-		local_max_df *= 5;
+		local_max_df *= 20;
 
 		if (local_max_df > num_docs || local_max_df > (int)max_df * num_docs) {
 			break;
@@ -519,5 +585,19 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		--idx;
 	}
 
+	return result;
+}
+
+std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
+		std::string& _query,
+		uint32_t top_k
+		) {
+	std::vector<std::vector<std::pair<std::string, std::string>>> result;
+	std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k);
+	result.reserve(top_k_docs.size());
+
+	for (int i = 0; i < top_k_docs.size(); ++i) {
+		result.push_back(get_csv_line(top_k_docs[i].first));
+	}
 	return result;
 }

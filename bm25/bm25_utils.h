@@ -11,7 +11,7 @@ static const std::string DOC_TERM_FREQS_DB_NAME = "DOC_TERM_FREQS";
 static const std::string INVERTED_INDEX_DB_NAME = "INVERTED_INDEX";
 static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
 
-#define INIT_MAX_DF 5000
+#define INIT_MAX_DF 500
 #define DEBUG 0
 
 std::vector<std::string> tokenize_whitespace(
@@ -49,6 +49,9 @@ class _BM25 {
 		std::vector<uint16_t> doc_sizes;
 		robin_hood::unordered_flat_set<std::string> large_dfs;
 
+		std::vector<uint32_t> csv_line_offsets;
+		robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
+
 		uint32_t num_docs;
 		int      min_df;
 		float    avg_doc_size;
@@ -56,6 +59,10 @@ class _BM25 {
 		float    k1;
 		float    b;
 		bool     cache_term_freqs;
+		bool     cache_inverted_index;
+
+		std::string csv_file;
+		std::vector<std::string> columns;
 
 		// LevelDB Management
 		// Two databases: one for term frequencies, one for inverted index
@@ -67,17 +74,22 @@ class _BM25 {
 
 		_BM25(
 				std::vector<std::string>& documents,
+				std::string csv_file,
 				int   min_df,
 				float max_df,
 				float k1,
 				float b,
-				bool cache_term_freqs
+				bool cache_term_freqs,
+				bool cache_inverted_index
 				);
 
 		~_BM25() {
 			delete doc_term_freqs_db;
 			delete inverted_index_db;
 		}
+
+		void get_csv_line_offsets();
+		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 
 		void init_dbs();
 
@@ -115,6 +127,11 @@ class _BM25 {
 
 		std::vector<std::pair<uint32_t, float>> query(
 				std::string& query,
+				uint32_t top_k
+				);
+
+		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(
+				std::string& _query,
 				uint32_t top_k
 				);
 };

@@ -32,13 +32,16 @@ cdef extern from "bm25_utils.h":
     cdef cppclass _BM25:
         _BM25(
                 vector[string]& documents,
+                string csv_file,
                 int   min_df,
                 float max_df,
                 float k1,
                 float b,
-                bool  cache_term_freqs
+                bool  cache_term_freqs,
+                bool  cache_inverted_index
                 ) nogil
-        vector[pair[uint32_t, float]] query(string& term, uint32_t doc_id)
+        vector[pair[uint32_t, float]] query(string& term, uint32_t top_k)
+        vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k)
 
 
 
@@ -49,6 +52,8 @@ cdef class BM25:
     cdef int   min_df
     cdef float max_df
     cdef bool  cache_term_freqs
+    cdef bool  cache_inverted_index
+    cdef str   csv_file
 
 
     def __init__(
@@ -58,9 +63,11 @@ cdef class BM25:
             str text_column = '',
             int min_df = 1,
             float max_df = 1,
-            bool cache_term_freqs = True
+            bool cache_term_freqs = True,
+            bool cache_inverted_index = True 
             ):
-        self.cache_term_freqs = cache_term_freqs
+        self.cache_term_freqs     = cache_term_freqs
+        self.cache_inverted_index = cache_inverted_index
 
         self.min_df = min_df
         self.max_df = max_df
@@ -106,6 +113,7 @@ cdef class BM25:
                             clean(line)[text_column_index]
                             )
             print(f"Extracted documents in {perf_counter() - init:.2f} seconds")
+            self.csv_file = csv_file
 
 
             init = perf_counter()
@@ -149,11 +157,13 @@ cdef class BM25:
 
         self.bm25 = new _BM25(
                 vector_documents,
+                self.csv_file.encode("utf-8"),
                 self.min_df,
                 self.max_df,
                 1.2,
                 0.4,
-                self.cache_term_freqs
+                self.cache_term_freqs,
+                self.cache_inverted_index
                 )
 
         vector_documents.clear()
@@ -175,10 +185,18 @@ cdef class BM25:
             scores.append(results[idx].second)
             
         output = []
-        ## fields = self.data_index[topk_ids]
-        fields = self.data_index.mget(topk_ids)
+        try:
+            fields = self.data_index.mget(topk_ids)
+        ## except KeyError as e:
+        except Exception as e:
+            raise e
+            print(e)
+            print(f"Error: key {topk_ids} not found in data index")
+            fields = []
+            for idx in topk_ids:
+                fields.append(self.data_index[idx])
+
         for idx, data_idx in enumerate(topk_ids):
-            ## doc = dict(zip(self.cols, self.data_index[data_idx]))
             doc = dict(zip(self.cols, fields[idx]))
             doc["score"] = scores[idx]
             output.append(doc)
@@ -195,3 +213,19 @@ cdef class BM25:
             indices.append(idx)
 
         return scores, indices
+
+
+    def _get_topk_internal(self, str query, int k = 10):
+        cdef vector[vector[pair[string, string]]] results
+        cdef list output = []
+
+        results = self.bm25.get_topk_internal(query.lower().encode("utf-8"), k)
+
+        for idx in range(len(results)):
+            _dict = {}
+            for jdx in range(len(results[idx])):
+                _dict[results[idx][jdx].first.decode("utf-8")] = results[idx][jdx].second.decode("utf-8")
+
+            output.append(_dict)
+
+        return output
