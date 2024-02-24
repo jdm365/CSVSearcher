@@ -1,5 +1,7 @@
 #include <iostream>
-#include <filesystem>
+// #include <filesystem>
+#include <unistd.h>
+#include <sys/stat.h>
 #include <vector>
 #include <queue>
 #include <string>
@@ -185,6 +187,7 @@ void _BM25::save_to_disk() {
 }
 
 void _BM25::init_dbs() {
+	/*
 	if (std::filesystem::exists(DIR_NAME)) {
 		// Remove the directory if it exists
 		std::filesystem::remove_all(DIR_NAME);
@@ -193,6 +196,22 @@ void _BM25::init_dbs() {
 	else {
 		// Create the directory if it does not exist
 		std::filesystem::create_directory(DIR_NAME);
+	}
+	*/
+	// Use POSIX functions instead of std::filesystem
+	if (access(DIR_NAME.c_str(), F_OK) != -1) {
+		// Remove the directory if it exists
+		std::string command = "rm -r " + DIR_NAME;
+		system(command.c_str());
+
+		// Create the directory
+		command = "mkdir " + DIR_NAME;
+		system(command.c_str());
+	}
+	else {
+		// Create the directory if it does not exist
+		std::string command = "mkdir " + DIR_NAME;
+		system(command.c_str());
 	}
 
 	leveldb::Options options;
@@ -663,7 +682,6 @@ _BM25::_BM25(
 
 inline float _BM25::_compute_idf(const std::string& term) {
 	uint32_t df = get_doc_term_freq_db(term);
-	std::cout << "df: " << df << std::endl;
 	return log((num_docs - df + 0.5) / (df + 0.5));
 }
 

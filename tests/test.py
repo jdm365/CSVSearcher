@@ -9,7 +9,8 @@ from time import perf_counter
 if __name__ == '__main__':
     query = "netflix inc"
 
-    FILENAME = '/home/jdm365/SearchApp/basic_search/data/companies_sorted.csv'
+    ## FILENAME = '/home/jdm365/SearchApp/basic_search/data/companies_sorted.csv'
+    FILENAME = '/Users/jakemehlman/Kaggle/Kaggle_Competition_Foursquare/data/train.csv'
     ## FILENAME = '/home/jdm365/SearchApp/basic_search/data/companies_sorted_1M.csv'
     names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True).name.tolist()
 
@@ -25,9 +26,9 @@ if __name__ == '__main__':
     scores, indices = model.query(query)
 
     init = perf_counter()
-    for idx in tqdm(rand_idxs, desc="Querying"):
+    ##for idx in tqdm(rand_idxs, desc="Querying"):
         ## scores, indices = model.query(names[idx])
-        records = model.get_topk_docs(names[idx], k=10)
+        ##records = model.get_topk_docs(names[idx], k=10)
     time = perf_counter() - init
     print(f"Time taken: {time:.2f} seconds")
     print(f"Queries per second: {len(rand_idxs) / time:.2f}")

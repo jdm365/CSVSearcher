@@ -14,7 +14,7 @@ static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
 static const std::string MISC  = "MISC";
 
 #define INIT_MAX_DF 1000
-#define DEBUG 1
+#define DEBUG 0
 
 std::vector<std::string> tokenize_whitespace(
 		const std::string& document

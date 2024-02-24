@@ -59,10 +59,10 @@ cdef class BM25:
 
     def __init__(
             self, 
-            str csv_file, 
-            str text_col,
-            List[str] documents = [], 
-            int min_df = 1,
+            str  csv_file, 
+            str  text_col,
+            list documents = [], 
+            int   min_df = 1,
             float max_df = 1,
             bool cache_term_freqs = True,
             bool cache_inverted_index = True,
@@ -87,8 +87,8 @@ cdef class BM25:
             self._build_inverted_index(documents)
             print(f"Built index in {perf_counter() - init:.2f} seconds")
 
-            del documents
-            gc.collect()
+            ## del documents
+            ## gc.collect()
 
         else:
             raise ValueError("Either documents or csv_file and text_column must be provided")
