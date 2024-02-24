@@ -15,12 +15,12 @@ if __name__ == '__main__':
 
     model = BM25(
             csv_file=FILENAME, 
-            text_column='name',
+            text_col='name',
             max_df=0.001,
             cache_doc_term_freqs=True
             )
 
-    rand_idxs = np.random.choice(len(names), 1_000_000, replace=False)
+    rand_idxs = np.random.choice(len(names), 1_000_0, replace=False)
 
     scores, indices = model.query(query)
 

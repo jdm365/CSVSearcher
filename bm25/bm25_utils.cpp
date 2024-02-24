@@ -18,13 +18,15 @@
 #include <leveldb/write_batch.h>
 
 
-
-void _BM25::get_csv_line_offsets() {
+void _BM25::read_csv(std::vector<std::string>& documents) {
+	// Open the file
 	FILE* file = fopen(csv_file.c_str(), "r");
 	if (file == NULL) {
 		std::cerr << "Unable to open file: " << csv_file << std::endl;
 		exit(1);
 	}
+
+	int search_column_index = -1;
 
 	// Read the file line by line
 	char* line = NULL;
@@ -32,7 +34,7 @@ void _BM25::get_csv_line_offsets() {
 	ssize_t read;
 	int line_num = 0;
 
-	// get column names and append to columns vector
+	// Get col names
 	read = getline(&line, &len, file);
 	std::istringstream iss(line);
 	std::string value;
@@ -41,11 +43,51 @@ void _BM25::get_csv_line_offsets() {
 			value.erase(value.find("\n"));
 		}
 		columns.push_back(value);
+		if (value == search_col) {
+			search_column_index = columns.size() - 1;
+		}
+	}
+
+	if (search_column_index == -1) {
+		std::cerr << "Search column not found in header" << std::endl;
+		for (int i = 0; i < columns.size(); ++i) {
+			std::cerr << columns[i] << ",";
+		}
+		std::cerr << std::endl;
+		exit(1);
 	}
 
 	while ((read = getline(&line, &len, file)) != -1) {
 		csv_line_offsets.push_back(ftell(file) - read);
 		++line_num;
+
+		// Split by commas not inside double quotes
+		std::string line_str(line);
+		std::vector<std::string> row;
+		std::string value;
+		std::string cell;
+		bool in_quotes = false;
+		for (int i = 0; i < line_str.size(); ++i) {
+			if (line_str[i] == '"') {
+				in_quotes = !in_quotes;
+			}
+			else if (line_str[i] == ',' && !in_quotes) {
+				row.push_back(cell);
+				cell = "";
+			}
+			else {
+				cell += line_str[i];
+			}
+		}
+		row.push_back(cell);
+
+		// Add the search column to the documents without quotes
+		std::string doc = row[search_column_index];
+		if (doc[0] == '"') {
+			doc = doc.substr(1, doc.size() - 2);
+			std::transform(doc.begin(), doc.end(), doc.begin(), ::toupper);
+		}
+		documents.push_back(doc);
 	}
 	fclose(file);
 
@@ -162,9 +204,7 @@ void _BM25::init_dbs() {
 	}
 }
 
-void _BM25::create_doc_term_freqs_db(
-		const robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs
-		) {
+void _BM25::create_doc_term_freqs_db() {
 	// Create term frequencies db
 	leveldb::WriteOptions write_options;
 	leveldb::Status status;
@@ -180,9 +220,7 @@ void _BM25::create_doc_term_freqs_db(
 	}
 }
 
-void _BM25::create_inverted_index_db(
-		const robin_hood::unordered_map<std::string, std::vector<uint32_t>>& inverted_index
-		) {
+void _BM25::create_inverted_index_db() {
 	// Create inverted index db
 	leveldb::WriteOptions write_options;
 	leveldb::Status status;
@@ -361,8 +399,8 @@ void tokenize_whitespace_batch(
 }
 
 _BM25::_BM25(
-		std::vector<std::string>& documents,
 		std::string csv_file,
+		std::string search_col,
 		int min_df,
 		float max_df,
 		float k1,
@@ -377,11 +415,18 @@ _BM25::_BM25(
 			cache_term_freqs(cache_term_freqs),
 			cache_inverted_index(cache_inverted_index),
 			cache_doc_term_freqs(cache_doc_term_freqs),
+			search_col(search_col), 
 			csv_file(csv_file) {
-	
-	get_csv_line_offsets();
 
 	auto overall_start = std::chrono::high_resolution_clock::now();
+	
+	// Read csv to get documents, line offsets, and columns
+	std::vector<std::string> documents;
+	read_csv(documents);
+
+	auto read_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
+	std::cout << "Read csv in " << read_elapsed_seconds.count() << " seconds" << std::endl;
 
 	init_dbs();
 
@@ -485,8 +530,8 @@ _BM25::_BM25(
 
 	start = std::chrono::high_resolution_clock::now();
 	// Write doc_term_freqs to leveldb
-	if (!cache_term_freqs) {
-		create_doc_term_freqs_db(doc_term_freqs);
+	if (!cache_doc_term_freqs) {
+		create_doc_term_freqs_db();
 		doc_term_freqs.clear();
 	}
 	end = std::chrono::high_resolution_clock::now();
@@ -518,7 +563,7 @@ _BM25::_BM25(
 
 	// Write inverted index to disk
 	if (!cache_inverted_index) {
-		create_inverted_index_db(inverted_index);
+		create_inverted_index_db();
 		inverted_index.clear();
 	}
 

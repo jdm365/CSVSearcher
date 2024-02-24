@@ -51,7 +51,7 @@ class _BM25 {
 		std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
 		robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
-		robin_hood::unordered_flat_set<std::string> large_dfs;
+		robin_hood::unordered_set<std::string> large_dfs;
 
 		std::vector<uint32_t> csv_line_offsets;
 
@@ -67,6 +67,7 @@ class _BM25 {
 
 		std::string csv_file;
 		std::vector<std::string> columns;
+		std::string search_col;
 
 		// LevelDB Management
 		// Two databases: one for term frequencies, one for inverted index
@@ -77,8 +78,8 @@ class _BM25 {
 		std::vector<int> term_freq_line_offsets;
 
 		_BM25(
-				std::vector<std::string>& documents,
 				std::string csv_file,
+				std::string search_col,
 				int   min_df,
 				float max_df,
 				float k1,
@@ -100,17 +101,14 @@ class _BM25 {
 		void load_dbs_from_dir(std::string db_dir);
 		void save_to_disk();
 
-		void get_csv_line_offsets();
+		// void get_csv_line_offsets();
+		void read_csv(std::vector<std::string>& document);
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 
 		void init_dbs();
 
-		void create_doc_term_freqs_db(
-				const robin_hood::unordered_map<std::string, uint32_t>& doc_term_freqs
-				);
-		void create_inverted_index_db(
-				const robin_hood::unordered_map<std::string, std::vector<uint32_t>>& inverted_index
-				);
+		void create_doc_term_freqs_db();
+		void create_inverted_index_db();
 		void write_row_to_inverted_index_db(
 				const std::string& term,
 				uint32_t doc_id
