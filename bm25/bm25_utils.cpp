@@ -37,6 +37,9 @@ void _BM25::get_csv_line_offsets() {
 	std::istringstream iss(line);
 	std::string value;
 	while (std::getline(iss, value, ',')) {
+		if (value.find("\n") != std::string::npos) {
+			value.erase(value.find("\n"));
+		}
 		columns.push_back(value);
 	}
 
@@ -45,6 +48,11 @@ void _BM25::get_csv_line_offsets() {
 		++line_num;
 	}
 	fclose(file);
+
+	// Write the offsets to a file
+	std::ofstream ofs(DIR_NAME + "/" + CSV_LINE_OFFSETS_NAME, std::ios::binary);
+	ofs.write((char*)&csv_line_offsets[0], csv_line_offsets.size() * sizeof(uint32_t));
+	ofs.close();
 }
 
 std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num) {
@@ -71,6 +79,56 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 		row.push_back(std::make_pair(column, val));
 	}
 	return row;
+}
+
+void _BM25::load_dbs_from_dir(std::string db_dir) {
+	leveldb::Options options;
+	options.create_if_missing = true;
+	leveldb::Status status;
+
+	const size_t cacheSize = 100 * 1048576; // 100 MB
+	options.block_cache = leveldb::NewLRUCache(cacheSize);
+
+	status = leveldb::DB::Open(options, db_dir + "/" + DOC_TERM_FREQS_DB_NAME, &doc_term_freqs_db);
+	if (!status.ok()) {
+		std::cerr << "Unable to open doc_term_freqs_db" << std::endl;
+		std::cerr << status.ToString() << std::endl;
+	}
+
+	status = leveldb::DB::Open(options, db_dir + "/" + INVERTED_INDEX_DB_NAME, &inverted_index_db);
+	if (!status.ok()) {
+		std::cerr << "Unable to open inverted_index_db" << std::endl;
+		std::cerr << status.ToString() << std::endl;
+	}
+
+	// Load the csv line offsets
+	std::ifstream file(db_dir + "/" + CSV_LINE_OFFSETS_NAME);
+	std::string line;
+	while (std::getline(file, line)) {
+		csv_line_offsets.push_back(std::stol(line));
+	}
+	file.close();
+}
+
+void _BM25::save_to_disk() {
+	// Save:
+	// 1. num_docs 
+	// 2. min_df 
+	// 3. max_df
+	// 4. avg_doc_size
+	// 5. k1 
+	// 6. b
+	// 7. cache_term_freqs 
+	// 8. cache_inverted_index
+	// 9. csv_line_offsets
+	// 10. doc_sizes 
+	// 11. large_dfs 
+	// 13. inverted_index_db (if cache_inverted_index is true)
+	// 14. doc_term_freqs_db (if cache_term_freqs is true)
+	// 15. columns
+	// 16. csv_file
+	// 17. term_freq_line_offsets
+	
 }
 
 void _BM25::init_dbs() {
@@ -165,6 +223,10 @@ void _BM25::write_row_to_inverted_index_db(
 }
 
 uint32_t _BM25::get_doc_term_freq_db(const std::string& term) {
+	if (cache_doc_term_freqs) {
+		return doc_term_freqs[term];
+	}
+
 	leveldb::ReadOptions read_options;
 	std::string value;
 	leveldb::Status status = doc_term_freqs_db->Get(read_options, term, &value);
@@ -306,13 +368,15 @@ _BM25::_BM25(
 		float k1,
 		float b,
 		bool  cache_term_freqs,
-		bool  cache_inverted_index
+		bool  cache_inverted_index,
+		bool  cache_doc_term_freqs
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
 			b(b),
 			cache_term_freqs(cache_term_freqs),
 			cache_inverted_index(cache_inverted_index),
+			cache_doc_term_freqs(cache_doc_term_freqs),
 			csv_file(csv_file) {
 	
 	get_csv_line_offsets();
@@ -326,7 +390,6 @@ _BM25::_BM25(
 	}
 
 	auto start = std::chrono::high_resolution_clock::now();
-	robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 	doc_term_freqs.reserve(documents.size());
 
 	// Accumulate document frequencies
@@ -351,7 +414,6 @@ _BM25::_BM25(
 	}
 
 	start = std::chrono::high_resolution_clock::now();
-	// std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
 
 	int max_number_of_occurrences = (int)(max_df * documents.size());
 	robin_hood::unordered_set<std::string> blacklisted_terms;
@@ -423,7 +485,10 @@ _BM25::_BM25(
 
 	start = std::chrono::high_resolution_clock::now();
 	// Write doc_term_freqs to leveldb
-	create_doc_term_freqs_db(doc_term_freqs);
+	if (!cache_term_freqs) {
+		create_doc_term_freqs_db(doc_term_freqs);
+		doc_term_freqs.clear();
+	}
 	end = std::chrono::high_resolution_clock::now();
 	elapsed_seconds = end - start;
 
@@ -431,7 +496,6 @@ _BM25::_BM25(
 		std::cout << "Finished writing doc term frequencies to disk in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
-	// robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
 	inverted_index.reserve(doc_term_freqs.size());
 
 	start = std::chrono::high_resolution_clock::now();
@@ -475,6 +539,17 @@ _BM25::_BM25(
 	if (DEBUG) {
 		std::cout << "Finished creating BM25 index in " << elapsed_seconds.count() << "s" << std::endl;
 	}
+
+	// Save non-vector/map members to disk
+	// save_to_disk();
+}
+
+
+_BM25::_BM25(
+		std::string db_dir,
+		std::string csv_file
+		) {
+	load_dbs_from_dir(db_dir);
 }
 
 inline float _BM25::_compute_idf(const std::string& term) {
@@ -596,8 +671,11 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 	std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k);
 	result.reserve(top_k_docs.size());
 
+	std::vector<std::pair<std::string, std::string>> row;
 	for (int i = 0; i < top_k_docs.size(); ++i) {
-		result.push_back(get_csv_line(top_k_docs[i].first));
+		row = get_csv_line(top_k_docs[i].first);
+		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].second)));
+		result.push_back(row);
 	}
 	return result;
 }

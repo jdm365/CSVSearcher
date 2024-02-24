@@ -38,7 +38,8 @@ cdef extern from "bm25_utils.h":
                 float k1,
                 float b,
                 bool  cache_term_freqs,
-                bool  cache_inverted_index
+                bool  cache_inverted_index,
+                bool  cache_doc_term_freqs
                 ) nogil
         vector[pair[uint32_t, float]] query(string& term, uint32_t top_k)
         vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k)
@@ -53,6 +54,7 @@ cdef class BM25:
     cdef float max_df
     cdef bool  cache_term_freqs
     cdef bool  cache_inverted_index
+    cdef bool  cache_doc_term_freqs
     cdef str   csv_file
 
 
@@ -64,10 +66,12 @@ cdef class BM25:
             int min_df = 1,
             float max_df = 1,
             bool cache_term_freqs = True,
-            bool cache_inverted_index = True 
+            bool cache_inverted_index = True,
+            bool cache_doc_term_freqs = False 
             ):
         self.cache_term_freqs     = cache_term_freqs
         self.cache_inverted_index = cache_inverted_index
+        self.cache_doc_term_freqs = cache_doc_term_freqs
 
         self.min_df = min_df
         self.max_df = max_df
@@ -77,14 +81,6 @@ cdef class BM25:
 
         elif csv_file != '' and text_column != '':
             init = perf_counter()
-            from indxr import Indxr
-
-            self.data_index = Indxr(
-                    csv_file,
-                    return_dict=False,
-                    has_header=True
-                    )
-            print(f"Built data index in {perf_counter() - init:.2f} seconds")
 
             ## Extract documents from the csv file
             ## Find column index
@@ -137,9 +133,6 @@ cdef class BM25:
         else:
             raise ValueError("Either documents or csv_file and text_column must be provided")
 
-        ## Call self.data_index[0] once. First call is slow.
-        self.data_index[0]
-
 
     def __cinit__(
             self, 
@@ -163,13 +156,15 @@ cdef class BM25:
                 1.2,
                 0.4,
                 self.cache_term_freqs,
-                self.cache_inverted_index
+                self.cache_inverted_index,
+                self.cache_doc_term_freqs
                 )
 
         vector_documents.clear()
         vector_documents.shrink_to_fit()
         
 
+    '''
     def get_topk_docs(self, str query, int k = 10):
         cdef list scores   = []
         cdef list topk_ids = []
@@ -201,6 +196,7 @@ cdef class BM25:
             doc["score"] = scores[idx]
             output.append(doc)
         return output 
+    '''
 
 
     def query(self, str query):
@@ -215,7 +211,8 @@ cdef class BM25:
         return scores, indices
 
 
-    def _get_topk_internal(self, str query, int k = 10):
+    ## def _get_topk_internal(self, str query, int k = 10):
+    def get_topk_docs(self, str query, int k = 10):
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
 

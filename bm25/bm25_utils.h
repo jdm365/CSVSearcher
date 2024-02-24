@@ -10,8 +10,10 @@ static const std::string DIR_NAME      			= "bm25_db";
 static const std::string DOC_TERM_FREQS_DB_NAME = "DOC_TERM_FREQS";
 static const std::string INVERTED_INDEX_DB_NAME = "INVERTED_INDEX";
 static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
+static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
+static const std::string MISC  = "MISC";
 
-#define INIT_MAX_DF 500
+#define INIT_MAX_DF 1000
 #define DEBUG 0
 
 std::vector<std::string> tokenize_whitespace(
@@ -45,12 +47,13 @@ struct SmallStringSet {
 
 class _BM25 {
 	public:
+		robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
 		std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
+		robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
 		robin_hood::unordered_flat_set<std::string> large_dfs;
 
 		std::vector<uint32_t> csv_line_offsets;
-		robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
 
 		uint32_t num_docs;
 		int      min_df;
@@ -60,6 +63,7 @@ class _BM25 {
 		float    b;
 		bool     cache_term_freqs;
 		bool     cache_inverted_index;
+		bool     cache_doc_term_freqs;
 
 		std::string csv_file;
 		std::vector<std::string> columns;
@@ -80,13 +84,21 @@ class _BM25 {
 				float k1,
 				float b,
 				bool cache_term_freqs,
-				bool cache_inverted_index
+				bool cache_inverted_index,
+				bool cache_doc_term_freqs
+				);
+		_BM25(
+				std::string db_dir,
+				std::string csv_file
 				);
 
 		~_BM25() {
 			delete doc_term_freqs_db;
 			delete inverted_index_db;
 		}
+
+		void load_dbs_from_dir(std::string db_dir);
+		void save_to_disk();
 
 		void get_csv_line_offsets();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
