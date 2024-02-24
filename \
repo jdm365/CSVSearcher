@@ -435,7 +435,6 @@ _BM25::_BM25(
 	doc_term_freqs.reserve(documents.size());
 
 	// Accumulate document frequencies
-	/*
 	for (const std::string& _doc : documents) {
 		SmallStringSet unique_terms;
 
@@ -446,31 +445,8 @@ _BM25::_BM25(
 
 		// Update global frequencies based on the local counts
 		for (const auto& term : unique_terms) {
-			if (doc_term_freqs.find(term) == doc_term_freqs.end()) {
-				doc_term_freqs[term] = 1;
-			} 
-			else {
-				doc_term_freqs[term]++;
-			}
+			++doc_term_freqs[term];
 		}
-	}
-	*/
-	SmallStringSet seen_terms;
-	for (const std::string& doc : documents) {
-		seen_terms.clear();
-
-		// Tokenize and process each term in the current document
-		tokenize_whitespace_inplace(doc, [&](const std::string& term) {
-			if (!seen_terms.contains(term)) {
-				if (doc_term_freqs.find(term) == doc_term_freqs.end()) {
-					doc_term_freqs[term] = 1;
-				} 
-				else {
-					++doc_term_freqs[term];
-				}
-			} 
-			seen_terms.insert(term);
-		});
 	}
 	auto end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> elapsed_seconds = end - start;
@@ -532,28 +508,11 @@ _BM25::_BM25(
 	}
 	*/
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
+		std::vector<std::string> doc = tokenize_whitespace(documents[doc_id]);
+		doc_sizes[doc_id] = doc.size();
 		uint16_t doc_size = 0;
-		tokenize_whitespace_inplace(documents[doc_id], [&](const std::string& term) {
-				if (blacklisted_terms.find(term) != blacklisted_terms.end()) {
-					return;
-				}
-				++doc_size;
+		tokenize_whitespace_inplace(_doc, [&](const std::string& term) {
 
-				// Use std::find_if to check if the term is already in the vector
-				auto it = std::find_if(term_freqs[doc_id].begin(), term_freqs[doc_id].end(), [&](const std::pair<std::string, uint16_t>& p) {
-					return p.first == term;
-				});
-
-				if (it != term_freqs[doc_id].end()) {
-					++it->second;
-				}
-				// tag this branch as likely
-				else {
-					term_freqs[doc_id].emplace_back(term, 1);
-				}
-		});
-
-		/*
 		robin_hood::unordered_map<std::string, uint16_t> term_freq;
 		for (const std::string& term : doc) {
 			if (blacklisted_terms.find(term) != blacklisted_terms.end()) {
@@ -568,9 +527,6 @@ _BM25::_BM25(
 			term_freq_vector.emplace_back(term_count.first, term_count.second);
 		}
 		term_freqs[doc_id] = term_freq_vector;
-		*/
-
-		doc_sizes[doc_id] = doc_size;
 	}
 	end = std::chrono::high_resolution_clock::now();
 	elapsed_seconds = end - start;
@@ -663,7 +619,6 @@ _BM25::_BM25(
 
 inline float _BM25::_compute_idf(const std::string& term) {
 	uint32_t df = get_doc_term_freq_db(term);
-	std::cout << "df: " << df << std::endl;
 	return log((num_docs - df + 0.5) / (df + 0.5));
 }
 

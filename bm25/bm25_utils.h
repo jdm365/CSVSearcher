@@ -14,7 +14,7 @@ static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
 static const std::string MISC  = "MISC";
 
 #define INIT_MAX_DF 1000
-#define DEBUG 0
+#define DEBUG 1
 
 std::vector<std::string> tokenize_whitespace(
 		const std::string& document
@@ -25,24 +25,40 @@ void tokenize_whitespace_batch(
 		);
 
 struct SmallStringSet {
-	std::bitset<16> bitset;
-	std::vector<std::string> vec;
+	std::bitset<255> bitset;
+	// std::vector<std::string> vec;
+	std::string vec[255];
+	int size = 0;
 
 	void insert(const std::string& str) {
-		if (bitset.size() < 16) {
+		if (bitset.size() < 255) {
 			if (!bitset.test(str.size())) {
 				bitset.set(str.size());
-				vec.push_back(str);
+				vec[size++] = str;
 			}
 		} else {
-			vec.push_back(str);
+			vec[size++] = str;
 		}
 	}
 
-	// Define iterator to get all elements with (auto x : set)
-	typedef std::vector<std::string>::iterator iterator;
-	iterator begin() { return vec.begin(); }
-	iterator end() { return vec.end(); }
+	bool contains(const std::string& str) {
+		if (bitset.size() < 255) {
+			return bitset.test(str.size());
+		} else {
+			for (int i = 0; i < size; i++) {
+				if (vec[i] == str) {
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
+	void clear() {
+		bitset.reset();
+		memset(vec, 0, sizeof(vec));
+		size = 0;
+	}
 };
 
 class _BM25 {
@@ -101,7 +117,6 @@ class _BM25 {
 		void load_dbs_from_dir(std::string db_dir);
 		void save_to_disk();
 
-		// void get_csv_line_offsets();
 		void read_csv(std::vector<std::string>& document);
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 
