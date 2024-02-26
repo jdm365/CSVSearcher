@@ -1,5 +1,4 @@
 #include <iostream>
-// #include <filesystem>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <vector>
@@ -528,28 +527,6 @@ _BM25::_BM25(
 	term_freqs.resize(num_docs);
 
 	start = std::chrono::high_resolution_clock::now();
-	/*
-	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
-		std::vector<std::string> doc = tokenize_whitespace(documents[doc_id]);
-
-		doc_sizes[doc_id] = doc.size();
-
-		robin_hood::unordered_map<std::string, uint16_t> term_freq;
-		for (const std::string& term : doc) {
-			if (blacklisted_terms.find(term) != blacklisted_terms.end()) {
-				continue;
-			}
-			++term_freq[term];
-		}
-		std::vector<std::pair<std::string, uint16_t>> term_freq_vector;
-		term_freq_vector.reserve(term_freq.size());
-
-		for (const robin_hood::pair<std::string, uint16_t>& term_count : term_freq) {
-			term_freq_vector.emplace_back(term_count.first, term_count.second);
-		}
-		term_freqs[doc_id] = term_freq_vector;
-	}
-	*/
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		uint16_t doc_size = 0;
 		tokenize_whitespace_inplace(documents[doc_id], [&](const std::string& term) {
@@ -571,23 +548,6 @@ _BM25::_BM25(
 					term_freqs[doc_id].emplace_back(term, 1);
 				}
 		});
-
-		/*
-		robin_hood::unordered_map<std::string, uint16_t> term_freq;
-		for (const std::string& term : doc) {
-			if (blacklisted_terms.find(term) != blacklisted_terms.end()) {
-				continue;
-			}
-			++term_freq[term];
-		}
-		std::vector<std::pair<std::string, uint16_t>> term_freq_vector;
-		term_freq_vector.reserve(term_freq.size());
-
-		for (const robin_hood::pair<std::string, uint16_t>& term_count : term_freq) {
-			term_freq_vector.emplace_back(term_count.first, term_count.second);
-		}
-		term_freqs[doc_id] = term_freq_vector;
-		*/
 
 		doc_sizes[doc_id] = doc_size;
 	}

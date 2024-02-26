@@ -26,7 +26,6 @@ void tokenize_whitespace_batch(
 
 struct SmallStringSet {
 	std::bitset<255> bitset;
-	// std::vector<std::string> vec;
 	std::string vec[255];
 	int size = 0;
 
