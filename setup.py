@@ -46,7 +46,7 @@ DARWIN_LINK_ARGS = [
 extensions = [
     Extension(
         MODULE_NAME,
-        sources=["bm25/bm25.pyx", "bm25/bm25_utils.cpp"],
+        sources=["bm25/bm25.pyx", "bm25/engine.cpp"],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=[np.get_include(), "bm25"],

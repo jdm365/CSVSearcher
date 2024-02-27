@@ -28,7 +28,7 @@ from time import perf_counter
 import sys
 
 
-cdef extern from "bm25_utils.h":
+cdef extern from "engine.h":
     cdef cppclass _BM25:
         _BM25(
                 string csv_file,

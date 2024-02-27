@@ -158,4 +158,4 @@ class _BM25 {
 				uint32_t top_k,
 				uint32_t init_max_df
 				);
-};
+};;

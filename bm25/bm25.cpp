@@ -9,7 +9,7 @@
             "/home/jdm365/miniconda3/envs/knn/lib/python3.11/site-packages/numpy/core/include/numpy/ndarrayobject.h",
             "/home/jdm365/miniconda3/envs/knn/lib/python3.11/site-packages/numpy/core/include/numpy/ndarraytypes.h",
             "/home/jdm365/miniconda3/envs/knn/lib/python3.11/site-packages/numpy/core/include/numpy/ufuncobject.h",
-            "bm25/bm25_utils.h"
+            "bm25/engine.h"
         ],
         "extra_compile_args": [
             "-std=c++17",
@@ -37,7 +37,7 @@
         "name": "bm25",
         "sources": [
             "bm25/bm25.pyx",
-            "bm25/bm25_utils.cpp"
+            "bm25/engine.cpp"
         ]
     },
     "module_name": "bm25"
@@ -1284,7 +1284,7 @@ static CYTHON_INLINE float __PYX_NAN() {
 #include "numpy/ndarraytypes.h"
 #include "numpy/arrayscalars.h"
 #include "numpy/ufuncobject.h"
-#include "bm25_utils.h"
+#include "engine.h"
 #ifdef _OPENMP
 #include <omp.h>
 #endif /* _OPENMP */

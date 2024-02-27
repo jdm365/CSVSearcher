@@ -11,7 +11,7 @@
 #include <omp.h>
 #include <unistd.h>
 
-#include "bm25_utils.h"
+#include "engine.h"
 #include "robin_hood.h"
 
 #include <leveldb/db.h>
@@ -41,8 +41,8 @@ void _BM25::read_csv(std::vector<std::string>& documents) {
 	int search_column_index = -1;
 
 	// Read the file line by line
-	char* line = NULL;
-	size_t len = 0;
+	char*   line = NULL;
+	size_t  len = 0;
 	ssize_t read;
 	int line_num = 0;
 
