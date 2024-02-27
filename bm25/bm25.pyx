@@ -41,8 +41,8 @@ cdef extern from "bm25_utils.h":
                 bool  cache_inverted_index,
                 bool  cache_doc_term_freqs
                 ) nogil
-        vector[pair[uint32_t, float]] query(string& term, uint32_t top_k)
-        vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k)
+        vector[pair[uint32_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
+        vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df)
 
 
 
@@ -115,8 +115,8 @@ cdef class BM25:
                 )
 
 
-    def query(self, str query):
-        results = self.bm25.query(query.upper().encode("utf-8"), 10)
+    def query(self, str query, int init_max_df = 1000):
+        results = self.bm25.query(query.upper().encode("utf-8"), 10, init_max_df)
 
         scores  = []
         indices = []
@@ -127,11 +127,11 @@ cdef class BM25:
         return scores, indices
 
 
-    def get_topk_docs(self, str query, int k = 10):
+    def get_topk_docs(self, str query, int k = 10, int init_max_df = 1000):
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
 
-        results = self.bm25.get_topk_internal(query.upper().encode("utf-8"), k)
+        results = self.bm25.get_topk_internal(query.upper().encode("utf-8"), k, init_max_df)
 
         for idx in range(len(results)):
             _dict = {}

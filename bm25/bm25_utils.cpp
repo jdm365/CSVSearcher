@@ -453,26 +453,6 @@ _BM25::_BM25(
 	doc_term_freqs.reserve(documents.size());
 
 	// Accumulate document frequencies
-	/*
-	for (const std::string& _doc : documents) {
-		SmallStringSet unique_terms;
-
-		// Tokenize and process each term in the current document
-		tokenize_whitespace_inplace(_doc, [&](const std::string& term) {
-			unique_terms.insert(term);
-		});
-
-		// Update global frequencies based on the local counts
-		for (const auto& term : unique_terms) {
-			if (doc_term_freqs.find(term) == doc_term_freqs.end()) {
-				doc_term_freqs[term] = 1;
-			} 
-			else {
-				doc_term_freqs[term]++;
-			}
-		}
-	}
-	*/
 	SmallStringSet seen_terms;
 	for (const std::string& doc : documents) {
 		seen_terms.clear();
@@ -504,10 +484,6 @@ _BM25::_BM25(
 
 	// Filter terms by min_df and max_df
 	for (const robin_hood::pair<std::string, uint32_t>& term_count : doc_term_freqs) {
-		if (term_count.second > INIT_MAX_DF) {
-			large_dfs.insert(term_count.first);
-		}
-
 		if ((int)term_count.second < min_df || (int)term_count.second > max_number_of_occurrences) {
 			blacklisted_terms.insert(term_count.first);
 			doc_term_freqs.erase(term_count.first);
@@ -658,7 +634,8 @@ inline float _BM25::_compute_bm25(
 
 std::vector<std::pair<uint32_t, float>> _BM25::query(
 		std::string& query, 
-		uint32_t k 
+		uint32_t k,
+		uint32_t init_max_df 
 		) {
 
 	std::vector<std::string> tokenized_query;
@@ -666,17 +643,11 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 
 	// Gather docs that contain at least one term from the query
 	// Try using dynamic max_df for performance
-	int local_max_df = INIT_MAX_DF;
+	int local_max_df = init_max_df;
 	robin_hood::unordered_set<uint32_t> candidate_docs;
 
 	while (candidate_docs.size() == 0) {
 		for (const std::string& term : tokenized_query) {
-
-			if (local_max_df == INIT_MAX_DF) {
-				if (large_dfs.find(term) != large_dfs.end()) {
-					continue;
-				}
-			}
 			std::vector<uint32_t> doc_ids = get_inverted_index_db(term);
 
 			if (doc_ids.size() == 0) {
@@ -753,10 +724,11 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& _query,
-		uint32_t top_k
+		uint32_t top_k,
+		uint32_t init_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k);
+	std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k, init_max_df);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;

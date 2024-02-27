@@ -13,7 +13,6 @@ static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
 static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
 static const std::string MISC  = "MISC";
 
-#define INIT_MAX_DF 1000
 #define DEBUG 0
 
 std::vector<std::string> tokenize_whitespace(
@@ -66,7 +65,6 @@ class _BM25 {
 		std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
 		robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
-		robin_hood::unordered_set<std::string> large_dfs;
 
 		std::vector<uint32_t> csv_line_offsets;
 
@@ -151,11 +149,13 @@ class _BM25 {
 
 		std::vector<std::pair<uint32_t, float>> query(
 				std::string& query,
-				uint32_t top_k
+				uint32_t top_k,
+				uint32_t init_max_df
 				);
 
 		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(
 				std::string& _query,
-				uint32_t top_k
+				uint32_t top_k,
+				uint32_t init_max_df
 				);
 };
