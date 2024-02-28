@@ -2,30 +2,18 @@
 
 cimport cython
 
-from libc.stdint cimport uint64_t, uint32_t, uint16_t
-from libc.stdlib cimport malloc, free
-from libc.stdio cimport FILE, fopen, fclose, fgets
-from libc.string cimport strlen, strtok
-from cpython.array cimport array
-from libc.math cimport log
-from typing import List
+from libc.stdint cimport uint32_t 
 
 from libcpp.vector cimport vector
-from libcpp.unordered_map cimport unordered_map
-from libcpp.unordered_set cimport unordered_set
-from libcpp.queue cimport priority_queue
-from libcpp.pair cimport pair
 from libcpp.string cimport string
+from libcpp.pair cimport pair
 from libcpp cimport bool
 
 cimport numpy as np
 import numpy as np
 np.import_array()
-import gc
-import re
 
 from time import perf_counter
-import sys
 
 
 cdef extern from "engine.h":
@@ -86,9 +74,6 @@ cdef class BM25:
             init = perf_counter()
             self._build_inverted_index(documents)
             print(f"Built index in {perf_counter() - init:.2f} seconds")
-
-            ## del documents
-            ## gc.collect()
 
         else:
             raise ValueError("Either documents or csv_file and text_column must be provided")
