@@ -11,16 +11,12 @@ static const std::string DOC_TERM_FREQS_DB_NAME = "DOC_TERM_FREQS";
 static const std::string INVERTED_INDEX_DB_NAME = "INVERTED_INDEX";
 static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
 static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
-static const std::string MISC  = "MISC";
+static const std::string MISC  					= "MISC";
 
-#define DEBUG 0
+#define DEBUG 1
 
 std::vector<std::string> tokenize_whitespace(
 		const std::string& document
-		);
-void tokenize_whitespace_batch(
-		std::vector<std::string>& documents,
-		std::vector<std::vector<std::string>>& tokenized_documents
 		);
 
 struct SmallStringSet {
@@ -61,9 +57,11 @@ struct SmallStringSet {
 
 class _BM25 {
 	public:
-		robin_hood::unordered_map<std::string, std::vector<uint32_t>> inverted_index;
-		std::vector<std::vector<std::pair<std::string, uint16_t>>> term_freqs;
-		robin_hood::unordered_map<std::string, uint32_t> doc_term_freqs;
+		robin_hood::unordered_map<std::string, uint32_t> unique_term_mapping;
+
+		robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> inverted_index;
+		std::vector<std::vector<std::pair<uint32_t, uint16_t>>> term_freqs;
+		robin_hood::unordered_map<uint32_t, uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
 
 		std::vector<uint32_t> csv_line_offsets;
@@ -114,7 +112,7 @@ class _BM25 {
 		void load_dbs_from_dir(std::string db_dir);
 		void save_to_disk();
 
-		void read_csv(std::vector<std::string>& document);
+		void read_csv(std::vector<uint32_t>& terms);
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 
 		void init_dbs();
@@ -126,23 +124,28 @@ class _BM25 {
 				uint32_t doc_id
 				);
 		uint32_t get_doc_term_freq_db(
-				const std::string& term
+				// const std::string& term
+				const uint32_t& term
 				);
 		std::vector<uint32_t> get_inverted_index_db(
-				const std::string& term
+				// const std::string& term
+				const uint32_t& term_idx
 				);
 
 		void write_term_freqs_to_file();
 		uint16_t get_term_freq_from_file(
 				int line_num,
-				const std::string& term
+				// const std::string& term
+				const uint32_t& term_idx
 				);
 
 		float _compute_idf(
-				const std::string& term
+				// const std::string& term
+				const uint32_t& term
 				);
 		float _compute_bm25(
-				const std::string& term,
+				// const std::string& term,
+				const uint32_t& term,
 				uint32_t doc_id,
 				float idf
 				);
