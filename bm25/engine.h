@@ -3,7 +3,6 @@
 #include <cstdint>
 
 #include "robin_hood.h"
-#include <leveldb/db.h>
 
 static const std::string DIR_NAME      			= "bm25_db";
 static const std::string DOC_TERM_FREQS_DB_NAME = "DOC_TERM_FREQS";
@@ -12,19 +11,21 @@ static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
 static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
 static const std::string MISC  					= "MISC";
 
-#define DEBUG 1
+#define DEBUG 0
 
-std::vector<std::string> tokenize_whitespace(
-		const std::string& document
-		);
+struct _compare {
+	inline bool operator()(const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
+		return a.second > b.second;
+	}
+};
 
 class _BM25 {
 	public:
-		robin_hood::unordered_map<std::string, uint32_t> unique_term_mapping;
+		robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
 
 		std::vector<std::vector<uint32_t>> inverted_index;
 		std::vector<std::vector<std::pair<uint32_t, uint16_t>>> term_freqs;
-		robin_hood::unordered_map<uint32_t, uint32_t> doc_term_freqs;
+		std::vector<uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
 
 		std::vector<uint32_t> csv_line_offsets;
@@ -43,13 +44,8 @@ class _BM25 {
 		std::vector<std::string> columns;
 		std::string search_col;
 
-		// LevelDB Management
-		// Two databases: one for term frequencies, one for inverted index
-		leveldb::DB* doc_term_freqs_db;
-		leveldb::DB* inverted_index_db;
-
 		// MMaped vector
-		std::vector<int> term_freq_line_offsets;
+		std::vector<uint32_t> term_freq_line_offsets;
 
 		_BM25(
 				std::string csv_file,
@@ -62,17 +58,9 @@ class _BM25 {
 				bool cache_inverted_index,
 				bool cache_doc_term_freqs
 				);
-		_BM25(
-				std::string db_dir,
-				std::string csv_file
-				);
 
-		~_BM25() {
-			delete doc_term_freqs_db;
-			delete inverted_index_db;
-		}
+		~_BM25() {}
 
-		void load_dbs_from_dir(std::string db_dir);
 		void save_to_disk();
 
 		void read_csv(std::vector<uint32_t>& terms);
@@ -80,36 +68,30 @@ class _BM25 {
 
 		void init_dbs();
 
-		void create_doc_term_freqs_db();
-		void create_inverted_index_db();
 		void write_row_to_inverted_index_db(
 				const std::string& term,
 				uint32_t doc_id
 				);
 		uint32_t get_doc_term_freq_db(
-				// const std::string& term
 				const uint32_t& term
 				);
 		std::vector<uint32_t> get_inverted_index_db(
-				// const std::string& term
 				const uint32_t& term_idx
 				);
 
 		void write_term_freqs_to_file();
 		uint16_t get_term_freq_from_file(
 				int line_num,
-				// const std::string& term
 				const uint32_t& term_idx
 				);
 
 		float _compute_idf(
-				// const std::string& term
 				const uint32_t& term
 				);
 		float _compute_bm25(
-				// const std::string& term,
 				const uint32_t& term,
 				uint32_t doc_id,
+				float tf,
 				float idf
 				);
 
@@ -124,4 +106,4 @@ class _BM25 {
 				uint32_t top_k,
 				uint32_t init_max_df
 				);
-};;
+};

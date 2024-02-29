@@ -14,14 +14,7 @@ COMPILER_FLAGS = [
     "-Wextra",
     "-march=native",
     "-ffast-math",
-    "-fPIC",
-]
-
-SANITIZER_FLAGS = [
-    "-fsanitize=address",
-    "-fsanitize=leak",
-    "-fsanitize=undefined",
-    "-fsanitize=thread",
+    ## "-fPIC",
 ]
 
 OS = os.uname().sysname
@@ -30,17 +23,17 @@ LINUX_LINK_ARGS = [
     "-fopenmp",
     "-lc++",
     "-lc++abi",
-    "-lleveldb",
+    ## "-lleveldb",
     "-L/usr/local/lib",
-    "-lsnappy",
+    ## "-lsnappy",
 ]
 
 DARWIN_LINK_ARGS = [
     "-lc++",
     "-lc++abi",
-    "-lleveldb",
+    ## "-lleveldb",
     "-L/usr/local/lib",
-    "-lsnappy",
+    ## "-lsnappy",
 ]
 
 extensions = [
