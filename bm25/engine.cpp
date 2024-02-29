@@ -424,7 +424,6 @@ inline float _BM25::_compute_bm25(
 		float tf,
 		float idf
 		) {
-	// float tf = get_term_freq_from_file(doc_id, term_idx);
 	float doc_size = doc_sizes[doc_id];
 
 	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
