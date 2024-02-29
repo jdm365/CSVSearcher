@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.bin
 /bm25_db/
+gen_compile_commands/
 
 # C extensions
 *.so
