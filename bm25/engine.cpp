@@ -11,6 +11,7 @@
 #include <omp.h>
 #include <unistd.h>
 #include <regex>
+#include <ctype.h>
 
 #include "engine.h"
 #include "robin_hood.h"
@@ -24,19 +25,24 @@ static std::regex pattern("\"");
 
 static void tokenize_whitespace_inplace(
 		const std::string& str, 
-		const std::function<void(const std::string&)>& callback
+		const std::function<void(const std::string_view&)>& callback
 		) {
     size_t start = 0;
     size_t end = 0;
 
-    while ((start = str.find_first_not_of(' ', end)) != std::string::npos) {
-        end = str.find(' ', start);
-        callback(str.substr(start, end - start));
+	while ((end = str.find(' ', start)) != std::string::npos) {
+        if (end != start) {
+            callback(std::string_view(str).substr(start, end - start));
+        }
+        start = end + 1;
+    }
+    if (start < str.length()) {
+        callback(std::string_view(str).substr(start));
     }
 }
 
 
-std::vector<std::string> tokenize_whitespace(
+inline std::vector<std::string> tokenize_whitespace(
 		const std::string& document
 		) {
 	std::vector<std::string> tokenized_document;
@@ -101,49 +107,60 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		csv_line_offsets.push_back(ftell(file) - read);
 		++line_num;
 
-		// Split by commas not inside double quotes
-		std::string line_str(line);
-		std::vector<std::string> row;
-		std::string value;
-		std::string cell;
+		// Iterate of line chars until we get to relevant column.
+		int char_idx = 0;
+		int col_idx  = 0;
 		bool in_quotes = false;
-		for (int i = 0; i < line_str.size(); ++i) {
-			if (line_str[i] == '"' && in_quotes) {
-				row.push_back(cell);
-				in_quotes = false;
-				cell = "";
-			}
-			else if (line_str[i] == '"' && !in_quotes) {
+		while (col_idx != search_column_index) {
+			if (line[char_idx] == '"' && !in_quotes) {
 				in_quotes = !in_quotes;
 			}
-			else if (line_str[i] == ',' && !in_quotes) {
-				row.push_back(cell);
-				cell = "";
+			else if (line[char_idx] == ',' && !in_quotes) {
+				++col_idx;
+			}
+			++char_idx;
+		}
+
+		// Split by commas not inside double quotes
+		// std::string line_str(line);
+		// std::string value;
+		std::string doc = "";
+		in_quotes = false;
+		while (true) {
+			if (line[char_idx] == '"' && !in_quotes) {
+				in_quotes = true;
+			}
+			else if (line[char_idx] == '"' && in_quotes) {
+				break;
+			}
+			else if (line[char_idx] == ',' && !in_quotes) {
+				break;
+			}
+			else if (line[char_idx] == '\n' && !in_quotes) {
+				break;
 			}
 			else {
-				cell += line_str[i];
+				doc += toupper(line[char_idx]);
+			}
+			++char_idx;
+
+			if (char_idx > 100000) {
+				std::cout << "String too large. Code is broken" << std::endl;
+				std::exit(1);
 			}
 		}
-		row.push_back(cell);
-
-		// Add the search column to the documents without quotes
-		std::string doc = row[search_column_index];
-		std::transform(doc.begin(), doc.end(), doc.begin(), ::toupper);
 
 		// Split doc on whitespace and update unique_term_mapping
-		std::vector<std::string> doc_tokens = tokenize_whitespace(doc);
-		for (const std::string& token : doc_tokens) {
-			if (unique_term_mapping.find(token) == unique_term_mapping.end()) {
-				uint32_t new_idx = unique_term_mapping.size();
-				unique_term_mapping[token] = new_idx;
-				terms.push_back(new_idx);
-				continue;
-			}
-
-			terms.push_back(unique_term_mapping[token]);
-		}
-		doc_sizes.push_back(doc_tokens.size());
+		uint16_t doc_size = 0;
+		tokenize_whitespace_inplace(doc, [&](const std::string_view& token_view) {
+				std::string token(token_view);
+				auto [it, inserted] = unique_term_mapping.try_emplace(token, unique_term_mapping.size());
+    			terms.push_back(it->second);
+				++doc_size;
+				});
+		doc_sizes.push_back(doc_size);
 	}
+
 	fclose(file);
 
 	// Write the offsets to a file
@@ -305,13 +322,12 @@ void _BM25::create_inverted_index_db() {
 	leveldb::Status status;
 
 	leveldb::WriteBatch batch;
-	for (const auto& pair : inverted_index) {
+	for (size_t doc_id = 0; doc_id < inverted_index.size(); ++doc_id) {
 		std::string value;
-		for (const auto& doc_id : pair.second) {
-			value += std::to_string(doc_id) + " ";
+		for (const auto& id : inverted_index[doc_id]) {
+			value += std::to_string(id) + " ";
 		}
-		// batch.Put(pair.first, value);
-		batch.Put(std::to_string(pair.first), value);
+		batch.Put(std::to_string(doc_id), value);
 	}
 
 	status = inverted_index_db->Write(write_options, &batch);
@@ -464,7 +480,6 @@ _BM25::_BM25(
 	auto overall_start = std::chrono::high_resolution_clock::now();
 	
 	// Read csv to get documents, line offsets, and columns
-	// std::vector<std::string> documents;
 	std::vector<uint32_t> terms;
 	read_csv(terms);
 
@@ -524,6 +539,7 @@ _BM25::_BM25(
 	}
 
 	// Filter terms by min_df and max_df
+	inverted_index.resize(unique_term_mapping.size());
 	term_freqs.resize(num_docs);
 
 	start = std::chrono::high_resolution_clock::now();
@@ -540,7 +556,6 @@ _BM25::_BM25(
 				return;
 			}
 
-
 			// Use std::find_if to check if the term is already in the vector
 			auto it = std::find_if(
 					term_freqs[doc_id].begin(), 
@@ -553,7 +568,6 @@ _BM25::_BM25(
 			if (it != term_freqs[doc_id].end()) {
 				++it->second;
 			}
-			// tag this branch as likely
 			else {
 				term_freqs[doc_id].emplace_back(mapped_term_idx, 1);
 				inverted_index[mapped_term_idx].push_back(doc_id);
@@ -580,9 +594,6 @@ _BM25::_BM25(
 		std::cout << "Finished writing term frequencies to disk in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 	
-	// Reserve here before potential clear.
-	inverted_index.reserve(doc_term_freqs.size());
-
 	start = std::chrono::high_resolution_clock::now();
 	// Write doc_term_freqs to leveldb
 	if (!cache_doc_term_freqs) {

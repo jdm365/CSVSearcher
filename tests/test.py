@@ -9,7 +9,7 @@ from time import perf_counter
 if __name__ == '__main__':
     query = "netflix inc"
 
-    ## FILENAME = '/home/jdm365/SearchApp/basic_search/data/companies_sorted.csv'
+    FILENAME = '/home/jdm365/SearchApp/basic_search/data/companies_sorted.csv'
     ## FILENAME = '/Users/jakemehlman/Kaggle/Kaggle_Competition_Foursquare/data/train.csv'
     ## FILENAME = '/home/jdm365/SearchApp/basic_search/data/companies_sorted_1M.csv'
 

@@ -1,7 +1,6 @@
 #include <vector>
 #include <string>
 #include <cstdint>
-#include <bitset>
 
 #include "robin_hood.h"
 #include <leveldb/db.h>
@@ -19,47 +18,11 @@ std::vector<std::string> tokenize_whitespace(
 		const std::string& document
 		);
 
-struct SmallStringSet {
-	std::bitset<255> bitset;
-	std::string vec[255];
-	int size = 0;
-
-	void insert(const std::string& str) {
-		if (bitset.size() < 255) {
-			if (!bitset.test(str.size())) {
-				bitset.set(str.size());
-				vec[size++] = str;
-			}
-		} else {
-			vec[size++] = str;
-		}
-	}
-
-	bool contains(const std::string& str) {
-		if (bitset.size() < 255) {
-			return bitset.test(str.size());
-		} else {
-			for (int i = 0; i < size; i++) {
-				if (vec[i] == str) {
-					return true;
-				}
-			}
-			return false;
-		}
-	}
-
-	void clear() {
-		bitset.reset();
-		memset(vec, 0, sizeof(vec));
-		size = 0;
-	}
-};
-
 class _BM25 {
 	public:
 		robin_hood::unordered_map<std::string, uint32_t> unique_term_mapping;
 
-		robin_hood::unordered_map<uint32_t, std::vector<uint32_t>> inverted_index;
+		std::vector<std::vector<uint32_t>> inverted_index;
 		std::vector<std::vector<std::pair<uint32_t, uint16_t>>> term_freqs;
 		robin_hood::unordered_map<uint32_t, uint32_t> doc_term_freqs;
 		std::vector<uint16_t> doc_sizes;
