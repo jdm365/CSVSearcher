@@ -8,9 +8,9 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
-#include <omp.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <algorithm>
 
 #include "engine.h"
 #include "robin_hood.h"
@@ -366,17 +366,17 @@ uint16_t _BM25::get_term_freq_from_file(
 		int line_num,
 		const uint32_t& term_idx
 		) {
-	if (cache_term_freqs) {
-		float tf = 0.0f;
-		for (const std::pair<uint32_t, uint16_t>& term_freq : term_freqs[line_num]) {
-			if (term_freq.first == term_idx) {
-				tf = term_freq.second;
-				break;
-			}
+	// Default to 1.0f.
+	// Inverted index implies membership.
+	// Only store values with >1 term freq.
+	float tf = 1.0f;
+	for (const std::pair<uint32_t, uint16_t>& term_freq : term_freqs[line_num]) {
+		if (term_freq.first == term_idx) {
+			tf = term_freq.second;
+			return tf;
 		}
-		return tf;
 	}
-	return 0;
+	return tf;
 }
 
 
@@ -422,7 +422,10 @@ _BM25::_BM25(
 	std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
 
 	auto start = std::chrono::high_resolution_clock::now();
+
 	doc_term_freqs.resize(unique_term_mapping.size());
+	inverted_index.resize(unique_term_mapping.size());
+	term_freqs.resize(num_docs);
 
 	// Accumulate document frequencies
 	uint64_t terms_seen = 0;
@@ -434,6 +437,11 @@ _BM25::_BM25(
 
 		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
 			uint32_t mapped_term_idx = terms[term_idx];
+
+			if (seen_terms.find(mapped_term_idx) != seen_terms.end()) {
+				++terms_seen;
+				continue;
+			}
 
 			++doc_term_freqs[mapped_term_idx];
 
@@ -448,7 +456,6 @@ _BM25::_BM25(
 		std::cout << "Finished accumulating document frequencies in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
-	inverted_index.resize(unique_term_mapping.size());
 
 	start = std::chrono::high_resolution_clock::now();
 
@@ -471,9 +478,6 @@ _BM25::_BM25(
 		std::cout << "Finished filtering terms by min_df and max_df in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
-	// Filter terms by min_df and max_df
-	term_freqs.resize(num_docs);
-
 	start = std::chrono::high_resolution_clock::now();
 	terms_seen = 0;
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
@@ -481,55 +485,28 @@ _BM25::_BM25(
 
 		size_t end = terms_seen + doc_size;
 
-		if (doc_size <= 32) {
-			for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
-				uint32_t mapped_term_idx = terms[term_idx];
-				++terms_seen;
+		robin_hood::unordered_flat_map<uint32_t, uint16_t> local_term_freqs;
+		local_term_freqs.reserve(doc_size);
+		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
+			uint32_t mapped_term_idx = terms[term_idx];
+			++terms_seen;
 
-				if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
-					continue;
-				}
+			if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
+				continue;
+			}
 
-				// Use std::find_if to check if the term is already in the vector
-				auto it = std::find_if(
-						term_freqs[doc_id].begin(), 
-						term_freqs[doc_id].end(), 
-						[&](const std::pair<uint32_t, uint16_t>& p
-						) {
-					return p.first == mapped_term_idx;
-				});
-
-				if (it != term_freqs[doc_id].end()) {
-					++it->second;
-				}
-				else {
-					term_freqs[doc_id].emplace_back(mapped_term_idx, 1);
-					inverted_index[mapped_term_idx].push_back(doc_id);
-				}
+			if (local_term_freqs.find(mapped_term_idx) != local_term_freqs.end()) {
+				++local_term_freqs[mapped_term_idx];
+			}
+			else {
+				local_term_freqs[mapped_term_idx] = 1;
+				inverted_index[mapped_term_idx].push_back(doc_id);
 			}
 		}
-		else {
-			robin_hood::unordered_flat_map<uint32_t, uint16_t> local_term_freqs;
-			local_term_freqs.reserve(doc_size);
-			for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
-				uint32_t mapped_term_idx = terms[term_idx];
-				++terms_seen;
 
-				if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
-					continue;
-				}
-
-				if (local_term_freqs.find(mapped_term_idx) != local_term_freqs.end()) {
-					++local_term_freqs[mapped_term_idx];
-				}
-				else {
-					local_term_freqs[mapped_term_idx] = 1;
-					inverted_index[mapped_term_idx].push_back(doc_id);
-				}
-			}
-
-			// Copy to term freqs
-			for (const auto& pair : local_term_freqs) {
+		// Copy to term freqs
+		for (const auto& pair : local_term_freqs) {
+			if (pair.second > 1) {
 				term_freqs[doc_id].emplace_back(pair.first, pair.second);
 			}
 		}
@@ -547,11 +524,14 @@ _BM25::_BM25(
 		std::cout << "Finished creating BM25 index in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
+	uint64_t max_doc_size = 0;
 	avg_doc_size = 0.0f;
 	for (int doc_id = 0; doc_id < num_docs; ++doc_id) {
 		avg_doc_size += (float)doc_sizes[doc_id];
+		max_doc_size = std::max((uint64_t)doc_sizes[doc_id], max_doc_size);
 	}
 	avg_doc_size /= num_docs;
+	std::cout << "Largest doc size: " << max_doc_size << std::endl;
 
 	if (DEBUG) {
 		// Get mem usage of inverted_index

@@ -16,8 +16,8 @@ if __name__ == '__main__':
 
     names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True).name.tolist()
 
-    ## FILENAME = '/home/jdm365/search-benchmark-game/corpus_500k.json'
-    FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
+    FILENAME = '/home/jdm365/search-benchmark-game/corpus_500k.json'
+    ## FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
     print(os.system(f"head -5 {FILENAME}"))
     init = perf_counter()
     ## df = pd.read_json(FILENAME, lines=True)
@@ -35,6 +35,7 @@ if __name__ == '__main__':
             cache_doc_term_freqs=True,
             cache_inverted_index=True,
             cache_term_freqs=True,
+            ## max_df=0.0001
             )
 
     rand_idxs = np.random.choice(len(names), 10_000, replace=False)
