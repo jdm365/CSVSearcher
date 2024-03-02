@@ -11,7 +11,7 @@ static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
 static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
 static const std::string MISC  					= "MISC";
 
-#define DEBUG 0
+#define DEBUG 1
 
 struct _compare {
 	inline bool operator()(const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
@@ -30,8 +30,8 @@ class _BM25 {
 
 		std::vector<std::vector<uint32_t>> inverted_index;
 		std::vector<std::vector<std::pair<uint32_t, uint16_t>>> term_freqs;
+		// std::vector<robin_hood::unordered_flat_map<uint32_t, uint16_t>> term_freqs;
 		std::vector<uint32_t> doc_term_freqs;
-		// std::vector<uint16_t> doc_sizes;
 		std::vector<uint32_t> doc_sizes;
 
 		std::vector<uint64_t> line_offsets;

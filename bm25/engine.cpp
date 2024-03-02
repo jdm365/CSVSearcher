@@ -88,7 +88,6 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 
 		// Split by commas not inside double quotes
 		std::string doc = "";
-		// uint16_t doc_size = 0;
 		uint32_t doc_size = 0;
 		while (line[char_idx] != '"') {
 			if (line[char_idx] == ' ' && doc == "") {
@@ -189,7 +188,6 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		// Split by commas not inside double quotes
 		std::string doc = "";
 		in_quotes = false;
-		// uint16_t doc_size = 0;
 		uint32_t doc_size = 0;
 		while (true) {
 			if (line[char_idx] == '"' && !in_quotes) {
@@ -217,8 +215,10 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 			}
 			++char_idx;
 
-			if (char_idx > 100000) {
-				std::cout << "String too large. Code is broken" << std::endl;
+			constexpr uint32_t max_size = 1024 * 1024 * 100;
+
+			if (char_idx > max_size) {
+				std::cout << "Field must be less than 100 MB." << std::endl;
 				std::exit(1);
 			}
 		}
@@ -429,7 +429,6 @@ _BM25::_BM25(
 	for (size_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		robin_hood::unordered_flat_set<uint32_t> seen_terms;
 
-		// uint16_t doc_size = doc_sizes[doc_id];
 		uint32_t doc_size = doc_sizes[doc_id];
 		size_t end = terms_seen + doc_size;
 
@@ -449,6 +448,8 @@ _BM25::_BM25(
 		std::cout << "Finished accumulating document frequencies in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
+	inverted_index.resize(unique_term_mapping.size());
+
 	start = std::chrono::high_resolution_clock::now();
 
 	uint32_t max_number_of_occurrences = max_df * num_docs;
@@ -461,6 +462,7 @@ _BM25::_BM25(
 			blacklisted_terms.insert(term_id);
 			doc_term_freqs[term_id] = 0;
 		}
+		inverted_index[term_id].reserve(term_count);
 	}
 	end = std::chrono::high_resolution_clock::now();
 	elapsed_seconds = end - start;
@@ -470,13 +472,11 @@ _BM25::_BM25(
 	}
 
 	// Filter terms by min_df and max_df
-	inverted_index.resize(unique_term_mapping.size());
 	term_freqs.resize(num_docs);
 
 	start = std::chrono::high_resolution_clock::now();
 	terms_seen = 0;
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
-		// uint16_t doc_size = doc_sizes[doc_id];
 		uint32_t doc_size = doc_sizes[doc_id];
 
 		size_t end = terms_seen + doc_size;
@@ -510,45 +510,7 @@ _BM25::_BM25(
 	elapsed_seconds = end - start;
 
 	if (DEBUG) {
-		std::cout << "Got term frequencies in " << elapsed_seconds.count() << "s" << std::endl;
-	}
-
-	start = std::chrono::high_resolution_clock::now();
-	// Write term_freqs to disk
-	if (!cache_term_freqs) {
-		write_term_freqs_to_file();
-		term_freqs.clear();
-		term_freqs.shrink_to_fit();
-	}
-	end = std::chrono::high_resolution_clock::now();
-	elapsed_seconds = end - start;
-	if (DEBUG) {
-		std::cout << "Finished writing term frequencies to disk in " << elapsed_seconds.count() << "s" << std::endl;
-	}
-	
-	start = std::chrono::high_resolution_clock::now();
-	// Write doc_term_freqs to leveldb
-	if (!cache_doc_term_freqs) {
-		doc_term_freqs.clear();
-	}
-	end = std::chrono::high_resolution_clock::now();
-	elapsed_seconds = end - start;
-
-	if (DEBUG) {
-		std::cout << "Finished writing doc term frequencies to disk in " << elapsed_seconds.count() << "s" << std::endl;
-	}
-
-	start = std::chrono::high_resolution_clock::now();
-
-	// Write inverted index to disk
-	if (!cache_inverted_index) {
-		inverted_index.clear();
-	}
-
-	end = std::chrono::high_resolution_clock::now();
-	elapsed_seconds = end - start;
-	if (DEBUG) {
-		std::cout << "Finished writing inverted index to disk in " << elapsed_seconds.count() << "s" << std::endl;
+		std::cout << "Got term frequencies and inverted index in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
 	end = std::chrono::high_resolution_clock::now();
@@ -657,9 +619,9 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		return std::vector<std::pair<uint32_t, float>>();
 	}
 
-	if (DEBUG) {
-		std::cout << "Num candidates: " << candidate_docs.size() << std::endl;
-	}
+	// if (DEBUG) {
+		// std::cout << "Num candidates: " << candidate_docs.size() << std::endl;
+	// }
 
 	// Priority queue to store top k docs
 	// Largest to smallest scores
