@@ -30,7 +30,6 @@ class _BM25 {
 
 		std::vector<std::vector<uint32_t>> inverted_index;
 		std::vector<std::vector<std::pair<uint32_t, uint16_t>>> term_freqs;
-		// std::vector<robin_hood::unordered_flat_map<uint32_t, uint16_t>> term_freqs;
 		std::vector<uint32_t> doc_term_freqs;
 		std::vector<uint32_t> doc_sizes;
 

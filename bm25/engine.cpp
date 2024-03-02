@@ -480,29 +480,57 @@ _BM25::_BM25(
 		uint32_t doc_size = doc_sizes[doc_id];
 
 		size_t end = terms_seen + doc_size;
-		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
-			uint32_t mapped_term_idx = terms[term_idx];
-			++terms_seen;
 
-			if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
-				continue;
+		if (doc_size <= 32) {
+			for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
+				uint32_t mapped_term_idx = terms[term_idx];
+				++terms_seen;
+
+				if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
+					continue;
+				}
+
+				// Use std::find_if to check if the term is already in the vector
+				auto it = std::find_if(
+						term_freqs[doc_id].begin(), 
+						term_freqs[doc_id].end(), 
+						[&](const std::pair<uint32_t, uint16_t>& p
+						) {
+					return p.first == mapped_term_idx;
+				});
+
+				if (it != term_freqs[doc_id].end()) {
+					++it->second;
+				}
+				else {
+					term_freqs[doc_id].emplace_back(mapped_term_idx, 1);
+					inverted_index[mapped_term_idx].push_back(doc_id);
+				}
+			}
+		}
+		else {
+			robin_hood::unordered_flat_map<uint32_t, uint16_t> local_term_freqs;
+			local_term_freqs.reserve(doc_size);
+			for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
+				uint32_t mapped_term_idx = terms[term_idx];
+				++terms_seen;
+
+				if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
+					continue;
+				}
+
+				if (local_term_freqs.find(mapped_term_idx) != local_term_freqs.end()) {
+					++local_term_freqs[mapped_term_idx];
+				}
+				else {
+					local_term_freqs[mapped_term_idx] = 1;
+					inverted_index[mapped_term_idx].push_back(doc_id);
+				}
 			}
 
-			// Use std::find_if to check if the term is already in the vector
-			auto it = std::find_if(
-					term_freqs[doc_id].begin(), 
-					term_freqs[doc_id].end(), 
-					[&](const std::pair<uint32_t, uint16_t>& p
-					) {
-				return p.first == mapped_term_idx;
-			});
-
-			if (it != term_freqs[doc_id].end()) {
-				++it->second;
-			}
-			else {
-				term_freqs[doc_id].emplace_back(mapped_term_idx, 1);
-				inverted_index[mapped_term_idx].push_back(doc_id);
+			// Copy to term freqs
+			for (const auto& pair : local_term_freqs) {
+				term_freqs[doc_id].emplace_back(pair.first, pair.second);
 			}
 		}
 	}
@@ -537,10 +565,12 @@ _BM25::_BM25(
 		for (const auto& vec : term_freqs) {
 			bytes_used += 6 * vec.size();
 		}
-		std::cout << "Term Freqs MB: " << bytes_used / (1024 * 1024) << std::endl;
-		std::cout << "Doc Term Freqs MB " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-		std::cout << "Doc Sizes MB " << (2 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-		std::cout << "csv Line Offsets MB " << (4 * line_offsets.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Term Freqs MB:     " << bytes_used / (1024 * 1024) << std::endl;
+		std::cout << "Doc Term Freqs MB: " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Doc Sizes MB:      " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Line Offsets MB:   " << (8 * line_offsets.size()) / (1024 * 1024) << std::endl;
+
+		std::cout << "Num unique terms:  " << unique_term_mapping.size() << std::endl;
 	}
 }
 
