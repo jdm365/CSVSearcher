@@ -1,6 +1,7 @@
 from bm25 import BM25
 import pandas as pd
 import numpy as np
+import os
 from tqdm import tqdm
 from time import perf_counter
 
@@ -15,9 +16,22 @@ if __name__ == '__main__':
 
     names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True).name.tolist()
 
+    ## FILENAME = '/home/jdm365/search-benchmark-game/corpus_500k.json'
+    FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
+    print(os.system(f"head -5 {FILENAME}"))
+    init = perf_counter()
+    ## df = pd.read_json(FILENAME, lines=True)
+    time = perf_counter() - init
+    print(f"Time taken: {time:.2f} seconds")
+    ## exit()
+    ## print(df)
+    ## df.to_json('/home/jdm365/search-benchmark-game/corpus_500k.json', orient='records', lines=True)
+    ## FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
+
     model = BM25(
-            csv_file=FILENAME, 
-            text_col='name',
+            filename=FILENAME, 
+            ## text_col='name',
+            text_col='text',
             cache_doc_term_freqs=True,
             cache_inverted_index=True,
             cache_term_freqs=True,

@@ -18,16 +18,13 @@
             "-Wall",
             "-Wextra",
             "-march=native",
-            "-ffast-math",
-            "-fPIC"
+            "-ffast-math"
         ],
         "extra_link_args": [
             "-fopenmp",
             "-lc++",
             "-lc++abi",
-            "-lleveldb",
-            "-L/usr/local/lib",
-            "-lsnappy"
+            "-L/usr/local/lib"
         ],
         "include_dirs": [
             "bm25",
@@ -1823,7 +1820,7 @@ struct __pyx_obj_4bm25_BM25 {
   bool cache_term_freqs;
   bool cache_inverted_index;
   bool cache_doc_term_freqs;
-  PyObject *csv_file;
+  PyObject *filename;
   PyObject *text_col;
 };
 
@@ -2852,7 +2849,7 @@ static const char __pyx_k_disable[] = "disable";
 static const char __pyx_k_indices[] = "indices";
 static const char __pyx_k_results[] = "results";
 static const char __pyx_k_seconds[] = " seconds";
-static const char __pyx_k_csv_file[] = "csv_file";
+static const char __pyx_k_filename[] = "filename";
 static const char __pyx_k_getstate[] = "__getstate__";
 static const char __pyx_k_setstate[] = "__setstate__";
 static const char __pyx_k_text_col[] = "text_col";
@@ -2889,7 +2886,7 @@ static const char __pyx_k_Either_documents_or_csv_file_and[] = "Either documents
 static const char __pyx_k_no_default___reduce___due_to_non[] = "no default __reduce__ due to non-trivial __cinit__";
 static const char __pyx_k_numpy_core_umath_failed_to_impor[] = "numpy.core.umath failed to import";
 /* #### Code section: decls ### */
-static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_csv_file, PyObject *__pyx_v_text_col, PyObject *__pyx_v_documents, int __pyx_v_min_df, float __pyx_v_max_df, bool __pyx_v_cache_term_freqs, bool __pyx_v_cache_inverted_index, bool __pyx_v_cache_doc_term_freqs); /* proto */
+static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_text_col, PyObject *__pyx_v_documents, int __pyx_v_min_df, float __pyx_v_max_df, bool __pyx_v_cache_term_freqs, bool __pyx_v_cache_inverted_index, bool __pyx_v_cache_doc_term_freqs); /* proto */
 static int __pyx_pf_4bm25_4BM25_2__cinit__(CYTHON_UNUSED struct __pyx_obj_4bm25_BM25 *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v_args, CYTHON_UNUSED PyObject *__pyx_v_kwargs); /* proto */
 static PyObject *__pyx_pf_4bm25_4BM25_4query(struct __pyx_obj_4bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_init_max_df); /* proto */
 static PyObject *__pyx_pf_4bm25_4BM25_6get_topk_docs(struct __pyx_obj_4bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_k, int __pyx_v_init_max_df); /* proto */
@@ -2999,12 +2996,12 @@ typedef struct {
   PyObject *__pyx_n_s_cache_inverted_index;
   PyObject *__pyx_n_s_cache_term_freqs;
   PyObject *__pyx_n_s_cline_in_traceback;
-  PyObject *__pyx_n_s_csv_file;
   PyObject *__pyx_n_s_dict;
   PyObject *__pyx_kp_u_disable;
   PyObject *__pyx_n_s_documents;
   PyObject *__pyx_kp_u_enable;
   PyObject *__pyx_n_s_encode;
+  PyObject *__pyx_n_s_filename;
   PyObject *__pyx_kp_u_gc;
   PyObject *__pyx_n_s_get_topk_docs;
   PyObject *__pyx_n_s_getstate;
@@ -3149,12 +3146,12 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_cache_inverted_index);
   Py_CLEAR(clear_module_state->__pyx_n_s_cache_term_freqs);
   Py_CLEAR(clear_module_state->__pyx_n_s_cline_in_traceback);
-  Py_CLEAR(clear_module_state->__pyx_n_s_csv_file);
   Py_CLEAR(clear_module_state->__pyx_n_s_dict);
   Py_CLEAR(clear_module_state->__pyx_kp_u_disable);
   Py_CLEAR(clear_module_state->__pyx_n_s_documents);
   Py_CLEAR(clear_module_state->__pyx_kp_u_enable);
   Py_CLEAR(clear_module_state->__pyx_n_s_encode);
+  Py_CLEAR(clear_module_state->__pyx_n_s_filename);
   Py_CLEAR(clear_module_state->__pyx_kp_u_gc);
   Py_CLEAR(clear_module_state->__pyx_n_s_get_topk_docs);
   Py_CLEAR(clear_module_state->__pyx_n_s_getstate);
@@ -3277,12 +3274,12 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_cache_inverted_index);
   Py_VISIT(traverse_module_state->__pyx_n_s_cache_term_freqs);
   Py_VISIT(traverse_module_state->__pyx_n_s_cline_in_traceback);
-  Py_VISIT(traverse_module_state->__pyx_n_s_csv_file);
   Py_VISIT(traverse_module_state->__pyx_n_s_dict);
   Py_VISIT(traverse_module_state->__pyx_kp_u_disable);
   Py_VISIT(traverse_module_state->__pyx_n_s_documents);
   Py_VISIT(traverse_module_state->__pyx_kp_u_enable);
   Py_VISIT(traverse_module_state->__pyx_n_s_encode);
+  Py_VISIT(traverse_module_state->__pyx_n_s_filename);
   Py_VISIT(traverse_module_state->__pyx_kp_u_gc);
   Py_VISIT(traverse_module_state->__pyx_n_s_get_topk_docs);
   Py_VISIT(traverse_module_state->__pyx_n_s_getstate);
@@ -3447,12 +3444,12 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_cache_inverted_index __pyx_mstate_global->__pyx_n_s_cache_inverted_index
 #define __pyx_n_s_cache_term_freqs __pyx_mstate_global->__pyx_n_s_cache_term_freqs
 #define __pyx_n_s_cline_in_traceback __pyx_mstate_global->__pyx_n_s_cline_in_traceback
-#define __pyx_n_s_csv_file __pyx_mstate_global->__pyx_n_s_csv_file
 #define __pyx_n_s_dict __pyx_mstate_global->__pyx_n_s_dict
 #define __pyx_kp_u_disable __pyx_mstate_global->__pyx_kp_u_disable
 #define __pyx_n_s_documents __pyx_mstate_global->__pyx_n_s_documents
 #define __pyx_kp_u_enable __pyx_mstate_global->__pyx_kp_u_enable
 #define __pyx_n_s_encode __pyx_mstate_global->__pyx_n_s_encode
+#define __pyx_n_s_filename __pyx_mstate_global->__pyx_n_s_filename
 #define __pyx_kp_u_gc __pyx_mstate_global->__pyx_kp_u_gc
 #define __pyx_n_s_get_topk_docs __pyx_mstate_global->__pyx_n_s_get_topk_docs
 #define __pyx_n_s_getstate __pyx_mstate_global->__pyx_n_s_getstate
@@ -5519,13 +5516,13 @@ static CYTHON_INLINE NPY_DATETIMEUNIT __pyx_f_5numpy_get_datetime64_unit(PyObjec
  * 
  *     def __init__(             # <<<<<<<<<<<<<<
  *             self,
- *             str  csv_file,
+ *             str  filename,
  */
 
 /* Python wrapper */
 static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
-  PyObject *__pyx_v_csv_file = 0;
+  PyObject *__pyx_v_filename = 0;
   PyObject *__pyx_v_text_col = 0;
   PyObject *__pyx_v_documents = 0;
   int __pyx_v_min_df;
@@ -5549,7 +5546,7 @@ static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__py
   #endif
   __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
   {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_csv_file,&__pyx_n_s_text_col,&__pyx_n_s_documents,&__pyx_n_s_min_df,&__pyx_n_s_max_df,&__pyx_n_s_cache_term_freqs,&__pyx_n_s_cache_inverted_index,&__pyx_n_s_cache_doc_term_freqs,0};
+    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_filename,&__pyx_n_s_text_col,&__pyx_n_s_documents,&__pyx_n_s_min_df,&__pyx_n_s_max_df,&__pyx_n_s_cache_term_freqs,&__pyx_n_s_cache_inverted_index,&__pyx_n_s_cache_doc_term_freqs,0};
     values[2] = __Pyx_Arg_NewRef_VARARGS(__pyx_k__3);
     if (__pyx_kwds) {
       Py_ssize_t kw_args;
@@ -5576,7 +5573,7 @@ static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__py
       kw_args = __Pyx_NumKwargs_VARARGS(__pyx_kwds);
       switch (__pyx_nargs) {
         case  0:
-        if (likely((values[0] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_csv_file)) != 0)) {
+        if (likely((values[0] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_filename)) != 0)) {
           (void)__Pyx_Arg_NewRef_VARARGS(values[0]);
           kw_args--;
         }
@@ -5659,7 +5656,7 @@ static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__py
         default: goto __pyx_L5_argtuple_error;
       }
     }
-    __pyx_v_csv_file = ((PyObject*)values[0]);
+    __pyx_v_filename = ((PyObject*)values[0]);
     __pyx_v_text_col = ((PyObject*)values[1]);
     __pyx_v_documents = ((PyObject*)values[2]);
     if (values[3]) {
@@ -5678,7 +5675,7 @@ static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__py
 
       /* "bm25.pyx":55
  *             int   min_df = 1,
- *             float max_df = 1,
+ *             float max_df = 1.0,
  *             bool cache_term_freqs = True,             # <<<<<<<<<<<<<<
  *             bool cache_inverted_index = True,
  *             bool cache_doc_term_freqs = False
@@ -5690,7 +5687,7 @@ static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__py
     } else {
 
       /* "bm25.pyx":56
- *             float max_df = 1,
+ *             float max_df = 1.0,
  *             bool cache_term_freqs = True,
  *             bool cache_inverted_index = True,             # <<<<<<<<<<<<<<
  *             bool cache_doc_term_freqs = False
@@ -5728,17 +5725,17 @@ static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__py
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_csv_file), (&PyUnicode_Type), 1, "csv_file", 1))) __PYX_ERR(0, 50, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_filename), (&PyUnicode_Type), 1, "filename", 1))) __PYX_ERR(0, 50, __pyx_L1_error)
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_text_col), (&PyUnicode_Type), 1, "text_col", 1))) __PYX_ERR(0, 51, __pyx_L1_error)
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_documents), (&PyList_Type), 1, "documents", 1))) __PYX_ERR(0, 52, __pyx_L1_error)
-  __pyx_r = __pyx_pf_4bm25_4BM25___init__(((struct __pyx_obj_4bm25_BM25 *)__pyx_v_self), __pyx_v_csv_file, __pyx_v_text_col, __pyx_v_documents, __pyx_v_min_df, __pyx_v_max_df, __pyx_v_cache_term_freqs, __pyx_v_cache_inverted_index, __pyx_v_cache_doc_term_freqs);
+  __pyx_r = __pyx_pf_4bm25_4BM25___init__(((struct __pyx_obj_4bm25_BM25 *)__pyx_v_self), __pyx_v_filename, __pyx_v_text_col, __pyx_v_documents, __pyx_v_min_df, __pyx_v_max_df, __pyx_v_cache_term_freqs, __pyx_v_cache_inverted_index, __pyx_v_cache_doc_term_freqs);
 
   /* "bm25.pyx":48
  * 
  * 
  *     def __init__(             # <<<<<<<<<<<<<<
  *             self,
- *             str  csv_file,
+ *             str  filename,
  */
 
   /* function exit code */
@@ -5756,7 +5753,7 @@ static int __pyx_pw_4bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__py
   return __pyx_r;
 }
 
-static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_csv_file, PyObject *__pyx_v_text_col, PyObject *__pyx_v_documents, int __pyx_v_min_df, float __pyx_v_max_df, bool __pyx_v_cache_term_freqs, bool __pyx_v_cache_inverted_index, bool __pyx_v_cache_doc_term_freqs) {
+static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_text_col, PyObject *__pyx_v_documents, int __pyx_v_min_df, float __pyx_v_max_df, bool __pyx_v_cache_term_freqs, bool __pyx_v_cache_inverted_index, bool __pyx_v_cache_doc_term_freqs) {
   PyObject *__pyx_v_init = NULL;
   int __pyx_r;
   __Pyx_RefNannyDeclarations
@@ -5788,7 +5785,7 @@ static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_se
  *         self.cache_term_freqs     = cache_term_freqs
  *         self.cache_inverted_index = cache_inverted_index             # <<<<<<<<<<<<<<
  *         self.cache_doc_term_freqs = cache_doc_term_freqs
- *         self.csv_file = csv_file
+ *         self.filename = filename
  */
   __pyx_v_self->cache_inverted_index = __pyx_v_cache_inverted_index;
 
@@ -5796,7 +5793,7 @@ static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_se
  *         self.cache_term_freqs     = cache_term_freqs
  *         self.cache_inverted_index = cache_inverted_index
  *         self.cache_doc_term_freqs = cache_doc_term_freqs             # <<<<<<<<<<<<<<
- *         self.csv_file = csv_file
+ *         self.filename = filename
  *         self.text_col = text_col
  */
   __pyx_v_self->cache_doc_term_freqs = __pyx_v_cache_doc_term_freqs;
@@ -5804,19 +5801,19 @@ static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_se
   /* "bm25.pyx":62
  *         self.cache_inverted_index = cache_inverted_index
  *         self.cache_doc_term_freqs = cache_doc_term_freqs
- *         self.csv_file = csv_file             # <<<<<<<<<<<<<<
+ *         self.filename = filename             # <<<<<<<<<<<<<<
  *         self.text_col = text_col
  * 
  */
-  __Pyx_INCREF(__pyx_v_csv_file);
-  __Pyx_GIVEREF(__pyx_v_csv_file);
-  __Pyx_GOTREF(__pyx_v_self->csv_file);
-  __Pyx_DECREF(__pyx_v_self->csv_file);
-  __pyx_v_self->csv_file = __pyx_v_csv_file;
+  __Pyx_INCREF(__pyx_v_filename);
+  __Pyx_GIVEREF(__pyx_v_filename);
+  __Pyx_GOTREF(__pyx_v_self->filename);
+  __Pyx_DECREF(__pyx_v_self->filename);
+  __pyx_v_self->filename = __pyx_v_filename;
 
   /* "bm25.pyx":63
  *         self.cache_doc_term_freqs = cache_doc_term_freqs
- *         self.csv_file = csv_file
+ *         self.filename = filename
  *         self.text_col = text_col             # <<<<<<<<<<<<<<
  * 
  *         self.min_df = min_df
@@ -5865,11 +5862,11 @@ static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_se
   /* "bm25.pyx":71
  *             pass
  * 
- *         elif csv_file != '' and text_col != '':             # <<<<<<<<<<<<<<
+ *         elif filename != '' and text_col != '':             # <<<<<<<<<<<<<<
  *             init = perf_counter()
  * 
  */
-  __pyx_t_4 = (__Pyx_PyUnicode_Equals(__pyx_v_csv_file, __pyx_kp_u__4, Py_NE)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 71, __pyx_L1_error)
+  __pyx_t_4 = (__Pyx_PyUnicode_Equals(__pyx_v_filename, __pyx_kp_u__4, Py_NE)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 71, __pyx_L1_error)
   if (__pyx_t_4) {
   } else {
     __pyx_t_3 = __pyx_t_4;
@@ -5882,7 +5879,7 @@ static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_se
 
     /* "bm25.pyx":72
  * 
- *         elif csv_file != '' and text_col != '':
+ *         elif filename != '' and text_col != '':
  *             init = perf_counter()             # <<<<<<<<<<<<<<
  * 
  *             init = perf_counter()
@@ -6022,7 +6019,7 @@ static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_se
     /* "bm25.pyx":71
  *             pass
  * 
- *         elif csv_file != '' and text_col != '':             # <<<<<<<<<<<<<<
+ *         elif filename != '' and text_col != '':             # <<<<<<<<<<<<<<
  *             init = perf_counter()
  * 
  */
@@ -6050,7 +6047,7 @@ static int __pyx_pf_4bm25_4BM25___init__(struct __pyx_obj_4bm25_BM25 *__pyx_v_se
  * 
  *     def __init__(             # <<<<<<<<<<<<<<
  *             self,
- *             str  csv_file,
+ *             str  filename,
  */
 
   /* function exit code */
@@ -6118,7 +6115,7 @@ static int __pyx_pf_4bm25_4BM25_2__cinit__(CYTHON_UNUSED struct __pyx_obj_4bm25_
  * 
  *     cdef void _build_inverted_index(self, list documents):             # <<<<<<<<<<<<<<
  *         self.bm25 = new _BM25(
- *                 self.csv_file.encode("utf-8"),
+ *                 self.filename.encode("utf-8"),
  */
 
 static void __pyx_f_4bm25_4BM25__build_inverted_index(struct __pyx_obj_4bm25_BM25 *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v_documents) {
@@ -6134,22 +6131,22 @@ static void __pyx_f_4bm25_4BM25__build_inverted_index(struct __pyx_obj_4bm25_BM2
   /* "bm25.pyx":91
  *     cdef void _build_inverted_index(self, list documents):
  *         self.bm25 = new _BM25(
- *                 self.csv_file.encode("utf-8"),             # <<<<<<<<<<<<<<
+ *                 self.filename.encode("utf-8"),             # <<<<<<<<<<<<<<
  *                 self.text_col.encode("utf-8"),
  *                 self.min_df,
  */
-  if (unlikely(__pyx_v_self->csv_file == Py_None)) {
+  if (unlikely(__pyx_v_self->filename == Py_None)) {
     PyErr_Format(PyExc_AttributeError, "'NoneType' object has no attribute '%.30s'", "encode");
     __PYX_ERR(0, 91, __pyx_L1_error)
   }
-  __pyx_t_1 = PyUnicode_AsUTF8String(__pyx_v_self->csv_file); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 91, __pyx_L1_error)
+  __pyx_t_1 = PyUnicode_AsUTF8String(__pyx_v_self->filename); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 91, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_t_2 = __pyx_convert_string_from_py_std__in_string(__pyx_t_1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 91, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
   /* "bm25.pyx":92
  *         self.bm25 = new _BM25(
- *                 self.csv_file.encode("utf-8"),
+ *                 self.filename.encode("utf-8"),
  *                 self.text_col.encode("utf-8"),             # <<<<<<<<<<<<<<
  *                 self.min_df,
  *                 self.max_df,
@@ -6167,7 +6164,7 @@ static void __pyx_f_4bm25_4BM25__build_inverted_index(struct __pyx_obj_4bm25_BM2
  * 
  *     cdef void _build_inverted_index(self, list documents):
  *         self.bm25 = new _BM25(             # <<<<<<<<<<<<<<
- *                 self.csv_file.encode("utf-8"),
+ *                 self.filename.encode("utf-8"),
  *                 self.text_col.encode("utf-8"),
  */
   __pyx_v_self->bm25 = new _BM25(__pyx_t_2, __pyx_t_3, __pyx_v_self->min_df, __pyx_v_self->max_df, 1.2, 0.4, __pyx_v_self->cache_term_freqs, __pyx_v_self->cache_inverted_index, __pyx_v_self->cache_doc_term_freqs);
@@ -6177,7 +6174,7 @@ static void __pyx_f_4bm25_4BM25__build_inverted_index(struct __pyx_obj_4bm25_BM2
  * 
  *     cdef void _build_inverted_index(self, list documents):             # <<<<<<<<<<<<<<
  *         self.bm25 = new _BM25(
- *                 self.csv_file.encode("utf-8"),
+ *                 self.filename.encode("utf-8"),
  */
 
   /* function exit code */
@@ -7092,7 +7089,7 @@ static PyObject *__pyx_tp_new_4bm25_BM25(PyTypeObject *t, PyObject *a, PyObject 
   #endif
   p = ((struct __pyx_obj_4bm25_BM25 *)o);
   p->__pyx_vtab = __pyx_vtabptr_4bm25_BM25;
-  p->csv_file = ((PyObject*)Py_None); Py_INCREF(Py_None);
+  p->filename = ((PyObject*)Py_None); Py_INCREF(Py_None);
   p->text_col = ((PyObject*)Py_None); Py_INCREF(Py_None);
   if (unlikely(__pyx_pw_4bm25_4BM25_3__cinit__(o, a, k) < 0)) goto bad;
   return o;
@@ -7110,7 +7107,7 @@ static void __pyx_tp_dealloc_4bm25_BM25(PyObject *o) {
     }
   }
   #endif
-  Py_CLEAR(p->csv_file);
+  Py_CLEAR(p->filename);
   Py_CLEAR(p->text_col);
   #if CYTHON_USE_TYPE_SLOTS || CYTHON_COMPILING_IN_PYPY
   (*Py_TYPE(o)->tp_free)(o);
@@ -7267,12 +7264,12 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_cache_inverted_index, __pyx_k_cache_inverted_index, sizeof(__pyx_k_cache_inverted_index), 0, 0, 1, 1},
     {&__pyx_n_s_cache_term_freqs, __pyx_k_cache_term_freqs, sizeof(__pyx_k_cache_term_freqs), 0, 0, 1, 1},
     {&__pyx_n_s_cline_in_traceback, __pyx_k_cline_in_traceback, sizeof(__pyx_k_cline_in_traceback), 0, 0, 1, 1},
-    {&__pyx_n_s_csv_file, __pyx_k_csv_file, sizeof(__pyx_k_csv_file), 0, 0, 1, 1},
     {&__pyx_n_s_dict, __pyx_k_dict, sizeof(__pyx_k_dict), 0, 0, 1, 1},
     {&__pyx_kp_u_disable, __pyx_k_disable, sizeof(__pyx_k_disable), 0, 1, 0, 0},
     {&__pyx_n_s_documents, __pyx_k_documents, sizeof(__pyx_k_documents), 0, 0, 1, 1},
     {&__pyx_kp_u_enable, __pyx_k_enable, sizeof(__pyx_k_enable), 0, 1, 0, 0},
     {&__pyx_n_s_encode, __pyx_k_encode, sizeof(__pyx_k_encode), 0, 0, 1, 1},
+    {&__pyx_n_s_filename, __pyx_k_filename, sizeof(__pyx_k_filename), 0, 0, 1, 1},
     {&__pyx_kp_u_gc, __pyx_k_gc, sizeof(__pyx_k_gc), 0, 1, 0, 0},
     {&__pyx_n_s_get_topk_docs, __pyx_k_get_topk_docs, sizeof(__pyx_k_get_topk_docs), 0, 0, 1, 1},
     {&__pyx_n_s_getstate, __pyx_k_getstate, sizeof(__pyx_k_getstate), 0, 0, 1, 1},
@@ -7908,11 +7905,11 @@ if (!__Pyx_RefNanny) {
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
   /* "bm25.pyx":52
- *             str  csv_file,
+ *             str  filename,
  *             str  text_col,
  *             list documents = [],             # <<<<<<<<<<<<<<
  *             int   min_df = 1,
- *             float max_df = 1,
+ *             float max_df = 1.0,
  */
   __pyx_t_4 = PyList_New(0); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 52, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);

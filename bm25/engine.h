@@ -19,6 +19,11 @@ struct _compare {
 	}
 };
 
+enum SupportedFileTypes {
+	CSV,
+	JSON	
+};
+
 class _BM25 {
 	public:
 		robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
@@ -26,9 +31,10 @@ class _BM25 {
 		std::vector<std::vector<uint32_t>> inverted_index;
 		std::vector<std::vector<std::pair<uint32_t, uint16_t>>> term_freqs;
 		std::vector<uint32_t> doc_term_freqs;
-		std::vector<uint16_t> doc_sizes;
+		// std::vector<uint16_t> doc_sizes;
+		std::vector<uint32_t> doc_sizes;
 
-		std::vector<uint32_t> csv_line_offsets;
+		std::vector<uint64_t> line_offsets;
 
 		uint32_t num_docs;
 		int      min_df;
@@ -40,7 +46,9 @@ class _BM25 {
 		bool     cache_inverted_index;
 		bool     cache_doc_term_freqs;
 
-		std::string csv_file;
+		SupportedFileTypes file_type;
+
+		std::string filename;
 		std::vector<std::string> columns;
 		std::string search_col;
 
@@ -48,7 +56,7 @@ class _BM25 {
 		std::vector<uint32_t> term_freq_line_offsets;
 
 		_BM25(
-				std::string csv_file,
+				std::string filename,
 				std::string search_col,
 				int   min_df,
 				float max_df,
@@ -63,8 +71,10 @@ class _BM25 {
 
 		void save_to_disk();
 
+		void read_json(std::vector<uint32_t>& terms);
 		void read_csv(std::vector<uint32_t>& terms);
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
+		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num);
 
 		void init_dbs();
 

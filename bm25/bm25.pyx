@@ -19,7 +19,7 @@ from time import perf_counter
 cdef extern from "engine.h":
     cdef cppclass _BM25:
         _BM25(
-                string csv_file,
+                string filename,
                 string search_col,
                 int   min_df,
                 float max_df,
@@ -41,17 +41,17 @@ cdef class BM25:
     cdef bool  cache_term_freqs
     cdef bool  cache_inverted_index
     cdef bool  cache_doc_term_freqs
-    cdef str   csv_file
+    cdef str   filename 
     cdef str   text_col
 
 
     def __init__(
             self, 
-            str  csv_file, 
+            str  filename, 
             str  text_col,
             list documents = [], 
             int   min_df = 1,
-            float max_df = 1,
+            float max_df = 1.0,
             bool cache_term_freqs = True,
             bool cache_inverted_index = True,
             bool cache_doc_term_freqs = False 
@@ -59,7 +59,7 @@ cdef class BM25:
         self.cache_term_freqs     = cache_term_freqs
         self.cache_inverted_index = cache_inverted_index
         self.cache_doc_term_freqs = cache_doc_term_freqs
-        self.csv_file = csv_file
+        self.filename = filename 
         self.text_col = text_col
 
         self.min_df = min_df
@@ -68,7 +68,7 @@ cdef class BM25:
         if documents != []:
             pass
 
-        elif csv_file != '' and text_col != '':
+        elif filename != '' and text_col != '':
             init = perf_counter()
 
             init = perf_counter()
@@ -88,7 +88,7 @@ cdef class BM25:
 
     cdef void _build_inverted_index(self, list documents):
         self.bm25 = new _BM25(
-                self.csv_file.encode("utf-8"),
+                self.filename.encode("utf-8"),
                 self.text_col.encode("utf-8"),
                 self.min_df,
                 self.max_df,

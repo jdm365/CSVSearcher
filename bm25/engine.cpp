@@ -16,12 +16,124 @@
 #include "robin_hood.h"
 
 
+void _BM25::read_json(std::vector<uint32_t>& terms) {
+	// Open the file
+	FILE* file = fopen(filename.c_str(), "r");
+	if (file == NULL) {
+		std::cerr << "Unable to open file: " << filename << std::endl;
+		exit(1);
+	}
+
+	// Read the file line by line
+	char*    line = NULL;
+	size_t   len = 0;
+	ssize_t  read;
+	uint64_t line_num = 0;
+
+	while ((read = getline(&line, &len, file)) != -1) {
+		line_offsets.push_back(ftello(file) - read);
+		++line_num;
+
+		// Iterate of line chars until we get to relevant column.
+		int char_idx   = 0;
+		int field_idx  = 0;
+		while (true) {
+			start:
+			if (line[char_idx] == '"') {
+				// Found first key. Match against search_col
+				++char_idx;
+
+				for (const char& c : search_col) {
+					if (c != line[char_idx]) {
+						// Scan to next key and then goto start.
+						// Basically count until four unescaped quotes
+						// are found the goto start
+						size_t num_quotes = 0;
+						while (num_quotes < 4) {
+							num_quotes += (line[char_idx] == '"');
+							++char_idx;
+						}
+						--char_idx;
+						goto start;
+					}
+					++char_idx;
+				}
+
+				if (line[char_idx] == '"') {
+					// If we made it here we found the correct key.
+					// Now iterate just past 1 more unescaped num_quotes
+					// to get to the value.
+					++char_idx;
+					while (line[char_idx] != '"') {
+						++char_idx;
+					}
+					++char_idx;
+					break;
+				}
+			}
+			else if (line[char_idx] == '}') {
+				std::cout << "Search field not found on line: " << line_num << std::endl;
+				std::exit(1);
+			}
+			++char_idx;
+
+			if (char_idx > 100000) {
+				std::cout << "Error in read json" << std::endl;
+				std::exit(1);
+			}
+		}
+		if (line_num % 100000 == 0) {
+			std::cout << "Lines read: " << line_num << std::endl;
+		}
+
+		// Split by commas not inside double quotes
+		std::string doc = "";
+		// uint16_t doc_size = 0;
+		uint32_t doc_size = 0;
+		while (line[char_idx] != '"') {
+			if (line[char_idx] == ' ' && doc == "") {
+				++char_idx;
+				continue;
+			}
+
+			if (line[char_idx] == ' ') {
+				unique_term_mapping.try_emplace(doc, unique_term_mapping.size());
+				terms.push_back(unique_term_mapping[doc]);
+				++doc_size;
+				doc.clear();
+			}
+			else {
+				doc += toupper(line[char_idx]);
+			}
+			++char_idx;
+
+			if (char_idx > 10000000) {
+				std::cout << "String too large. Code is broken" << std::endl;
+				std::exit(1);
+			}
+		}
+		unique_term_mapping.try_emplace(doc, unique_term_mapping.size());
+		terms.push_back(unique_term_mapping[doc]);
+		++doc_size;
+		doc_sizes.push_back(doc_size);
+	}
+	fclose(file);
+
+	// Write the offsets to a file
+	std::ofstream ofs(DIR_NAME + "/" + CSV_LINE_OFFSETS_NAME, std::ios::binary);
+	ofs.write((char*)&line_offsets[0], line_offsets.size() * sizeof(uint32_t));
+	ofs.close();
+
+	num_docs = doc_sizes.size();
+	std::cout << "Million Terms: " << terms.size() / 1000000 << std::endl;
+	std::cout << "Num docs: " << num_docs << std::endl;
+}
 
 void _BM25::read_csv(std::vector<uint32_t>& terms) {
 	// Open the file
-	FILE* file = fopen(csv_file.c_str(), "r");
+	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
-		std::cerr << "Unable to open file: " << csv_file << std::endl;
+		std::cerr << "Unable to open file: " << filename << std::endl;
 		exit(1);
 	}
 
@@ -57,7 +169,7 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 	}
 
 	while ((read = getline(&line, &len, file)) != -1) {
-		csv_line_offsets.push_back(ftell(file) - read);
+		line_offsets.push_back(ftell(file) - read);
 		++line_num;
 
 		// Iterate of line chars until we get to relevant column.
@@ -77,7 +189,8 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		// Split by commas not inside double quotes
 		std::string doc = "";
 		in_quotes = false;
-		uint16_t doc_size = 0;
+		// uint16_t doc_size = 0;
+		uint32_t doc_size = 0;
 		while (true) {
 			if (line[char_idx] == '"' && !in_quotes) {
 				in_quotes = true;
@@ -121,16 +234,16 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 
 	// Write the offsets to a file
 	std::ofstream ofs(DIR_NAME + "/" + CSV_LINE_OFFSETS_NAME, std::ios::binary);
-	ofs.write((char*)&csv_line_offsets[0], csv_line_offsets.size() * sizeof(uint32_t));
+	ofs.write((char*)&line_offsets[0], line_offsets.size() * sizeof(uint32_t));
 	ofs.close();
 
 	num_docs = doc_sizes.size();
 }
 
 std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num) {
-	std::ifstream file(csv_file);
+	std::ifstream file(filename);
 	std::string line;
-	file.seekg(csv_line_offsets[line_num]);
+	file.seekg(line_offsets[line_num]);
 	std::getline(file, line);
 	file.close();
 
@@ -154,6 +267,57 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 		}
 	}
 	row.emplace_back(columns[col_idx], cell);
+	return row;
+}
+
+
+std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_num) {
+	std::ifstream file(filename);
+	std::string line;
+	file.seekg(line_offsets[line_num]);
+	std::getline(file, line);
+	file.close();
+
+	// Create effective json by combining column names with values split by commas
+	std::vector<std::pair<std::string, std::string>> row;
+	bool in_quotes = false;
+	size_t col_idx = 0;
+
+	std::string first  = "";
+	std::string second = "";
+
+	while (true) {
+		while (line[col_idx] != '"') {
+			++col_idx;
+		}
+		++col_idx;
+
+		while (line[col_idx] != '"') {
+			first += line[col_idx];
+			++col_idx;
+		}
+		++col_idx;
+
+		while (line[col_idx] != '"') {
+			++col_idx;
+		}
+		++col_idx;
+
+		while (line[col_idx] != '"') {
+			second += line[col_idx];
+			++col_idx;
+		}
+
+		row.emplace_back(first, second);
+		first.clear();
+		second.clear();
+
+		++col_idx;
+		
+		if (line[col_idx] == '}') {
+			return row;
+		}
+	}
 	return row;
 }
 
@@ -217,7 +381,7 @@ uint16_t _BM25::get_term_freq_from_file(
 
 
 _BM25::_BM25(
-		std::string csv_file,
+		std::string filename,
 		std::string search_col,
 		int min_df,
 		float max_df,
@@ -234,17 +398,28 @@ _BM25::_BM25(
 			cache_inverted_index(cache_inverted_index),
 			cache_doc_term_freqs(cache_doc_term_freqs),
 			search_col(search_col), 
-			csv_file(csv_file) {
+			filename(filename) {
 
 	auto overall_start = std::chrono::high_resolution_clock::now();
 	
-	// Read csv to get documents, line offsets, and columns
+	// Read file to get documents, line offsets, and columns
 	std::vector<uint32_t> terms;
-	read_csv(terms);
+	if (filename.substr(filename.size() - 3, 3) == "csv") {
+		read_csv(terms);
+		file_type = CSV;
+	}
+	else if (filename.substr(filename.size() - 4, 4) == "json") {
+		read_json(terms);
+		file_type = JSON;
+	}
+	else {
+		std::cout << "Only csv and json files are supported." << std::endl;
+		std::exit(1);
+	}
 
 	auto read_end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
-	std::cout << "Read csv in " << read_elapsed_seconds.count() << " seconds" << std::endl;
+	std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
 
 	auto start = std::chrono::high_resolution_clock::now();
 	doc_term_freqs.resize(unique_term_mapping.size());
@@ -254,20 +429,13 @@ _BM25::_BM25(
 	for (size_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		robin_hood::unordered_flat_set<uint32_t> seen_terms;
 
-		uint16_t doc_size = doc_sizes[doc_id];
+		// uint16_t doc_size = doc_sizes[doc_id];
+		uint32_t doc_size = doc_sizes[doc_id];
 		size_t end = terms_seen + doc_size;
 
 		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
 			uint32_t mapped_term_idx = terms[term_idx];
 
-			/*
-			if (doc_term_freqs.find(mapped_term_idx) == doc_term_freqs.end()) {
-				doc_term_freqs[mapped_term_idx] = 1;
-			}
-			else {
-				++doc_term_freqs[mapped_term_idx];
-			}
-			*/
 			++doc_term_freqs[mapped_term_idx];
 
 			seen_terms.insert(mapped_term_idx);
@@ -287,9 +455,7 @@ _BM25::_BM25(
 	robin_hood::unordered_set<uint32_t> blacklisted_terms;
 
 	// Filter terms by min_df and max_df
-	// for (const robin_hood::pair<uint32_t, uint32_t>& term_count : doc_term_freqs) {
 	for (size_t term_id = 0; term_id < doc_term_freqs.size(); ++term_id) {
-		// if (term_count.second < min_df || term_count.second > max_number_of_occurrences) {
 		uint32_t term_count = doc_term_freqs[term_id];
 		if (term_count < min_df || term_count > max_number_of_occurrences) {
 			blacklisted_terms.insert(term_id);
@@ -310,7 +476,8 @@ _BM25::_BM25(
 	start = std::chrono::high_resolution_clock::now();
 	terms_seen = 0;
 	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
-		uint16_t doc_size = doc_sizes[doc_id];
+		// uint16_t doc_size = doc_sizes[doc_id];
+		uint32_t doc_size = doc_sizes[doc_id];
 
 		size_t end = terms_seen + doc_size;
 		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
@@ -318,7 +485,7 @@ _BM25::_BM25(
 			++terms_seen;
 
 			if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
-				return;
+				continue;
 			}
 
 			// Use std::find_if to check if the term is already in the vector
@@ -384,33 +551,35 @@ _BM25::_BM25(
 		std::cout << "Finished writing inverted index to disk in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
-	avg_doc_size = 0.0f;
-	for (int doc_id = 0; doc_id < num_docs; ++doc_id) {
-		avg_doc_size += (float)doc_sizes[doc_id];
-	}
-	avg_doc_size /= num_docs;
-
 	end = std::chrono::high_resolution_clock::now();
 	elapsed_seconds = end - overall_start;
 	if (DEBUG) {
 		std::cout << "Finished creating BM25 index in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
-	// Get mem usage of inverted_index
-	uint64_t bytes_used = 0;
-	for (const auto& vec : inverted_index) {
-		bytes_used += 4 * vec.size();
+	avg_doc_size = 0.0f;
+	for (int doc_id = 0; doc_id < num_docs; ++doc_id) {
+		avg_doc_size += (float)doc_sizes[doc_id];
 	}
-	std::cout << "Inverted Index MB: " << bytes_used / (1024 * 1024) << std::endl;
+	avg_doc_size /= num_docs;
 
-	bytes_used = 0;
-	for (const auto& vec : term_freqs) {
-		bytes_used += 6 * vec.size();
+	if (DEBUG) {
+		// Get mem usage of inverted_index
+		uint64_t bytes_used = 0;
+		for (const auto& vec : inverted_index) {
+			bytes_used += 4 * vec.size();
+		}
+		std::cout << "Inverted Index MB: " << bytes_used / (1024 * 1024) << std::endl;
+
+		bytes_used = 0;
+		for (const auto& vec : term_freqs) {
+			bytes_used += 6 * vec.size();
+		}
+		std::cout << "Term Freqs MB: " << bytes_used / (1024 * 1024) << std::endl;
+		std::cout << "Doc Term Freqs MB " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Doc Sizes MB " << (2 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "csv Line Offsets MB " << (4 * line_offsets.size()) / (1024 * 1024) << std::endl;
 	}
-	std::cout << "Term Freqs MB: " << bytes_used / (1024 * 1024) << std::endl;
-	std::cout << "Doc Term Freqs MB " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-	std::cout << "Doc Sizes MB " << (2 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-	std::cout << "csv Line Offsets MB " << (4 * csv_line_offsets.size()) / (1024 * 1024) << std::endl;
 }
 
 inline float _BM25::_compute_idf(const uint32_t& term_idx) {
@@ -544,8 +713,19 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;
-	for (int i = 0; i < top_k_docs.size(); ++i) {
-		row = get_csv_line(top_k_docs[i].first);
+	for (size_t i = 0; i < top_k_docs.size(); ++i) {
+		switch (file_type) {
+			case CSV:
+				row = get_csv_line(top_k_docs[i].first);
+				break;
+			case JSON:
+				row = get_json_line(top_k_docs[i].first);
+				break;
+			default:
+				std::cout << "Error: Incorrect file type" << std::endl;
+				std::exit(1);
+				break;
+		}
 		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].second)));
 		result.push_back(row);
 	}
