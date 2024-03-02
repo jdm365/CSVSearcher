@@ -176,10 +176,15 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		int col_idx  = 0;
 		bool in_quotes = false;
 		while (col_idx != search_column_index) {
-			if (line[char_idx] == '"' && !in_quotes) {
-				in_quotes = !in_quotes;
+			if (line[char_idx] == '"') {
+				// Skip to next quote.
+				++char_idx;
+				while (line[char_idx] == '"') {
+					++char_idx;
+				}
 			}
-			else if (line[char_idx] == ',' && !in_quotes) {
+
+			if (line[char_idx] == ',') {
 				++col_idx;
 			}
 			++char_idx;
@@ -187,22 +192,14 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 
 		// Split by commas not inside double quotes
 		std::string doc = "";
-		in_quotes = false;
 		uint32_t doc_size = 0;
-		while (true) {
-			if (line[char_idx] == '"' && !in_quotes) {
-				in_quotes = true;
-			}
-			else if (line[char_idx] == '"' && in_quotes) {
-				break;
-			}
-			else if (line[char_idx] == ',' && !in_quotes) {
-				break;
-			}
-			else if (line[char_idx] == '\n' && !in_quotes) {
-				break;
-			}
-			else if (line[char_idx] == ' ') {
+		char end_delim = ',';
+		if (line[char_idx] == '"') {
+			end_delim = '\n';
+			++char_idx;
+		}
+		while (line[char_idx] != end_delim) {
+			if (line[char_idx] == ' ') {
 				if (unique_term_mapping.find(doc) == unique_term_mapping.end()) {
 					unique_term_mapping[doc] = unique_term_mapping.size();
 				}
@@ -214,13 +211,6 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 				doc += toupper(line[char_idx]);
 			}
 			++char_idx;
-
-			constexpr uint32_t max_size = 1024 * 1024 * 100;
-
-			if (char_idx > max_size) {
-				std::cout << "Field must be less than 100 MB." << std::endl;
-				std::exit(1);
-			}
 		}
 		if (unique_term_mapping.find(doc) == unique_term_mapping.end()) {
 			unique_term_mapping[doc] = unique_term_mapping.size();
