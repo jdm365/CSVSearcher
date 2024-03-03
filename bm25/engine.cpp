@@ -205,13 +205,6 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		}
 		while (line[char_idx] != end_delim) {
 			if (line[char_idx] == ' ') {
-				/*
-				if (unique_term_mapping.find(doc) == unique_term_mapping.end()) {
-					unique_term_mapping[doc] = unique_term_mapping.size();
-				}
-				*/
-				// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
-				// terms.push_back(unique_term_mapping[doc]);
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 				unique_terms_found += (uint32_t)add;
 				terms.push_back(it->second);
@@ -223,13 +216,6 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 			}
 			++char_idx;
 		}
-		/*
-		if (unique_term_mapping.find(doc) == unique_term_mapping.end()) {
-			unique_term_mapping[doc] = unique_term_mapping.size();
-		}
-		*/
-		// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
-		// terms.push_back(unique_term_mapping[doc]);
 		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 		unique_terms_found += (uint32_t)add;
 		terms.push_back(it->second);

@@ -23,7 +23,7 @@ struct _compare {
 
 enum SupportedFileTypes {
 	CSV,
-	JSON	
+	JSON
 };
 
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename);
