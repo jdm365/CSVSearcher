@@ -1,6 +1,9 @@
-#include <iostream>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <ctype.h>
+
+#include <iostream>
 #include <vector>
 #include <queue>
 #include <string>
@@ -8,8 +11,6 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
-#include <unistd.h>
-#include <ctype.h>
 #include <algorithm>
 
 #include "engine.h"

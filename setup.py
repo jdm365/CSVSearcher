@@ -20,7 +20,7 @@ COMPILER_FLAGS = [
 OS = os.uname().sysname
 
 LINUX_LINK_ARGS = [
-    "-fopenmp",
+        ## "-fopenmp",
     "-lc++",
     "-lc++abi",
     ## "-lleveldb",
