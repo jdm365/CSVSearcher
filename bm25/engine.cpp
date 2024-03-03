@@ -30,13 +30,14 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 	ssize_t  read;
 	uint64_t line_num = 0;
 
+	uint32_t unique_terms_found = 0;
+
 	while ((read = getline(&line, &len, file)) != -1) {
 		line_offsets.push_back(ftello(file) - read);
 		++line_num;
 
 		// Iterate of line chars until we get to relevant column.
 		int char_idx   = 0;
-		int field_idx  = 0;
 		while (true) {
 			start:
 			if (line[char_idx] == '"') {
@@ -96,8 +97,12 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 			}
 
 			if (line[char_idx] == ' ') {
-				unique_term_mapping.try_emplace(doc, unique_term_mapping.size());
-				terms.push_back(unique_term_mapping[doc]);
+				// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
+				// terms.push_back(unique_term_mapping[doc]);
+				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+				unique_terms_found += (uint32_t)add;
+				terms.push_back(it->second);
+
 				++doc_size;
 				doc.clear();
 			}
@@ -111,17 +116,15 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 				std::exit(1);
 			}
 		}
-		unique_term_mapping.try_emplace(doc, unique_term_mapping.size());
-		terms.push_back(unique_term_mapping[doc]);
+		// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
+		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+		unique_terms_found += (uint32_t)add;
+		terms.push_back(it->second);
+		// terms.push_back(unique_term_mapping[doc]);
 		++doc_size;
 		doc_sizes.push_back(doc_size);
 	}
 	fclose(file);
-
-	// Write the offsets to a file
-	std::ofstream ofs(DIR_NAME + "/" + CSV_LINE_OFFSETS_NAME, std::ios::binary);
-	ofs.write((char*)&line_offsets[0], line_offsets.size() * sizeof(uint32_t));
-	ofs.close();
 
 	num_docs = doc_sizes.size();
 	std::cout << "Million Terms: " << terms.size() / 1000000 << std::endl;
@@ -167,6 +170,8 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		exit(1);
 	}
 
+	uint32_t unique_terms_found = 0;
+
 	while ((read = getline(&line, &len, file)) != -1) {
 		line_offsets.push_back(ftell(file) - read);
 		++line_num;
@@ -200,10 +205,16 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		}
 		while (line[char_idx] != end_delim) {
 			if (line[char_idx] == ' ') {
+				/*
 				if (unique_term_mapping.find(doc) == unique_term_mapping.end()) {
 					unique_term_mapping[doc] = unique_term_mapping.size();
 				}
-				terms.push_back(unique_term_mapping[doc]);
+				*/
+				// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
+				// terms.push_back(unique_term_mapping[doc]);
+				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+				unique_terms_found += (uint32_t)add;
+				terms.push_back(it->second);
 				++doc_size;
 				doc.clear();
 			}
@@ -212,20 +223,21 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 			}
 			++char_idx;
 		}
+		/*
 		if (unique_term_mapping.find(doc) == unique_term_mapping.end()) {
 			unique_term_mapping[doc] = unique_term_mapping.size();
 		}
-		terms.push_back(unique_term_mapping[doc]);
+		*/
+		// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
+		// terms.push_back(unique_term_mapping[doc]);
+		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+		unique_terms_found += (uint32_t)add;
+		terms.push_back(it->second);
 		++doc_size;
 		doc_sizes.push_back(doc_size);
 	}
 
 	fclose(file);
-
-	// Write the offsets to a file
-	std::ofstream ofs(DIR_NAME + "/" + CSV_LINE_OFFSETS_NAME, std::ios::binary);
-	ofs.write((char*)&line_offsets[0], line_offsets.size() * sizeof(uint32_t));
-	ofs.close();
 
 	num_docs = doc_sizes.size();
 }
@@ -311,13 +323,262 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 	return row;
 }
 
-void _BM25::save_to_disk() {}
+void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file when serializing u32 vector.\n";
+        return;
+    }
+
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint32_t));
+	}
+
+    out_file.close();
+}
+
+void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& filename) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file when serializing u64 vector.\n";
+        return;
+    }
+
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint64_t));
+	}
+
+    out_file.close();
+}
+
+void serialize_vector_of_vectors_u32(const std::vector<std::vector<uint32_t>>& vec, const std::string& filename) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file for writing.\n";
+        return;
+    }
+
+    // Write the size of the outer vector first
+    size_t outer_size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+
+    for (const auto& inner_vec : vec) {
+        size_t inner_size = vec.size();
+        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
+        
+        // Write the elements of the inner vector
+        if (!vec.empty()) {
+            out_file.write(reinterpret_cast<const char*>(vec.data()), vec.size() * sizeof(uint32_t));
+        }
+    }
+
+    out_file.close();
+}
+
+void serialize_robin_hood_flat_map_string_u32(
+		const robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		const std::string& filename
+		) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file for writing.\n";
+        return;
+    }
+
+    // Write the size of the map first
+    size_t map_size = map.size();
+    out_file.write(reinterpret_cast<const char*>(&map_size), sizeof(map_size));
+
+    for (const auto& [key, value] : map) {
+        size_t key_size = key.size();
+        out_file.write(reinterpret_cast<const char*>(&key_size), sizeof(key_size));
+        out_file.write(key.data(), key_size);
+        out_file.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    }
+
+    out_file.close();
+}
+
+void serialize_vector_of_vectors_pair_u32_u16(
+		const std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
+		const std::string& filename
+		) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file for writing.\n";
+        return;
+    }
+
+    // Write the size of the outer vector
+    size_t outer_size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+
+    // Iterate through the outer vector
+    for (const auto& inner_vec : vec) {
+        // Write the size of the inner vector
+        size_t inner_size = inner_vec.size();
+        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
+        
+        // Write the pairs
+        for (const auto& [first, second] : inner_vec) {
+            out_file.write(reinterpret_cast<const char*>(&first), sizeof(first));
+            out_file.write(reinterpret_cast<const char*>(&second), sizeof(second));
+        }
+    }
+
+    out_file.close();
+}
+
+
+void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint32_t));
+    }
+
+    in_file.close();
+}
+
+void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filename) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint64_t));
+    }
+
+    in_file.close();
+}
+
+void deserialize_vector_of_vectors_u32(std::vector<std::vector<uint32_t>>& vec, const std::string& filename) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+	if (vec.size() > 0) {
+		std::cerr << "Vector must be empty for initialization.\n";
+		return;
+	}
+	// Read the size of the outer vector
+    size_t outer_size;
+    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
+    vec.resize(outer_size);
+
+    // Iterate through the outer vector
+    for (auto& inner_vec : vec) {
+        // Read the size of the inner vector
+        size_t inner_size;
+        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
+        vec.resize(inner_size);
+
+        // Read the elements of the inner vector
+        if (inner_size > 0) {
+            in_file.read(reinterpret_cast<char*>(vec.data()), inner_size * sizeof(uint32_t));
+        }
+    }
+
+    in_file.close();
+}
+
+void deserialize_robin_hood_flat_map_string_u32(
+		robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		const std::string& filename
+		) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+	// Read the size of the map
+    size_t map_size;
+    in_file.read(reinterpret_cast<char*>(&map_size), sizeof(map_size));
+
+    // Read each key-value pair and insert it into the map
+    for (size_t i = 0; i < map_size; ++i) {
+        size_t keySize;
+        in_file.read(reinterpret_cast<char*>(&keySize), sizeof(keySize));
+        
+        std::string key(keySize, '\0');
+        in_file.read(&key[0], keySize);
+
+        uint32_t value;
+        in_file.read(reinterpret_cast<char*>(&value), sizeof(value));
+
+        map[key] = value;
+    }
+
+    in_file.close();
+}
+
+void deserialize_vector_of_vectors_pair_u32_u16(
+		std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
+		const std::string& filename
+		) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read the size of the outer vector
+    size_t outer_size;
+    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
+    vec.resize(outer_size);
+
+    for (auto& inner_vec : vec) {
+        size_t inner_size;
+        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
+        inner_vec.resize(inner_size);
+
+        // Read the pairs
+        for (auto& [first, second] : inner_vec) {
+            in_file.read(reinterpret_cast<char*>(&first), sizeof(first));
+            in_file.read(reinterpret_cast<char*>(&second), sizeof(second));
+        }
+    }
+
+    in_file.close();
+}
+
+void _BM25::save_to_disk() {
+	// unique_term_mapping
+}
 
 uint32_t _BM25::get_doc_term_freq_db(const uint32_t& term_idx) {
-	if (cache_doc_term_freqs) {
-		return doc_term_freqs[term_idx];
-	}
-	return 0;
+	return doc_term_freqs[term_idx];
 }
 
 std::vector<uint32_t> _BM25::get_inverted_index_db(const uint32_t& term_idx) {
@@ -328,29 +589,6 @@ std::vector<uint32_t> _BM25::get_inverted_index_db(const uint32_t& term_idx) {
 	return std::vector<uint32_t>();
 }
 
-
-void _BM25::write_term_freqs_to_file() {
-	// Create memmap index to get specific line later
-	term_freq_line_offsets.reserve(
-			term_freqs.size()
-			);
-
-	// Use pure C to write to file
-	FILE* file = fopen((DIR_NAME + "/" + TERM_FREQS_FILE_NAME).c_str(), "w");
-	int offset = 0;
-
-	for (const auto& map : term_freqs) {
-		term_freq_line_offsets.push_back(offset);
-
-		for (const auto& pair : map) {
-			fprintf(file, "%s %d\t", std::to_string(pair.first).c_str(), pair.second);
-		}
-
-		fprintf(file, "\n");
-		offset = ftell(file);
-	}
-	fclose(file);
-}
 
 uint16_t _BM25::get_term_freq_from_file(
 		int line_num,

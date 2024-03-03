@@ -4,12 +4,13 @@
 
 #include "robin_hood.h"
 
-static const std::string DIR_NAME      			= "bm25_db";
-static const std::string DOC_TERM_FREQS_DB_NAME = "DOC_TERM_FREQS";
-static const std::string INVERTED_INDEX_DB_NAME = "INVERTED_INDEX";
-static const std::string TERM_FREQS_FILE_NAME   = "TERM_FREQS";
-static const std::string CSV_LINE_OFFSETS_NAME  = "CSV_LINE_OFFSETS";
-static const std::string MISC  					= "MISC";
+static const std::string DIR_NAME      			  = "bm25_db";
+static const std::string UNIQUE_TERM_MAPPING_PATH = DIR_NAME + "/" + "DOC_TERM_FREQS.bin";
+static const std::string DOC_TERM_FREQS_PATH      = DIR_NAME + "/" + "DOC_TERM_FREQS.bin";
+static const std::string INVERTED_INDEX_PATH      = DIR_NAME + "/" + "INVERTED_INDEX.bin";
+static const std::string TERM_FREQS_FILE_PATH     = DIR_NAME + "/" + "TERM_FREQS.bin";
+static const std::string CSV_LINE_OFFSETS_PATH    = DIR_NAME + "/" + "CSV_LINE_OFFSETS.bin";
+static const std::string METADATA_PATH			  = DIR_NAME + "/" + "METADATA.bin";
 
 #define DEBUG 1
 
@@ -23,6 +24,31 @@ enum SupportedFileTypes {
 	CSV,
 	JSON	
 };
+
+void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename);
+void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& filename);
+void serialize_vector_of_vectors_u32(const std::vector<std::vector<uint32_t>>& vec, const std::string& filename);
+void serialize_robin_hood_flat_map_string_u32(
+		const robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		const std::string& filename
+		);
+void serialize_vector_of_vectors_pair_u32_u16(
+		const std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
+		const std::string& filename
+		);
+
+
+void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename);
+void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filename);
+void deserialize_vector_of_vectors_u32(std::vector<std::vector<uint32_t>>& vec, const std::string& filename);
+void deserialize_robin_hood_flat_map_string_u32(
+		robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		const std::string& filename
+		);
+void deserialize_vector_of_vectors_pair_u32_u16(
+		std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
+		const std::string& filename
+		);
 
 class _BM25 {
 	public:
@@ -50,9 +76,6 @@ class _BM25 {
 		std::string filename;
 		std::vector<std::string> columns;
 		std::string search_col;
-
-		// MMaped vector
-		std::vector<uint32_t> term_freq_line_offsets;
 
 		_BM25(
 				std::string filename,
