@@ -24,13 +24,13 @@ cdef extern from "engine.h":
                 int   min_df,
                 float max_df,
                 float k1,
-                float b,
-                bool  cache_term_freqs,
-                bool  cache_inverted_index,
-                bool  cache_doc_term_freqs
+                float b
                 ) nogil
+        _BM25(string db_dir)
         vector[pair[uint32_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
         vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df)
+        void save_to_disk()
+        void load_from_disk(string db_dir)
 
 
 
@@ -38,27 +38,19 @@ cdef class BM25:
     cdef _BM25* bm25
     cdef int   min_df
     cdef float max_df
-    cdef bool  cache_term_freqs
-    cdef bool  cache_inverted_index
-    cdef bool  cache_doc_term_freqs
     cdef str   filename 
     cdef str   text_col
 
 
     def __init__(
             self, 
-            str  filename, 
-            str  text_col,
+            str  filename = None, 
+            str  text_col = None,
+            str  db_dir   = None,
             list documents = [], 
             int   min_df = 1,
-            float max_df = 1.0,
-            bool cache_term_freqs = True,
-            bool cache_inverted_index = True,
-            bool cache_doc_term_freqs = False 
+            float max_df = 1.0
             ):
-        self.cache_term_freqs     = cache_term_freqs
-        self.cache_inverted_index = cache_inverted_index
-        self.cache_doc_term_freqs = cache_doc_term_freqs
         self.filename = filename 
         self.text_col = text_col
 
@@ -68,15 +60,28 @@ cdef class BM25:
         if documents != []:
             pass
 
-        elif filename != '' and text_col != '':
-            init = perf_counter()
+        if db_dir is not None:
+            try:
+                self.bm25 = new _BM25(db_dir.encode("utf-8"))
+            except FileNotFoundError:
+                print(f"DB dir {db_dir} not found. Has it moved? Training from scratch.")
 
+                init = perf_counter()
+                self._build_inverted_index(documents)
+                print(f"Built index in {perf_counter() - init:.2f} seconds")
+
+
+        elif filename != '' and text_col != '':
             init = perf_counter()
             self._build_inverted_index(documents)
             print(f"Built index in {perf_counter() - init:.2f} seconds")
 
         else:
-            raise ValueError("Either documents or csv_file and text_column must be provided")
+            raise ValueError("""One of the following must be provided: \
+                                1: db_dir\
+                                2: filename + text_col\
+                                3: documents\
+                                """)
 
 
     def __cinit__(
@@ -93,11 +98,9 @@ cdef class BM25:
                 self.min_df,
                 self.max_df,
                 1.2,
-                0.4,
-                self.cache_term_freqs,
-                self.cache_inverted_index,
-                self.cache_doc_term_freqs
+                0.4
                 )
+        self.bm25.save_to_disk()
 
 
     def query(self, str query, int init_max_df = 1000):

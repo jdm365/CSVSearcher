@@ -373,12 +373,12 @@ void serialize_vector_of_vectors_u32(const std::vector<std::vector<uint32_t>>& v
     out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
 
     for (const auto& inner_vec : vec) {
-        size_t inner_size = vec.size();
+        size_t inner_size = inner_vec.size();
         out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
         
         // Write the elements of the inner vector
-        if (!vec.empty()) {
-            out_file.write(reinterpret_cast<const char*>(vec.data()), vec.size() * sizeof(uint32_t));
+        if (!inner_vec.empty()) {
+            out_file.write(reinterpret_cast<const char*>(inner_vec.data()), inner_vec.size() * sizeof(uint32_t));
         }
     }
 
@@ -488,9 +488,9 @@ void deserialize_vector_of_vectors_u32(std::vector<std::vector<uint32_t>>& vec, 
     }
 
 	if (vec.size() > 0) {
-		std::cerr << "Vector must be empty for initialization.\n";
-		return;
+		vec.clear();
 	}
+
 	// Read the size of the outer vector
     size_t outer_size;
     in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
@@ -501,11 +501,11 @@ void deserialize_vector_of_vectors_u32(std::vector<std::vector<uint32_t>>& vec, 
         // Read the size of the inner vector
         size_t inner_size;
         in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
-        vec.resize(inner_size);
+        inner_vec.resize(inner_size);
 
         // Read the elements of the inner vector
         if (inner_size > 0) {
-            in_file.read(reinterpret_cast<char*>(vec.data()), inner_size * sizeof(uint32_t));
+            in_file.read(reinterpret_cast<char*>(inner_vec.data()), inner_size * sizeof(uint32_t));
         }
     }
 
@@ -574,7 +574,139 @@ void deserialize_vector_of_vectors_pair_u32_u16(
 }
 
 void _BM25::save_to_disk() {
-	// unique_term_mapping
+	auto start = std::chrono::high_resolution_clock::now();
+
+	if (access(DIR_NAME.c_str(), F_OK) != -1) {
+		// Remove the directory if it exists
+		std::string command = "rm -r " + DIR_NAME;
+		system(command.c_str());
+
+		// Create the directory
+		command = "mkdir " + DIR_NAME;
+		system(command.c_str());
+	}
+	else {
+		// Create the directory if it does not exist
+		std::string command = "mkdir " + DIR_NAME;
+		system(command.c_str());
+	}
+
+	serialize_robin_hood_flat_map_string_u32(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
+	serialize_vector_of_vectors_u32(inverted_index, INVERTED_INDEX_PATH);
+	serialize_vector_of_vectors_pair_u32_u16(term_freqs, TERM_FREQS_FILE_PATH);
+	serialize_vector_u32(doc_term_freqs, DOC_TERM_FREQS_PATH);
+	serialize_vector_u32(doc_sizes, DOC_SIZES_PATH);
+	serialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
+
+	// Serialize smaller members.
+	std::ofstream out_file(METADATA_PATH, std::ios::binary);
+	if (!out_file) {
+		std::cerr << "Error opening file for writing.\n";
+		return;
+	}
+
+	// Write basic types directly
+	out_file.write(reinterpret_cast<const char*>(&num_docs), sizeof(num_docs));
+	out_file.write(reinterpret_cast<const char*>(&min_df), sizeof(min_df));
+	out_file.write(reinterpret_cast<const char*>(&avg_doc_size), sizeof(avg_doc_size));
+	out_file.write(reinterpret_cast<const char*>(&max_df), sizeof(max_df));
+	out_file.write(reinterpret_cast<const char*>(&k1), sizeof(k1));
+	out_file.write(reinterpret_cast<const char*>(&b), sizeof(b));
+
+	// Write enum as int
+	int file_type_int = static_cast<int>(file_type);
+	out_file.write(reinterpret_cast<const char*>(&file_type_int), sizeof(file_type_int));
+
+	// Write std::string
+	size_t filename_length = filename.size();
+	out_file.write(reinterpret_cast<const char*>(&filename_length), sizeof(filename_length));
+	out_file.write(filename.data(), filename_length);
+
+	// Write std::vector<std::string>
+	size_t columns_size = columns.size();
+	out_file.write(reinterpret_cast<const char*>(&columns_size), sizeof(columns_size));
+	for (const auto& col : columns) {
+		size_t col_length = col.size();
+		out_file.write(reinterpret_cast<const char*>(&col_length), sizeof(col_length));
+		out_file.write(col.data(), col_length);
+	}
+
+	// Write search_col std::string
+	size_t search_col_length = search_col.size();
+	out_file.write(reinterpret_cast<const char*>(&search_col_length), sizeof(search_col_length));
+	out_file.write(search_col.data(), search_col_length);
+
+	out_file.close();
+
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> elapsed_seconds = end - start;
+
+	if (DEBUG) {
+		std::cout << "Saved in " << elapsed_seconds.count() << "s" << std::endl;
+	}
+}
+
+void _BM25::load_from_disk(const std::string& db_dir) {
+	auto start = std::chrono::high_resolution_clock::now();
+
+	deserialize_robin_hood_flat_map_string_u32(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
+	deserialize_vector_of_vectors_u32(inverted_index, INVERTED_INDEX_PATH);
+	deserialize_vector_of_vectors_pair_u32_u16(term_freqs, TERM_FREQS_FILE_PATH);
+	deserialize_vector_u32(doc_term_freqs, DOC_TERM_FREQS_PATH);
+	deserialize_vector_u32(doc_sizes, DOC_SIZES_PATH);
+	deserialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
+
+	// Load smaller members.
+	std::ifstream in_file(METADATA_PATH, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read basic types directly
+    in_file.read(reinterpret_cast<char*>(&num_docs), sizeof(num_docs));
+    in_file.read(reinterpret_cast<char*>(&min_df), sizeof(min_df));
+    in_file.read(reinterpret_cast<char*>(&avg_doc_size), sizeof(avg_doc_size));
+    in_file.read(reinterpret_cast<char*>(&max_df), sizeof(max_df));
+    in_file.read(reinterpret_cast<char*>(&k1), sizeof(k1));
+    in_file.read(reinterpret_cast<char*>(&b), sizeof(b));
+
+    // Read enum as int
+    int file_type_int;
+    in_file.read(reinterpret_cast<char*>(&file_type_int), sizeof(file_type_int));
+    file_type = static_cast<SupportedFileTypes>(file_type_int);
+
+    // Read std::string
+    size_t filename_length;
+    in_file.read(reinterpret_cast<char*>(&filename_length), sizeof(filename_length));
+    filename.resize(filename_length);
+    in_file.read(&filename[0], filename_length);
+
+    // Read std::vector<std::string>
+    size_t columns_size;
+    in_file.read(reinterpret_cast<char*>(&columns_size), sizeof(columns_size));
+    columns.resize(columns_size);
+    for (auto& col : columns) {
+        size_t col_length;
+        in_file.read(reinterpret_cast<char*>(&col_length), sizeof(col_length));
+        col.resize(col_length);
+        in_file.read(&col[0], col_length);
+    }
+
+    // Read search_col std::string
+    size_t search_col_length;
+    in_file.read(reinterpret_cast<char*>(&search_col_length), sizeof(search_col_length));
+    search_col.resize(search_col_length);
+    in_file.read(&search_col[0], search_col_length);
+
+    in_file.close();
+
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> elapsed_seconds = end - start;
+
+	if (DEBUG) {
+		std::cout << "Loaded in " << elapsed_seconds.count() << "s" << std::endl;
+	}
 }
 
 uint32_t _BM25::get_doc_term_freq_db(const uint32_t& term_idx) {
@@ -582,11 +714,7 @@ uint32_t _BM25::get_doc_term_freq_db(const uint32_t& term_idx) {
 }
 
 std::vector<uint32_t> _BM25::get_inverted_index_db(const uint32_t& term_idx) {
-	if (cache_inverted_index) {
-		return inverted_index[term_idx];
-	}
-
-	return std::vector<uint32_t>();
+	return inverted_index[term_idx];
 }
 
 
@@ -614,17 +742,11 @@ _BM25::_BM25(
 		int min_df,
 		float max_df,
 		float k1,
-		float b,
-		bool  cache_term_freqs,
-		bool  cache_inverted_index,
-		bool  cache_doc_term_freqs
+		float b
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
 			b(b),
-			cache_term_freqs(cache_term_freqs),
-			cache_inverted_index(cache_inverted_index),
-			cache_doc_term_freqs(cache_doc_term_freqs),
 			search_col(search_col), 
 			filename(filename) {
 

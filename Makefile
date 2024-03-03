@@ -1,4 +1,6 @@
-all:
+all: install clean
+
+install:
 	python -m pip install .
 
 proto:

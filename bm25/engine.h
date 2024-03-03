@@ -5,11 +5,12 @@
 #include "robin_hood.h"
 
 static const std::string DIR_NAME      			  = "bm25_db";
-static const std::string UNIQUE_TERM_MAPPING_PATH = DIR_NAME + "/" + "DOC_TERM_FREQS.bin";
-static const std::string DOC_TERM_FREQS_PATH      = DIR_NAME + "/" + "DOC_TERM_FREQS.bin";
+static const std::string UNIQUE_TERM_MAPPING_PATH = DIR_NAME + "/" + "UNIQUE_TERM_MAPPING.bin";
 static const std::string INVERTED_INDEX_PATH      = DIR_NAME + "/" + "INVERTED_INDEX.bin";
 static const std::string TERM_FREQS_FILE_PATH     = DIR_NAME + "/" + "TERM_FREQS.bin";
-static const std::string CSV_LINE_OFFSETS_PATH    = DIR_NAME + "/" + "CSV_LINE_OFFSETS.bin";
+static const std::string DOC_TERM_FREQS_PATH      = DIR_NAME + "/" + "DOC_TERM_FREQS.bin";
+static const std::string DOC_SIZES_PATH      	  = DIR_NAME + "/" + "DOC_SIZES.bin";
+static const std::string LINE_OFFSETS_PATH    	  = DIR_NAME + "/" + "LINE_OFFSETS.bin";
 static const std::string METADATA_PATH			  = DIR_NAME + "/" + "METADATA.bin";
 
 #define DEBUG 1
@@ -53,12 +54,10 @@ void deserialize_vector_of_vectors_pair_u32_u16(
 class _BM25 {
 	public:
 		robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
-
 		std::vector<std::vector<uint32_t>> inverted_index;
 		std::vector<std::vector<std::pair<uint32_t, uint16_t>>> term_freqs;
 		std::vector<uint32_t> doc_term_freqs;
 		std::vector<uint32_t> doc_sizes;
-
 		std::vector<uint64_t> line_offsets;
 
 		uint32_t num_docs;
@@ -67,9 +66,6 @@ class _BM25 {
 		float    max_df;
 		float    k1;
 		float    b;
-		bool     cache_term_freqs;
-		bool     cache_inverted_index;
-		bool     cache_doc_term_freqs;
 
 		SupportedFileTypes file_type;
 
@@ -83,15 +79,16 @@ class _BM25 {
 				int   min_df,
 				float max_df,
 				float k1,
-				float b,
-				bool cache_term_freqs,
-				bool cache_inverted_index,
-				bool cache_doc_term_freqs
+				float b
 				);
+		_BM25(std::string db_dir) {
+			load_from_disk(db_dir);
+		}
 
 		~_BM25() {}
 
 		void save_to_disk();
+		void load_from_disk(const std::string& db_dir);
 
 		void read_json(std::vector<uint32_t>& terms);
 		void read_csv(std::vector<uint32_t>& terms);
