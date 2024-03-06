@@ -16,8 +16,8 @@ if __name__ == '__main__':
 
     names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True).name.tolist()
 
-    FILENAME = '/home/jdm365/search-benchmark-game/corpus_500k.json'
-    ## FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
+    ## FILENAME = '/home/jdm365/search-benchmark-game/corpus_500k.json'
+    FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
     ## print(os.system(f"head -5 {FILENAME}"))
     init = perf_counter()
     ## df = pd.read_json(FILENAME, lines=True)
@@ -29,10 +29,9 @@ if __name__ == '__main__':
     ## FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
 
     model = BM25(
-            ## filename=FILENAME, 
-            ## text_col='name',
-            ## text_col='text',
-            db_dir='bm25_db'
+            filename=FILENAME, 
+            text_col='text',
+            ## db_dir='bm25_db'
             ## max_df=0.001
             )
 

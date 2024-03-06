@@ -98,8 +98,6 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 			}
 
 			if (line[char_idx] == ' ') {
-				// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
-				// terms.push_back(unique_term_mapping[doc]);
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 				unique_terms_found += (uint32_t)add;
 				terms.push_back(it->second);
@@ -117,11 +115,9 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 				std::exit(1);
 			}
 		}
-		// unique_terms_found += (uint32_t)unique_term_mapping.try_emplace(doc, unique_terms_found).second;
 		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 		unique_terms_found += (uint32_t)add;
 		terms.push_back(it->second);
-		// terms.push_back(unique_term_mapping[doc]);
 		++doc_size;
 		doc_sizes.push_back(doc_size);
 	}
@@ -712,7 +708,8 @@ uint16_t _BM25::get_term_freq_from_file(
 	// Default to 1.0f.
 	// Inverted index implies membership.
 	// Only store values with >1 term freq.
-	float tf = 1.0f;
+	// float tf = 1.0f;
+	float tf = 0.0f;
 	for (const std::pair<uint32_t, uint16_t>& term_freq : term_freqs[line_num]) {
 		if (term_freq.first == term_idx) {
 			tf = term_freq.second;
@@ -843,9 +840,10 @@ _BM25::_BM25(
 
 		// Copy to term freqs
 		for (const auto& pair : local_term_freqs) {
-			if (pair.second > 1) {
-				term_freqs[doc_id].emplace_back(pair.first, pair.second);
-			}
+			term_freqs[doc_id].emplace_back(pair.first, pair.second);
+			// if (pair.second > 1) {
+				// term_freqs[doc_id].emplace_back(pair.first, pair.second);
+			// }
 		}
 	}
 	end = std::chrono::high_resolution_clock::now();
@@ -897,14 +895,14 @@ inline float _BM25::_compute_idf(const uint32_t& term_idx) {
 }
 
 inline float _BM25::_compute_bm25(
-		const uint32_t& term_idx,
 		uint32_t doc_id,
 		float tf,
 		float idf
 		) {
 	float doc_size = doc_sizes[doc_id];
 
-	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
+	// return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
+	return idf * tf / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
 }
 
 std::vector<std::pair<uint32_t, float>> _BM25::query(
@@ -937,9 +935,10 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	// Gather docs that contain at least one term from the query
 	// Uses dynamic max_df for performance
 	int local_max_df = init_max_df;
-	robin_hood::unordered_set<uint32_t> candidate_docs;
+	robin_hood::unordered_flat_map<uint32_t, float> doc_scores;
 
-	while (candidate_docs.size() == 0) {
+	while (doc_scores.size() == 0) {
+		size_t idx = 0;
 		for (const uint32_t& term_idx : term_idxs) {
 			std::vector<uint32_t> doc_ids = get_inverted_index_db(term_idx);
 
@@ -947,12 +946,20 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 				continue;
 			}
 
+			float idf = _compute_idf(term_idx);
+
 			if (doc_ids.size() > local_max_df) {
 				continue;
 			}
 
 			for (const uint32_t& doc_id : doc_ids) {
-				candidate_docs.insert(doc_id);
+				float tf = get_term_freq_from_file(doc_id, term_idx);
+				if (doc_scores.find(doc_id) == doc_scores.end()) {
+					doc_scores[doc_id] = _compute_bm25(doc_id, tf, idf);
+				}
+				else {
+					doc_scores[doc_id] += _compute_bm25(doc_id, tf, idf);
+				}
 			}
 		}
 		local_max_df *= 20;
@@ -960,49 +967,28 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		if (local_max_df > num_docs || local_max_df > (int)max_df * num_docs) {
 			break;
 		}
+		++idx;
 	}
 	
-	if (candidate_docs.size() == 0) {
+	if (doc_scores.size() == 0) {
 		return std::vector<std::pair<uint32_t, float>>();
 	}
 
-	// if (DEBUG) {
-		// std::cout << "Num candidates: " << candidate_docs.size() << std::endl;
-	// }
-
 	// Priority queue to store top k docs
-	// Largest to smallest scores
 	std::priority_queue<
 		std::pair<uint32_t, float>, 
 		std::vector<std::pair<uint32_t, float>>, 
 		_compare> top_k_docs;
 
-	// Compute BM25 scores for each candidate doc
-	std::vector<float> idfs(term_idxs.size(), 0.0f);
-	std::vector<float> tfs(term_idxs.size(), 0.0f);
-	int idx = 0;
-	for (const uint32_t& doc_id : candidate_docs) {
-		float score = 0;
-		int   jdx = 0;
-		for (const uint32_t& term_idx : term_idxs) {
-			if (idx == 0) {
-				idfs[jdx] = _compute_idf(term_idx);
-				tfs[jdx]  = get_term_freq_from_file(doc_id, term_idx);
-			}
-			score += _compute_bm25(term_idx, doc_id, tfs[jdx], idfs[jdx]);
-			++jdx;
-		}
-
-		top_k_docs.push(std::make_pair(doc_id, score));
+	for (const auto& pair : doc_scores) {
+		top_k_docs.push(std::make_pair(pair.first, pair.second));
 		if (top_k_docs.size() > k) {
 			top_k_docs.pop();
 		}
-		++idx;
 	}
-	
 
 	std::vector<std::pair<uint32_t, float>> result(top_k_docs.size());
-	idx = top_k_docs.size() - 1;
+	size_t idx = top_k_docs.size() - 1;
 	while (!top_k_docs.empty()) {
 		result[idx] = top_k_docs.top();
 		top_k_docs.pop();

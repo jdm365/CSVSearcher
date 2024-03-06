@@ -118,7 +118,6 @@ class _BM25 {
 				const uint32_t& term
 				);
 		float _compute_bm25(
-				const uint32_t& term,
 				uint32_t doc_id,
 				float tf,
 				float idf
