@@ -92,6 +92,7 @@ class _BM25 {
 
 		void read_json(std::vector<uint32_t>& terms);
 		void read_csv(std::vector<uint32_t>& terms);
+		void read_csv_fast(std::vector<uint32_t>& terms);
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num);
 

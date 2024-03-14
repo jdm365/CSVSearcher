@@ -282,12 +282,12 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 
 	uint32_t unique_terms_found = 0;
 
+	std::string doc = "";
 
 	// Small string optimization limit on most platforms
+	doc.reserve(22);
 
 	while ((read = getline(&line, &len, file)) != -1) {
-		std::string doc;
-
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
 		++line_num;
@@ -310,6 +310,7 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 			}
 			++char_idx;
 		}
+		/*
 
 		// Split by commas not inside double quotes
 		uint32_t doc_size = 0;
@@ -324,7 +325,6 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 				unique_terms_found += (uint32_t)add;
 				terms.push_back(it->second);
-
 				++doc_size;
 				doc.clear();
 
@@ -337,11 +337,10 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 		unique_terms_found += (uint32_t)add;
 		terms.push_back(it->second);
-
 		++doc_size;
-		doc.clear();
-
 		doc_sizes.push_back(doc_size);
+		doc.clear();
+		*/
 	}
 
 	fclose(file);

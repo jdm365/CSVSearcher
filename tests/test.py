@@ -1,7 +1,6 @@
 from bm25 import BM25
 import pandas as pd
 import numpy as np
-import os
 from tqdm import tqdm
 from time import perf_counter
 
@@ -14,10 +13,9 @@ if __name__ == '__main__':
     ## FILENAME = '/Users/jakemehlman/Kaggle/Kaggle_Competition_Foursquare/data/train.csv'
     ## FILENAME = '/home/jdm365/SearchApp/basic_search/data/companies_sorted_1M.csv'
 
-    names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True).name.tolist()
 
     ## FILENAME = '/home/jdm365/search-benchmark-game/corpus_500k.json'
-    FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
+    ## FILENAME = '/home/jdm365/search-benchmark-game/corpus.json'
     ## print(os.system(f"head -5 {FILENAME}"))
     init = perf_counter()
     ## df = pd.read_json(FILENAME, lines=True)
@@ -30,10 +28,13 @@ if __name__ == '__main__':
 
     model = BM25(
             filename=FILENAME, 
-            text_col='text',
+            ## text_col='text',
+            text_col='name',
             ## db_dir='bm25_db'
             ## max_df=0.001
             )
+    exit()
+    names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True).name.tolist()
 
     rand_idxs = np.random.choice(len(names), 10_000, replace=False)
 
