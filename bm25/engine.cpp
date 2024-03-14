@@ -2,8 +2,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <ctype.h>
-#include <emmintrin.h>
-#include <smmintrin.h> 
 
 #include <iostream>
 #include <vector>
