@@ -114,7 +114,11 @@ cdef class BM25:
         with open(os.path.join(self.db_dir, "last_modified.txt"), "r") as f:
             last_modified = f.read()
 
-        if str(os.path.getmtime(self.db_dir)) != last_modified:
+        new_time = str(os.path.getmtime(self.db_dir))
+        new_time = new_time.split('.')[0]
+        last_modified = last_modified.split('.')[0]
+
+        if new_time != last_modified:
             return False
 
         with open(os.path.join(self.db_dir, "filename.txt"), "r") as f:
@@ -127,7 +131,11 @@ cdef class BM25:
         with open(os.path.join(self.db_dir, "last_modified_file.txt"), "r") as f:
             last_modified = f.read()
 
-        if str(os.path.getmtime(self.filename)) != last_modified:
+        new_time = str(os.path.getmtime(self.filename))
+        new_time = new_time.split('.')[0]
+        last_modified = last_modified.split('.')[0]
+
+        if new_time != last_modified:
             return False
 
         self.bm25 = new _BM25(self.db_dir.encode("utf-8"))
