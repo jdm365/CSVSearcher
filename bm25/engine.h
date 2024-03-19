@@ -129,10 +129,25 @@ class _BM25 {
 				uint32_t top_k,
 				uint32_t init_max_df
 				);
+		std::vector<std::pair<uint32_t, float>> query(
+				std::string& query,
+				uint32_t top_k,
+				uint32_t init_max_df,
+				uint32_t* mask_idxs,
+				uint32_t mask_len
+				);
 
 		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(
 				std::string& _query,
 				uint32_t top_k,
 				uint32_t init_max_df
+				);
+
+		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(
+				std::string& _query,
+				uint32_t top_k,
+				uint32_t init_max_df,
+				uint32_t* mask_idxs,
+				uint32_t mask_len
 				);
 };

@@ -1133,13 +1133,157 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	return result;
 }
 
+std::vector<std::pair<uint32_t, float>> _BM25::query(
+		std::string& query, 
+		uint32_t k,
+		uint32_t init_max_df,
+		uint32_t* mask_idxs,
+		uint32_t mask_len
+		) {
+	std::vector<uint32_t> term_idxs;
+
+	std::string substr = "";
+	for (const char& c : query) {
+		if (c != ' ') {
+			substr += c; 
+			continue;
+		}
+		if (unique_term_mapping.find(substr) == unique_term_mapping.end()) {
+			continue;
+		}
+		term_idxs.push_back(unique_term_mapping[substr]);
+		substr.clear();
+	}
+	if (unique_term_mapping.find(substr) != unique_term_mapping.end()) {
+		term_idxs.push_back(unique_term_mapping[substr]);
+	}
+
+	if (term_idxs.size() == 0) {
+		return std::vector<std::pair<uint32_t, float>>();
+	}
+
+	// Gather docs that contain at least one term from the query
+	// Uses dynamic max_df for performance
+	int local_max_df = init_max_df;
+	robin_hood::unordered_set<uint32_t> candidate_docs;
+
+	while (candidate_docs.size() == 0) {
+		for (const uint32_t& term_idx : term_idxs) {
+			std::vector<uint32_t> doc_ids = get_inverted_index_db(term_idx);
+
+			if (doc_ids.size() == 0) {
+				continue;
+			}
+
+			if (doc_ids.size() > local_max_df) {
+				continue;
+			}
+
+			for (const uint32_t& doc_id : doc_ids) {
+				candidate_docs.insert(doc_id);
+			}
+		}
+		local_max_df *= 20;
+
+		if (local_max_df > num_docs || local_max_df > (int)max_df * num_docs) {
+			break;
+		}
+	}
+	
+	if (candidate_docs.size() == 0) {
+		return std::vector<std::pair<uint32_t, float>>();
+	}
+
+	robin_hood::unordered_set<uint32_t> mask_set(mask_idxs, mask_idxs + mask_len);
+
+	// Apply mask
+
+	// Priority queue to store top k docs
+	// Largest to smallest scores
+	std::priority_queue<
+		std::pair<uint32_t, float>, 
+		std::vector<std::pair<uint32_t, float>>, 
+		_compare> top_k_docs;
+
+	// Compute BM25 scores for each candidate doc
+	std::vector<float> idfs(term_idxs.size(), 0.0f);
+	int idx = 0;
+	for (const uint32_t& doc_id : candidate_docs) {
+		float score = 0;
+		int   jdx = 0;
+		for (const uint32_t& term_idx : term_idxs) {
+			if (idx == 0) {
+				idfs[jdx] = _compute_idf(term_idx);
+			}
+			float tf  = get_term_freq_from_file(doc_id, term_idx);
+			score += _compute_bm25(doc_id, tf, idfs[jdx]);
+			++jdx;
+		}
+
+		top_k_docs.push(std::make_pair(doc_id, score));
+		if (top_k_docs.size() > k) {
+			top_k_docs.pop();
+		}
+		++idx;
+	}
+	
+
+	std::vector<std::pair<uint32_t, float>> result(top_k_docs.size());
+	idx = top_k_docs.size() - 1;
+	while (!top_k_docs.empty()) {
+		result[idx] = top_k_docs.top();
+		top_k_docs.pop();
+		--idx;
+	}
+
+	return result;
+}
+
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& _query,
 		uint32_t top_k,
 		uint32_t init_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
+	// std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k, init_max_df);
 	std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k, init_max_df);
+	result.reserve(top_k_docs.size());
+
+	std::vector<std::pair<std::string, std::string>> row;
+	for (size_t i = 0; i < top_k_docs.size(); ++i) {
+		switch (file_type) {
+			case CSV:
+				row = get_csv_line(top_k_docs[i].first);
+				break;
+			case JSON:
+				row = get_json_line(top_k_docs[i].first);
+				break;
+			default:
+				std::cout << "Error: Incorrect file type" << std::endl;
+				std::exit(1);
+				break;
+		}
+		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].second)));
+		result.push_back(row);
+	}
+	return result;
+}
+
+std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
+		std::string& _query,
+		uint32_t top_k,
+		uint32_t init_max_df,
+		uint32_t* mask_idxs,
+		uint32_t mask_len
+		) {
+	std::vector<std::vector<std::pair<std::string, std::string>>> result;
+	std::vector<std::pair<uint32_t, float>> top_k_docs = query(
+			_query, 
+			top_k, 
+			init_max_df,
+			mask_idxs,
+			mask_len
+			);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;

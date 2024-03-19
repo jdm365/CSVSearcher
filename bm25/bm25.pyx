@@ -31,6 +31,7 @@ cdef extern from "engine.h":
         _BM25(string db_dir)
         vector[pair[uint32_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
         vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df)
+        vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df, uint32_t* mask_idxs, uint32_t mask_len)
         void save_to_disk()
         void load_from_disk(string db_dir)
 
@@ -189,11 +190,31 @@ cdef class BM25:
         return scores, indices
 
 
-    def get_topk_docs(self, str query, int k = 10, int init_max_df = 1000):
+    cpdef get_topk_docs(
+            self, 
+            str query, 
+            int k = 10, 
+            int init_max_df = 1000, 
+            ## np.ndarray[uint32_t, ndim=1] mask_idxs = None
+            mask_idxs = None
+            ):
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
+        cdef uint32_t[:] mask_idxs_view 
 
-        results = self.bm25.get_topk_internal(query.upper().encode("utf-8"), k, init_max_df)
+        if mask_idxs is None:
+            results = self.bm25.get_topk_internal(query.upper().encode("utf-8"), k, init_max_df)
+        else:
+            ## define mask view of numpy array
+            mask_idxs_view = mask_idxs
+
+            results = self.bm25.get_topk_internal(
+                    query.upper().encode("utf-8"), 
+                    k, 
+                    init_max_df,
+                    &mask_idxs_view[0],
+                    mask_idxs.shape[0]
+                    )
 
         for idx in range(len(results)):
             _dict = {}
