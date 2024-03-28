@@ -31,7 +31,7 @@ cdef extern from "engine.h":
         _BM25(string db_dir)
         vector[pair[uint32_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
         vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df)
-        vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df, uint32_t* mask_idxs, uint32_t mask_len)
+        ## vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df, uint32_t* mask_idxs, uint32_t mask_len)
         void save_to_disk()
         void load_from_disk(string db_dir)
 
@@ -212,8 +212,8 @@ cdef class BM25:
                     query.upper().encode("utf-8"), 
                     k, 
                     init_max_df,
-                    &mask_idxs_view[0],
-                    mask_idxs.shape[0]
+                    ## &mask_idxs_view[0],
+                    ## mask_idxs.shape[0]
                     )
 
         for idx in range(len(results)):

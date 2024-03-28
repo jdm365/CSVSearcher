@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <stdio.h>
 
 #include <iostream>
 #include <vector>
@@ -13,9 +14,93 @@
 #include <sstream>
 #include <algorithm>
 
+#include <chrono>
+#include <ctime>
+#include <sys/mman.h>
+#include <fcntl.h>
+
 #include "engine.h"
 #include "robin_hood.h"
 
+
+std::vector<std::string> process_csv(const char* filepath) {
+    int fd = open(filepath, O_RDONLY);
+    if (fd == -1) {
+        std::cerr << "Error opening file: " << std::strerror(errno) << std::endl;
+        return {};
+    }
+
+    struct stat sb;
+    if (fstat(fd, &sb) == -1) {
+        std::cerr << "Error getting file size: " << std::strerror(errno) << std::endl;
+        close(fd);
+        return {};
+    }
+
+	char* mapped = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    if (mapped == MAP_FAILED) {
+        std::cerr << "Error mapping file: " << std::strerror(errno) << std::endl;
+        close(fd);
+        return {};
+    }
+	std::cout << "SB size: " << sb.st_size << std::endl;
+
+    // Allocate a char buffer to hold the file's contents
+    // Ensure there's enough memory for this operation to prevent bad_alloc exceptions
+    // char* buffer = new char[sb.st_size];
+
+    // Copy the contents from the memory-mapped area to the buffer
+    // std::memcpy(buffer, mapped, sb.st_size);
+	constexpr uint64_t COMMA_MASK   = 0x2C2C2C2C2C2C2C2C;
+	constexpr uint64_t NEWLINE_MASK = 0x0A0A0A0A0A0A0A0A;
+	constexpr uint64_t SPACE_MASK   = 0x2020202020202020;
+
+	// Read the file line up until comma
+	std::vector<std::string> names;
+	names.reserve(sb.st_size / 8);
+	std::string name = "";
+	/*
+	for (size_t i = 0; i < sb.st_size; ++i) {
+		switch (mapped[i]) {
+			case ' ':
+				names.push_back(name);
+				name.clear();
+				break;
+			case ',':
+				names.push_back(name);
+				name.clear();
+				break;
+			case '\n':
+				names.push_back(name);
+				break;
+			default:
+				name += mapped[i];
+				break;
+		}
+	}
+	*/
+	std::vector<uint16_t> lengths;
+	std::vector<uint64_t> starts;
+
+	for (size_t i = 0; i < sb.st_size; i += 8) {
+		uint64_t chunk = *(uint64_t*)(mapped + i);
+		uint64_t delim_mask = chunk & (COMMA_MASK | NEWLINE_MASK | SPACE_MASK);
+
+		int num_delims = __builtin_popcountll(delim_mask);
+		for (int j = 0; j < num_delims; ++j) {
+			uint64_t delim_idx = __builtin_ctzll(delim_mask);
+			lengths.push_back(delim_idx);
+			starts.push_back(i + delim_idx);
+		}
+	}
+
+    // Cleanup
+	// delete [] buffer;
+    munmap(mapped, sb.st_size);
+    close(fd);
+
+	return names;
+}
 
 
 void _BM25::read_json(std::vector<uint32_t>& terms) {
@@ -878,6 +963,16 @@ _BM25::_BM25(
 	std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
 	std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
 
+	/*
+	// Read again with process_csv
+	auto _start = std::chrono::high_resolution_clock::now();
+	std::vector<std::string> names = process_csv(filename.c_str());
+	auto _end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> _elapsed_seconds = _end - _start;
+	std::cout << "Processed csv in " << _elapsed_seconds.count() << " seconds" << std::endl;
+	std::cout << "Num names: " << names.size() << std::endl;
+	*/
+
 	auto start = std::chrono::high_resolution_clock::now();
 
 	doc_term_freqs.resize(unique_term_mapping.size());
@@ -1088,9 +1183,9 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		return std::vector<std::pair<uint32_t, float>>();
 	}
 
-	// if (DEBUG) {
-		// std::cout << "Num candidates: " << candidate_docs.size() << std::endl;
-	// }
+	// printf("Init max df: %d\n", init_max_df);
+	// printf("Local max df: %d\n", local_max_df);
+	// printf("Num candidate docs: %lu\n\n", candidate_docs.size());
 
 	// Priority queue to store top k docs
 	// Largest to smallest scores
@@ -1133,111 +1228,6 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	return result;
 }
 
-std::vector<std::pair<uint32_t, float>> _BM25::query(
-		std::string& query, 
-		uint32_t k,
-		uint32_t init_max_df,
-		uint32_t* mask_idxs,
-		uint32_t mask_len
-		) {
-	std::vector<uint32_t> term_idxs;
-
-	std::string substr = "";
-	for (const char& c : query) {
-		if (c != ' ') {
-			substr += c; 
-			continue;
-		}
-		if (unique_term_mapping.find(substr) == unique_term_mapping.end()) {
-			continue;
-		}
-		term_idxs.push_back(unique_term_mapping[substr]);
-		substr.clear();
-	}
-	if (unique_term_mapping.find(substr) != unique_term_mapping.end()) {
-		term_idxs.push_back(unique_term_mapping[substr]);
-	}
-
-	if (term_idxs.size() == 0) {
-		return std::vector<std::pair<uint32_t, float>>();
-	}
-
-	// Gather docs that contain at least one term from the query
-	// Uses dynamic max_df for performance
-	int local_max_df = init_max_df;
-	robin_hood::unordered_set<uint32_t> candidate_docs;
-
-	while (candidate_docs.size() == 0) {
-		for (const uint32_t& term_idx : term_idxs) {
-			std::vector<uint32_t> doc_ids = get_inverted_index_db(term_idx);
-
-			if (doc_ids.size() == 0) {
-				continue;
-			}
-
-			if (doc_ids.size() > local_max_df) {
-				continue;
-			}
-
-			for (const uint32_t& doc_id : doc_ids) {
-				candidate_docs.insert(doc_id);
-			}
-		}
-		local_max_df *= 20;
-
-		if (local_max_df > num_docs || local_max_df > (int)max_df * num_docs) {
-			break;
-		}
-	}
-	
-	if (candidate_docs.size() == 0) {
-		return std::vector<std::pair<uint32_t, float>>();
-	}
-
-	robin_hood::unordered_set<uint32_t> mask_set(mask_idxs, mask_idxs + mask_len);
-
-	// Apply mask
-
-	// Priority queue to store top k docs
-	// Largest to smallest scores
-	std::priority_queue<
-		std::pair<uint32_t, float>, 
-		std::vector<std::pair<uint32_t, float>>, 
-		_compare> top_k_docs;
-
-	// Compute BM25 scores for each candidate doc
-	std::vector<float> idfs(term_idxs.size(), 0.0f);
-	int idx = 0;
-	for (const uint32_t& doc_id : candidate_docs) {
-		float score = 0;
-		int   jdx = 0;
-		for (const uint32_t& term_idx : term_idxs) {
-			if (idx == 0) {
-				idfs[jdx] = _compute_idf(term_idx);
-			}
-			float tf  = get_term_freq_from_file(doc_id, term_idx);
-			score += _compute_bm25(doc_id, tf, idfs[jdx]);
-			++jdx;
-		}
-
-		top_k_docs.push(std::make_pair(doc_id, score));
-		if (top_k_docs.size() > k) {
-			top_k_docs.pop();
-		}
-		++idx;
-	}
-	
-
-	std::vector<std::pair<uint32_t, float>> result(top_k_docs.size());
-	idx = top_k_docs.size() - 1;
-	while (!top_k_docs.empty()) {
-		result[idx] = top_k_docs.top();
-		top_k_docs.pop();
-		--idx;
-	}
-
-	return result;
-}
 
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& _query,
@@ -1245,45 +1235,7 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		uint32_t init_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	// std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k, init_max_df);
 	std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k, init_max_df);
-	result.reserve(top_k_docs.size());
-
-	std::vector<std::pair<std::string, std::string>> row;
-	for (size_t i = 0; i < top_k_docs.size(); ++i) {
-		switch (file_type) {
-			case CSV:
-				row = get_csv_line(top_k_docs[i].first);
-				break;
-			case JSON:
-				row = get_json_line(top_k_docs[i].first);
-				break;
-			default:
-				std::cout << "Error: Incorrect file type" << std::endl;
-				std::exit(1);
-				break;
-		}
-		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].second)));
-		result.push_back(row);
-	}
-	return result;
-}
-
-std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
-		std::string& _query,
-		uint32_t top_k,
-		uint32_t init_max_df,
-		uint32_t* mask_idxs,
-		uint32_t mask_len
-		) {
-	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	std::vector<std::pair<uint32_t, float>> top_k_docs = query(
-			_query, 
-			top_k, 
-			init_max_df,
-			mask_idxs,
-			mask_len
-			);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;
