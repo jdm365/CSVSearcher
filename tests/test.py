@@ -20,7 +20,7 @@ def test_okapi_bm25(csv_filename: str):
     bm25 = BM25Okapi(tokenized_names)
     print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
 
-    for company in tqdm(companies_sample, desc="Querying"):
+    for company in tqdm(companies_sample[:10], desc="Querying"):
         tok_company = company.split()
         bm25.get_top_n(tok_company, tokenized_names, n=10)
 
@@ -35,9 +35,6 @@ def test_retriv(csv_filename: str):
 
     rand_idxs = np.random.choice(len(names), 10_000, replace=False)
     companies_sample = names.iloc[rand_idxs]
-    companies_sample_dict = df.iloc[rand_idxs].rename(
-        columns={'name': 'text', 'domain': 'id'}
-    ).to_dict(orient='records')
 
     init = perf_counter()
     model = SparseRetriever()
@@ -68,6 +65,93 @@ def test_retriv(csv_filename: str):
             )
 
 
+def test_duckdb(csv_filename: str):
+    import duckdb
+
+    CONN = duckdb.connect(database=':memory:')
+    CONN.execute(f"""
+        CREATE TABLE companies AS (SELECT * FROM read_csv_auto('{csv_filename}'))
+    """)
+
+    init = perf_counter()
+    CONN.execute("""
+                 PRAGMA
+                 create_fts_index('companies', 'domain', 'name')
+                 """)
+    print(f"Time to index: {perf_counter() - init:.2f} seconds")
+
+    companies_sample = CONN.execute("SELECT name FROM companies ORDER BY RANDOM() LIMIT 10000").fetchdf()['name']
+
+    init = perf_counter()
+    for company in tqdm(companies_sample, desc="Querying"):
+        CONN.execute(f"""
+                     SELECT name, score, domain FROM (
+                         SELECT *, fts_main_documents.match_bm25(
+                             domain,
+                             '{company}'
+                             ) AS score
+                         FROM companies
+                         LIMIT 10
+                        ) sq
+                     WHERE score IS NOT NULL
+                     ORDER BY score DESC
+                     """)
+    print(f"Time to query: {perf_counter() - init:.2f} seconds")
+
+def test_anserini(csv_filename: str):
+    from pyserini.search import LuceneSearcher
+    from pyserini.index.lucene import LuceneIndexer
+
+    ## convert to json
+    df = pd.read_csv(csv_filename).fillna('')
+    companies_sample = df['name'].sample(10_000)
+
+    df.rename(columns={'name': 'contents', 'domain': 'id'}, inplace=True)
+    os.system('rm -rf tmp_data_dir')
+    os.system('mkdir tmp_data_dir')
+
+    records = df.to_dict(orient='records')
+
+    init = perf_counter()
+    writer = LuceneIndexer('tmp_data_dir', append=True, threads=1)
+    writer.add_batch_dict(records)
+    writer.close()
+    print(f"Time to index: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
+    searcher = LuceneSearcher('tmp_data_dir')
+    for company in tqdm(companies_sample, desc="Querying"):
+        hits = searcher.search(company, k=10)
+        ## print(hits)
+    print(f"Time to query: {perf_counter() - init:.2f} seconds")
+
+    os.system('rm -rf tmp_data_dir')
+
+
+def test_sklearn(csv_filename: str):
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    df = pd.read_csv(csv_filename)
+    names = df['name']
+
+    rand_idxs = np.random.choice(len(names), 10_000, replace=False)
+    companies_sample = names.iloc[rand_idxs]
+
+    init = perf_counter()
+    vectorizer = TfidfVectorizer()
+    X = vectorizer.fit_transform(names)
+    print(f"Time to vectorize: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
+    for company in tqdm(companies_sample[:10], desc="Querying"):
+        company_vec = vectorizer.transform([company])
+        cosine_similarity(X, company_vec)
+
+    print(f"Time to query: {perf_counter() - init:.2f} seconds")
+    
+
+
 if __name__ == '__main__':
     query = "netflix inc"
 
@@ -82,6 +166,9 @@ if __name__ == '__main__':
 
     ## test_okapi_bm25(FILENAME)
     ## test_retriv(FILENAME)
+    ## test_duckdb(FILENAME)
+    test_anserini(FILENAME)
+    ## test_sklearn(FILENAME)
 
     init = perf_counter()
     ## df = pd.read_json(FILENAME, lines=True)
@@ -94,10 +181,12 @@ if __name__ == '__main__':
 
     model = BM25(
             filename=FILENAME, 
+            ## filename='corpus.json', 
             ## text_col='text',
             text_col='name',
             ## db_dir='bm25_db'
-            max_df=(10000/7.2e6)
+            ## max_df=(10000/7.2e6)
+            ## max_df=(100/7.2e6)
             )
     os.system(f"rm -rf bm25_db")
     ## exit()

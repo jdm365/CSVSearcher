@@ -23,17 +23,13 @@ LINUX_LINK_ARGS = [
         ## "-fopenmp",
     "-lc++",
     "-lc++abi",
-    ## "-lleveldb",
     "-L/usr/local/lib",
-    ## "-lsnappy",
 ]
 
 DARWIN_LINK_ARGS = [
     "-lc++",
     "-lc++abi",
-    ## "-lleveldb",
     "-L/usr/local/lib",
-    ## "-lsnappy",
 ]
 
 extensions = [
