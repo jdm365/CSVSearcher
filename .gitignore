@@ -5,6 +5,7 @@ __pycache__/
 *.bin
 /bm25_db/
 gen_compile_commands/
+bm25.cpp
 
 # C extensions
 *.so
