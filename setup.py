@@ -14,23 +14,23 @@ COMPILER_FLAGS = [
     "-Wextra",
     "-march=native",
     "-ffast-math",
-    ## "-fPIC",
 ]
 
 OS = os.uname().sysname
 
-LINUX_LINK_ARGS = [
-        ## "-fopenmp",
+LINK_ARGS = [
     "-lc++",
     "-lc++abi",
     "-L/usr/local/lib",
 ]
 
-DARWIN_LINK_ARGS = [
-    "-lc++",
-    "-lc++abi",
-    "-L/usr/local/lib",
-]
+if OS == "Darwin":
+    COMPILER_FLAGS += [
+        "-fopenmp",
+    ]
+    LINK_ARGS += [
+        "-fopenmp"
+    ]
 
 extensions = [
     Extension(
@@ -39,7 +39,7 @@ extensions = [
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=[np.get_include(), "bm25"],
-        extra_link_args=DARWIN_LINK_ARGS if OS == "Darwin" else LINUX_LINK_ARGS,
+        extra_link_args=LINK_ARGS,
     ),
 ]
 
