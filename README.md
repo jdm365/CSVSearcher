@@ -3,6 +3,8 @@ BM25 algorithm written in c++ and exposed through cython.
 
 ## Install
 ```bash
+git clone https://github.com/jdm365/BM25.git
+cd BM25
 make install
 ```
 
