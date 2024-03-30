@@ -29,9 +29,15 @@ cdef extern from "engine.h":
                 float b
                 ) nogil
         _BM25(string db_dir)
+        _BM25(
+                vector[string]& documents,
+                int   min_df,
+                float max_df,
+                float k1,
+                float b
+                ) nogil
         vector[pair[uint32_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
         vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df)
-        ## vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df, uint32_t* mask_idxs, uint32_t mask_len)
         void save_to_disk()
         void load_from_disk(string db_dir)
 
@@ -39,11 +45,13 @@ cdef extern from "engine.h":
 
 cdef class BM25:
     cdef _BM25* bm25
-    cdef int   min_df
-    cdef float max_df
-    cdef str   filename 
-    cdef str   text_col
-    cdef str   db_dir
+    cdef int    min_df
+    cdef float  max_df
+    cdef str    filename 
+    cdef str    text_col
+    cdef str    db_dir
+    cdef float  k1 
+    cdef float  b
 
 
     def __init__(
@@ -53,50 +61,32 @@ cdef class BM25:
             str  db_dir   = None,
             list documents = [], 
             int   min_df = 1,
-            float max_df = 1.0
+            float max_df = 1.0,
+            float k1     = 1.2,
+            float b      = 0.4
             ):
         self.filename = filename 
         self.text_col = text_col
 
         self.min_df = min_df
         self.max_df = max_df
+        self.k1     = k1
+        self.b      = b
 
         self.db_dir = 'bm25_db'
 
         if documents != []:
-            pass
+            init = perf_counter()
+            self._init_with_documents(documents)
+            print(f"Built index in {perf_counter() - init:.2f} seconds")
 
-        '''
-        if db_dir is not None:
-            try:
-                self.bm25 = new _BM25(db_dir.encode("utf-8"))
-            except FileNotFoundError:
-                print(f"DB dir {db_dir} not found. Has it moved? Training from scratch.")
-
+        else:
+            success = self.load()
+            if not success:
                 init = perf_counter()
-                self._build_inverted_index(documents)
+                self._init_with_file()
                 print(f"Built index in {perf_counter() - init:.2f} seconds")
 
-
-        elif filename != '' and text_col != '':
-            init = perf_counter()
-            self._build_inverted_index(documents)
-            print(f"Built index in {perf_counter() - init:.2f} seconds")
-        '''
-        success = self.load()
-        if not success:
-            init = perf_counter()
-            self._build_inverted_index(documents)
-            print(f"Built index in {perf_counter() - init:.2f} seconds")
-
-        '''
-        else:
-            raise ValueError("""One of the following must be provided: \
-                                1: db_dir\
-                                2: filename + text_col\
-                                3: documents\
-                                """)
-        '''
 
 
     def __cinit__(
@@ -165,18 +155,32 @@ cdef class BM25:
             f.write(str(last_modified))
 
 
-    cdef void _build_inverted_index(self, list documents):
+    cdef void _init_with_documents(self, list documents):
+        self.filename = "in_memory"
+
+        cdef vector[string] docs
+        docs.reserve(len(documents))
+        for doc in documents:
+            docs.push_back(doc.upper().encode("utf-8"))
+
+        self.bm25 = new _BM25(
+                docs,
+                self.min_df,
+                self.max_df,
+                self.k1,
+                self.b
+                )
+
+    cdef void _init_with_file(self):
         self.bm25 = new _BM25(
                 self.filename.encode("utf-8"),
                 self.text_col.encode("utf-8"),
                 self.min_df,
                 self.max_df,
-                1.2,
-                0.4
+                self.k1,
+                self.b
                 )
-        ## self.bm25.save_to_disk()
         self.save()
-
 
     def query(self, str query, int init_max_df = 1000):
         results = self.bm25.query(query.upper().encode("utf-8"), 10, init_max_df)
@@ -194,26 +198,19 @@ cdef class BM25:
             self, 
             str query, 
             int k = 10, 
-            int init_max_df = 1000, 
-            ## np.ndarray[uint32_t, ndim=1] mask_idxs = None
-            mask_idxs = None
+            int init_max_df = 1000
             ):
+        ## Will just call `query` if docs were provided and not filename.
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
-        cdef uint32_t[:] mask_idxs_view 
 
-        if mask_idxs is None:
-            results = self.bm25.get_topk_internal(query.upper().encode("utf-8"), k, init_max_df)
+        if self.filename == "in_memory":
+            return self.query(query, init_max_df)
         else:
-            ## define mask view of numpy array
-            mask_idxs_view = mask_idxs
-
             results = self.bm25.get_topk_internal(
                     query.upper().encode("utf-8"), 
                     k, 
-                    init_max_df,
-                    ## &mask_idxs_view[0],
-                    ## mask_idxs.shape[0]
+                    init_max_df
                     )
 
         for idx in range(len(results)):

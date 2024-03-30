@@ -961,17 +961,9 @@ _BM25::_BM25(
 
 	auto read_end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
-	std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
-
-	/*
-	// Read again with process_csv
-	auto _start = std::chrono::high_resolution_clock::now();
-	std::vector<std::string> names = process_csv(filename.c_str());
-	auto _end = std::chrono::high_resolution_clock::now();
-	std::chrono::duration<double> _elapsed_seconds = _end - _start;
-	std::cout << "Processed csv in " << _elapsed_seconds.count() << " seconds" << std::endl;
-	std::cout << "Num names: " << names.size() << std::endl;
-	*/
+	if (DEBUG) {
+		std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
+	}
 
 	auto start = std::chrono::high_resolution_clock::now();
 
@@ -1059,9 +1051,195 @@ _BM25::_BM25(
 		// Copy to term freqs
 		for (const auto& pair : local_term_freqs) {
 			term_freqs[doc_id].emplace_back(pair.first, pair.second);
-			// if (pair.second > 1) {
-				// term_freqs[doc_id].emplace_back(pair.first, pair.second);
-			// }
+		}
+	}
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
+
+	if (DEBUG) {
+		std::cout << "Got term frequencies and inverted index in " << elapsed_seconds.count() << "s" << std::endl;
+	}
+
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - overall_start;
+	if (DEBUG) {
+		std::cout << "Finished creating BM25 index in " << elapsed_seconds.count() << "s" << std::endl;
+	}
+
+	uint64_t max_doc_size = 0;
+	avg_doc_size = 0.0f;
+	for (int doc_id = 0; doc_id < num_docs; ++doc_id) {
+		avg_doc_size += (float)doc_sizes[doc_id];
+		max_doc_size = std::max((uint64_t)doc_sizes[doc_id], max_doc_size);
+	}
+	avg_doc_size /= num_docs;
+
+	if (DEBUG) {
+		std::cout << "Largest doc size: " << max_doc_size << std::endl;
+	}
+
+	if (DEBUG) {
+		// Get mem usage of inverted_index
+		uint64_t bytes_used = 0;
+		for (const auto& vec : inverted_index) {
+			bytes_used += 4 * vec.size();
+		}
+		std::cout << "Inverted Index MB: " << bytes_used / (1024 * 1024) << std::endl;
+
+		bytes_used = 0;
+		for (const auto& vec : term_freqs) {
+			bytes_used += 6 * vec.size();
+		}
+		std::cout << "Term Freqs MB:     " << bytes_used / (1024 * 1024) << std::endl;
+		std::cout << "Doc Term Freqs MB: " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Doc Sizes MB:      " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Line Offsets MB:   " << (8 * line_offsets.size()) / (1024 * 1024) << std::endl;
+
+		std::cout << "Num unique terms:  " << unique_term_mapping.size() << std::endl;
+	}
+}
+
+
+_BM25::_BM25(
+		std::vector<std::string>& documents,
+		int min_df,
+		float max_df,
+		float k1,
+		float b
+		) : min_df(min_df), 
+			max_df(max_df), 
+			k1(k1), 
+			b(b) {
+	filename = "in_memory";
+	file_type = IN_MEMORY;
+
+	auto overall_start = std::chrono::high_resolution_clock::now();
+
+	num_docs = documents.size();
+
+	std::vector<uint32_t> terms;
+	terms.reserve(documents.size() * documents[0].size());
+
+	uint64_t unique_terms_found = 0;
+	std::string term = "";
+	for (const std::string& doc : documents) {
+		size_t char_idx = 0;
+		size_t doc_size = 0;
+
+		for (const char& c : doc) {
+			if (c == ' ') {
+				auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+				unique_terms_found += (uint64_t)add;
+				terms.push_back(it->second);
+				term.clear();
+				++doc_size;
+				++char_idx;
+				continue;
+			}
+
+			term += toupper(c);
+			++char_idx;
+		}
+		if (term.size() > 0) {
+			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+			unique_terms_found += (uint64_t)add;
+			terms.push_back(it->second);
+			term.clear();
+			++doc_size;
+		}
+		doc_sizes.push_back(doc_size);
+	}
+	terms.shrink_to_fit();
+	
+	auto start = std::chrono::high_resolution_clock::now();
+
+	doc_term_freqs.resize(unique_term_mapping.size());
+	inverted_index.resize(unique_term_mapping.size());
+	term_freqs.resize(num_docs);
+
+	std::cout << "Unique terms found: " << unique_terms_found << std::endl;
+	std::cout << std::flush;
+
+	// Accumulate document frequencies
+	uint64_t terms_seen = 0;
+	for (size_t doc_id = 0; doc_id < num_docs; ++doc_id) {
+		robin_hood::unordered_flat_set<uint32_t> seen_terms;
+
+		uint32_t doc_size = doc_sizes[doc_id];
+		size_t end = terms_seen + doc_size;
+
+		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
+			uint32_t mapped_term_idx = terms[term_idx];
+
+			if (seen_terms.find(mapped_term_idx) != seen_terms.end()) {
+				++terms_seen;
+				continue;
+			}
+
+			++doc_term_freqs[mapped_term_idx];
+
+			seen_terms.insert(mapped_term_idx);
+			++terms_seen;
+		}
+	}
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> elapsed_seconds = end - start;
+
+	if (DEBUG) {
+		std::cout << "Finished accumulating document frequencies in " << elapsed_seconds.count() << "s" << std::endl;
+	}
+
+
+	start = std::chrono::high_resolution_clock::now();
+
+	uint32_t max_number_of_occurrences = max_df * num_docs;
+	robin_hood::unordered_set<uint32_t> blacklisted_terms;
+
+	// Filter terms by min_df and max_df
+	for (size_t term_id = 0; term_id < doc_term_freqs.size(); ++term_id) {
+		uint32_t term_count = doc_term_freqs[term_id];
+		if (term_count < min_df || term_count > max_number_of_occurrences) {
+			blacklisted_terms.insert(term_id);
+			doc_term_freqs[term_id] = 0;
+		}
+		inverted_index[term_id].reserve(term_count);
+	}
+	end = std::chrono::high_resolution_clock::now();
+	elapsed_seconds = end - start;
+
+	if (DEBUG) {
+		std::cout << "Finished filtering terms by min_df and max_df in " << elapsed_seconds.count() << "s" << std::endl;
+	}
+
+	start = std::chrono::high_resolution_clock::now();
+	terms_seen = 0;
+	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
+		uint32_t doc_size = doc_sizes[doc_id];
+
+		size_t end = terms_seen + doc_size;
+
+		robin_hood::unordered_flat_map<uint32_t, uint16_t> local_term_freqs;
+		local_term_freqs.reserve(doc_size);
+		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
+			uint32_t mapped_term_idx = terms[term_idx];
+			++terms_seen;
+
+			if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
+				continue;
+			}
+
+			if (local_term_freqs.find(mapped_term_idx) != local_term_freqs.end()) {
+				++local_term_freqs[mapped_term_idx];
+			}
+			else {
+				local_term_freqs[mapped_term_idx] = 1;
+				inverted_index[mapped_term_idx].push_back(doc_id);
+			}
+		}
+
+		// Copy to term freqs
+		for (const auto& pair : local_term_freqs) {
+			term_freqs[doc_id].emplace_back(pair.first, pair.second);
 		}
 	}
 	end = std::chrono::high_resolution_clock::now();
@@ -1119,7 +1297,6 @@ inline float _BM25::_compute_bm25(
 		) {
 	float doc_size = doc_sizes[doc_id];
 
-	// return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
 	return idf * tf / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
 }
 
@@ -1183,10 +1360,6 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 		return std::vector<std::pair<uint32_t, float>>();
 	}
 
-	// printf("Init max df: %d\n", init_max_df);
-	// printf("Local max df: %d\n", local_max_df);
-	// printf("Num candidate docs: %lu\n\n", candidate_docs.size());
-
 	// Priority queue to store top k docs
 	// Largest to smallest scores
 	std::priority_queue<
@@ -1246,6 +1419,10 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 				break;
 			case JSON:
 				row = get_json_line(top_k_docs[i].first);
+				break;
+			case IN_MEMORY:
+				std::cout << "Error: In-memory data not supported for this function." << std::endl;
+				std::exit(1);
 				break;
 			default:
 				std::cout << "Error: Incorrect file type" << std::endl;

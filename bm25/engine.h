@@ -13,7 +13,7 @@ static const std::string DOC_SIZES_PATH      	  = DIR_NAME + "/" + "DOC_SIZES.bi
 static const std::string LINE_OFFSETS_PATH    	  = DIR_NAME + "/" + "LINE_OFFSETS.bin";
 static const std::string METADATA_PATH			  = DIR_NAME + "/" + "METADATA.bin";
 
-#define DEBUG 1
+#define DEBUG 0
 
 struct _compare {
 	inline bool operator()(const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
@@ -23,7 +23,8 @@ struct _compare {
 
 enum SupportedFileTypes {
 	CSV,
-	JSON
+	JSON,
+	IN_MEMORY
 };
 
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename);
@@ -84,6 +85,14 @@ class _BM25 {
 		_BM25(std::string db_dir) {
 			load_from_disk(db_dir);
 		}
+
+		_BM25(
+				std::vector<std::string>& documents,
+				int   min_df,
+				float max_df,
+				float k1,
+				float b
+				);
 
 		~_BM25() {}
 
