@@ -205,7 +205,7 @@ cdef class BM25:
         cdef list output = []
 
         if self.filename == "in_memory":
-            return self.query(query, init_max_df)
+            raise ValueError("Cannot get topk docs when documents were provided instead of a filename")
         else:
             results = self.bm25.get_topk_internal(
                     query.upper().encode("utf-8"), 
