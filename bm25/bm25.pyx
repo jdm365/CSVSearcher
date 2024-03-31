@@ -3,19 +3,12 @@
 cimport cython
 
 from libc.stdint cimport uint32_t 
-
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp.pair cimport pair
 from libcpp cimport bool
 
-cimport numpy as np
-import numpy as np
-np.import_array()
-
-import datetime
 import os
-from time import perf_counter
 
 
 cdef extern from "engine.h":
@@ -76,16 +69,12 @@ cdef class BM25:
         self.db_dir = 'bm25_db'
 
         if documents != []:
-            init = perf_counter()
             self._init_with_documents(documents)
-            print(f"Built index in {perf_counter() - init:.2f} seconds")
 
         else:
             success = self.load()
             if not success:
-                init = perf_counter()
                 self._init_with_file()
-                print(f"Built index in {perf_counter() - init:.2f} seconds")
 
 
 
@@ -194,18 +183,17 @@ cdef class BM25:
         return scores, indices
 
 
-    cpdef get_topk_docs(
+    def get_topk_docs(
             self, 
             str query, 
             int k = 10, 
             int init_max_df = 1000
             ):
-        ## Will just call `query` if docs were provided and not filename.
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
 
         if self.filename == "in_memory":
-            raise ValueError("Cannot get topk docs when documents were provided instead of a filename")
+            raise RuntimeError("Cannot get topk docs when documents were provided instead of a filename")
         else:
             results = self.bm25.get_topk_internal(
                     query.upper().encode("utf-8"), 

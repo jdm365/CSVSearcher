@@ -146,6 +146,8 @@ def test_sklearn(csv_filename: str):
 if __name__ == '__main__':
     query = "netflix inc"
 
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    FILENAME = os.path.join(CURRENT_DIR, 'data', 'companies_sorted.csv')
     FILENAME = '/home/jdm365/SearchApp/data/companies_sorted.csv'
 
     ## test_okapi_bm25(FILENAME)
