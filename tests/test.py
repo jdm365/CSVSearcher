@@ -144,11 +144,8 @@ def test_sklearn(csv_filename: str):
 
 
 if __name__ == '__main__':
-    query = "netflix inc"
-
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    FILENAME = os.path.join(CURRENT_DIR, 'data', 'companies_sorted.csv')
-    FILENAME = '/home/jdm365/SearchApp/data/companies_sorted.csv'
+    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
 
     ## test_okapi_bm25(FILENAME)
     ## test_retriv(FILENAME)
@@ -156,8 +153,9 @@ if __name__ == '__main__':
     ## test_anserini(FILENAME)
     ## test_sklearn(FILENAME)
 
-    names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True).name.tolist()
+    ## names = pd.read_csv(FILENAME, usecols=['name'], nrows=10000).reset_index(drop=True).name.tolist()
 
+    init = perf_counter()
     model = BM25(
             filename=FILENAME, 
             ## filename='corpus.json', 
@@ -168,20 +166,21 @@ if __name__ == '__main__':
             ## max_df=(10000/7.2e6)
             ## max_df=(100/7.2e6)
             )
-    os.system(f"rm -rf bm25_db")
-    names = pd.read_csv(FILENAME, usecols=['name'])
+    print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
-    rand_idxs = np.random.choice(len(names), 10_000, replace=False)
+    N = 10_000
+    names = pd.read_csv(FILENAME, usecols=['name'], nrows=N).reset_index(drop=True).name.tolist()
 
     init = perf_counter()
-    for idx in tqdm(rand_idxs, desc="Querying"):
-        model.query(names.loc[idx, 'name'], init_max_df=500)
-        ## records = model.get_topk_docs(names[idx], k=10, init_max_df=500)
-    time = perf_counter() - init
-    print(f"Time taken: {time:.2f} seconds")
-    print(f"Queries per second: {len(rand_idxs) / time:.2f}")
+    for idx, name in enumerate(tqdm(names, desc="Querying")):
+        model.query(name, init_max_df=500)
 
-    records = model.get_topk_docs(query, k=10, init_max_df=500)
+    time = perf_counter() - init
+    print(f"Queries per second: {N / time:.2f}")
+
+    QUERY = "netflix inc"
+
+    records = model.get_topk_docs(QUERY, k=10, init_max_df=500)
     print(pd.DataFrame(records))
 
     ## scores, indices = model.get_topk_docs(query, k=10, init_max_df=500)

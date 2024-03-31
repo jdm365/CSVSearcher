@@ -21,6 +21,7 @@
 
 #include "engine.h"
 #include "robin_hood.h"
+#include "xxhash64.h"
 
 
 std::vector<std::string> process_csv(const char* filepath) {
@@ -103,7 +104,7 @@ std::vector<std::string> process_csv(const char* filepath) {
 }
 
 
-void _BM25::read_json(std::vector<uint32_t>& terms) {
+void _BM25::read_json(std::vector<uint64_t>& terms) {
 	// Open the file
 	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
@@ -117,7 +118,7 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 	ssize_t  read;
 	uint64_t line_num = 0;
 
-	uint32_t unique_terms_found = 0;
+	uint64_t unique_terms_found = 0;
 
 	while ((read = getline(&line, &len, file)) != -1) {
 		line_offsets.push_back(ftello(file) - read);
@@ -185,7 +186,7 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 
 			if (line[char_idx] == ' ') {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				unique_terms_found += (uint32_t)add;
+				unique_terms_found += (uint64_t)add;
 				terms.push_back(it->second);
 
 				++doc_size;
@@ -202,7 +203,7 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 			}
 		}
 		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-		unique_terms_found += (uint32_t)add;
+		unique_terms_found += (uint64_t)add;
 		terms.push_back(it->second);
 		++doc_size;
 		doc_sizes.push_back(doc_size);
@@ -214,7 +215,7 @@ void _BM25::read_json(std::vector<uint32_t>& terms) {
 	std::cout << "Num docs: " << num_docs << std::endl;
 }
 
-void _BM25::read_csv(std::vector<uint32_t>& terms) {
+void _BM25::read_csv(std::vector<uint64_t>& terms) {
 	// Open the file
 	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
@@ -228,7 +229,7 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 	char*    line = NULL;
 	size_t   len = 0;
 	ssize_t  read;
-	uint32_t line_num = 0;
+	uint64_t line_num = 0;
 	uint64_t byte_offset = 0;
 
 	// Get col names
@@ -255,7 +256,7 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 	}
 	byte_offset += ftell(file);
 
-	uint32_t unique_terms_found = 0;
+	uint64_t unique_terms_found = 0;
 
 	std::string doc = "";
 
@@ -298,7 +299,7 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 		while (line[char_idx] != end_delim) {
 			if (line[char_idx] == ' ') {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				unique_terms_found += (uint32_t)add;
+				unique_terms_found += (uint64_t)add;
 				terms.push_back(it->second);
 				++doc_size;
 				doc.clear();
@@ -310,7 +311,7 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 			++char_idx;
 		}
 		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-		unique_terms_found += (uint32_t)add;
+		unique_terms_found += (uint64_t)add;
 		terms.push_back(it->second);
 		++doc_size;
 		doc_sizes.push_back(doc_size);
@@ -322,7 +323,7 @@ void _BM25::read_csv(std::vector<uint32_t>& terms) {
 	num_docs = doc_sizes.size();
 }
 
-void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
+void _BM25::read_csv_hash(std::vector<uint64_t>& terms) {
 	// Open the file
 	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
@@ -336,7 +337,7 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 	char*    line = NULL;
 	size_t   len = 0;
 	ssize_t  read;
-	uint32_t line_num = 0;
+	uint64_t line_num = 0;
 	uint64_t byte_offset = 0;
 
 	// Get col names
@@ -352,7 +353,6 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 			search_column_index = columns.size() - 1;
 		}
 	}
-	byte_offset += ftell(file);
 
 	if (search_column_index == -1) {
 		std::cerr << "Search column not found in header" << std::endl;
@@ -362,17 +362,17 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 		std::cerr << std::endl;
 		exit(1);
 	}
+	byte_offset += ftell(file);
 
-	uint32_t unique_terms_found = 0;
-
+	std::string doc = "";
 
 	// Small string optimization limit on most platforms
+	doc.reserve(22);
 
 	while ((read = getline(&line, &len, file)) != -1) {
-		std::string doc;
-
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
+
 		++line_num;
 
 		// Iterate of line chars until we get to relevant column.
@@ -404,10 +404,7 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 
 		while (line[char_idx] != end_delim) {
 			if (line[char_idx] == ' ') {
-				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				unique_terms_found += (uint32_t)add;
-				terms.push_back(it->second);
-
+				terms.push_back(hasher.hash(doc.data(), doc.size(), SEED));
 				++doc_size;
 				doc.clear();
 
@@ -417,20 +414,17 @@ void _BM25::read_csv_fast(std::vector<uint32_t>& terms) {
 			doc += toupper(line[char_idx]);
 			++char_idx;
 		}
-		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-		unique_terms_found += (uint32_t)add;
-		terms.push_back(it->second);
-
+		terms.push_back(hasher.hash(doc.data(), doc.size(), SEED));
 		++doc_size;
-		doc.clear();
-
 		doc_sizes.push_back(doc_size);
+		doc.clear();
 	}
 
 	fclose(file);
 
 	num_docs = doc_sizes.size();
 }
+
 
 std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num) {
 	std::ifstream file(filename);
@@ -551,7 +545,10 @@ void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& f
     out_file.close();
 }
 
-void serialize_vector_of_vectors_u32(const std::vector<std::vector<uint32_t>>& vec, const std::string& filename) {
+void serialize_vector_of_vectors_u32(
+		const std::vector<std::vector<uint32_t>>& vec, 
+		const std::string& filename
+		) {
 	std::ofstream out_file(filename, std::ios::binary);
     if (!out_file) {
         std::cerr << "Error opening file for writing.\n";
@@ -569,6 +566,33 @@ void serialize_vector_of_vectors_u32(const std::vector<std::vector<uint32_t>>& v
         // Write the elements of the inner vector
         if (!inner_vec.empty()) {
             out_file.write(reinterpret_cast<const char*>(inner_vec.data()), inner_vec.size() * sizeof(uint32_t));
+        }
+    }
+
+    out_file.close();
+}
+
+void serialize_vector_of_vectors_u64(
+		const std::vector<std::vector<uint64_t>>& vec, 
+		const std::string& filename
+		) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file for writing.\n";
+        return;
+    }
+
+    // Write the size of the outer vector first
+    size_t outer_size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+
+    for (const auto& inner_vec : vec) {
+        size_t inner_size = inner_vec.size();
+        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
+        
+        // Write the elements of the inner vector
+        if (!inner_vec.empty()) {
+            out_file.write(reinterpret_cast<const char*>(inner_vec.data()), inner_vec.size() * sizeof(uint64_t));
         }
     }
 
@@ -599,8 +623,62 @@ void serialize_robin_hood_flat_map_string_u32(
     out_file.close();
 }
 
+void serialize_robin_hood_flat_map_string_u64(
+		const robin_hood::unordered_flat_map<std::string, uint64_t>& map,
+		const std::string& filename
+		) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file for writing.\n";
+        return;
+    }
+
+    // Write the size of the map first
+    size_t map_size = map.size();
+    out_file.write(reinterpret_cast<const char*>(&map_size), sizeof(map_size));
+
+    for (const auto& [key, value] : map) {
+        size_t key_size = key.size();
+        out_file.write(reinterpret_cast<const char*>(&key_size), sizeof(key_size));
+        out_file.write(key.data(), key_size);
+        out_file.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    }
+
+    out_file.close();
+}
+
 void serialize_vector_of_vectors_pair_u32_u16(
 		const std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
+		const std::string& filename
+		) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file for writing.\n";
+        return;
+    }
+
+    // Write the size of the outer vector
+    size_t outer_size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+
+    // Iterate through the outer vector
+    for (const auto& inner_vec : vec) {
+        // Write the size of the inner vector
+        size_t inner_size = inner_vec.size();
+        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
+        
+        // Write the pairs
+        for (const auto& [first, second] : inner_vec) {
+            out_file.write(reinterpret_cast<const char*>(&first), sizeof(first));
+            out_file.write(reinterpret_cast<const char*>(&second), sizeof(second));
+        }
+    }
+
+    out_file.close();
+}
+
+void serialize_vector_of_vectors_pair_u64_u16(
+		const std::vector<std::vector<std::pair<uint64_t, uint16_t>>>& vec, 
 		const std::string& filename
 		) {
 	std::ofstream out_file(filename, std::ios::binary);
@@ -670,7 +748,10 @@ void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filen
     in_file.close();
 }
 
-void deserialize_vector_of_vectors_u32(std::vector<std::vector<uint32_t>>& vec, const std::string& filename) {
+void deserialize_vector_of_vectors_u32(
+		std::vector<std::vector<uint32_t>>& vec, 
+		const std::string& filename
+		) {
 	std::ifstream in_file(filename, std::ios::binary);
     if (!in_file) {
         std::cerr << "Error opening file for reading.\n";
@@ -696,6 +777,42 @@ void deserialize_vector_of_vectors_u32(std::vector<std::vector<uint32_t>>& vec, 
         // Read the elements of the inner vector
         if (inner_size > 0) {
             in_file.read(reinterpret_cast<char*>(inner_vec.data()), inner_size * sizeof(uint32_t));
+        }
+    }
+
+    in_file.close();
+}
+
+
+void deserialize_vector_of_vectors_u64(
+		std::vector<std::vector<uint64_t>>& vec, 
+		const std::string& filename
+		) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+	if (vec.size() > 0) {
+		vec.clear();
+	}
+
+	// Read the size of the outer vector
+    size_t outer_size;
+    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
+    vec.resize(outer_size);
+
+    // Iterate through the outer vector
+    for (auto& inner_vec : vec) {
+        // Read the size of the inner vector
+        size_t inner_size;
+        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
+        inner_vec.resize(inner_size);
+
+        // Read the elements of the inner vector
+        if (inner_size > 0) {
+            in_file.read(reinterpret_cast<char*>(inner_vec.data()), inner_size * sizeof(uint64_t));
         }
     }
 
@@ -733,8 +850,69 @@ void deserialize_robin_hood_flat_map_string_u32(
     in_file.close();
 }
 
+void deserialize_robin_hood_flat_map_string_u64(
+		robin_hood::unordered_flat_map<std::string, uint64_t>& map,
+		const std::string& filename
+		) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+	// Read the size of the map
+    size_t map_size;
+    in_file.read(reinterpret_cast<char*>(&map_size), sizeof(map_size));
+
+    // Read each key-value pair and insert it into the map
+    for (size_t i = 0; i < map_size; ++i) {
+        size_t keySize;
+        in_file.read(reinterpret_cast<char*>(&keySize), sizeof(keySize));
+        
+        std::string key(keySize, '\0');
+        in_file.read(&key[0], keySize);
+
+        uint64_t value;
+        in_file.read(reinterpret_cast<char*>(&value), sizeof(value));
+
+        map[key] = value;
+    }
+
+    in_file.close();
+}
+
 void deserialize_vector_of_vectors_pair_u32_u16(
 		std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
+		const std::string& filename
+		) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read the size of the outer vector
+    size_t outer_size;
+    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
+    vec.resize(outer_size);
+
+    for (auto& inner_vec : vec) {
+        size_t inner_size;
+        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
+        inner_vec.resize(inner_size);
+
+        // Read the pairs
+        for (auto& [first, second] : inner_vec) {
+            in_file.read(reinterpret_cast<char*>(&first), sizeof(first));
+            in_file.read(reinterpret_cast<char*>(&second), sizeof(second));
+        }
+    }
+
+    in_file.close();
+}
+
+void deserialize_vector_of_vectors_pair_u64_u16(
+		std::vector<std::vector<std::pair<uint64_t, uint16_t>>>& vec, 
 		const std::string& filename
 		) {
 	std::ifstream in_file(filename, std::ios::binary);
@@ -781,11 +959,11 @@ void _BM25::save_to_disk() {
 		system(command.c_str());
 	}
 
-	serialize_robin_hood_flat_map_string_u32(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
-	serialize_vector_of_vectors_u32(inverted_index, INVERTED_INDEX_PATH);
-	serialize_vector_of_vectors_pair_u32_u16(term_freqs, TERM_FREQS_FILE_PATH);
-	serialize_vector_u32(doc_term_freqs, DOC_TERM_FREQS_PATH);
-	serialize_vector_u32(doc_sizes, DOC_SIZES_PATH);
+	serialize_robin_hood_flat_map_string_u64(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
+	serialize_vector_of_vectors_u64(inverted_index, INVERTED_INDEX_PATH);
+	serialize_vector_of_vectors_pair_u64_u16(term_freqs, TERM_FREQS_FILE_PATH);
+	serialize_vector_u64(doc_term_freqs, DOC_TERM_FREQS_PATH);
+	serialize_vector_u64(doc_sizes, DOC_SIZES_PATH);
 	serialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
 
 	// Serialize smaller members.
@@ -839,11 +1017,11 @@ void _BM25::save_to_disk() {
 void _BM25::load_from_disk(const std::string& db_dir) {
 	auto start = std::chrono::high_resolution_clock::now();
 
-	deserialize_robin_hood_flat_map_string_u32(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
-	deserialize_vector_of_vectors_u32(inverted_index, INVERTED_INDEX_PATH);
-	deserialize_vector_of_vectors_pair_u32_u16(term_freqs, TERM_FREQS_FILE_PATH);
-	deserialize_vector_u32(doc_term_freqs, DOC_TERM_FREQS_PATH);
-	deserialize_vector_u32(doc_sizes, DOC_SIZES_PATH);
+	deserialize_robin_hood_flat_map_string_u64(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
+	deserialize_vector_of_vectors_u64(inverted_index, INVERTED_INDEX_PATH);
+	deserialize_vector_of_vectors_pair_u64_u16(term_freqs, TERM_FREQS_FILE_PATH);
+	deserialize_vector_u64(doc_term_freqs, DOC_TERM_FREQS_PATH);
+	deserialize_vector_u64(doc_sizes, DOC_SIZES_PATH);
 	deserialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
 
 	// Load smaller members.
@@ -899,25 +1077,27 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 	}
 }
 
-uint32_t _BM25::get_doc_term_freq_db(const uint32_t& term_idx) {
+uint64_t _BM25::get_doc_term_freq_db(const uint64_t& term_idx) {
 	return doc_term_freqs[term_idx];
+	// return doc_term_freqs_map[term_idx];
 }
 
-std::vector<uint32_t> _BM25::get_inverted_index_db(const uint32_t& term_idx) {
+std::vector<uint64_t> _BM25::get_inverted_index_db(const uint64_t& term_idx) {
 	return inverted_index[term_idx];
+	// return inverted_index_map[term_idx];
 }
 
 
 uint16_t _BM25::get_term_freq_from_file(
 		int line_num,
-		const uint32_t& term_idx
+		const uint64_t& term_idx
 		) {
 	// Default to 1.0f.
 	// Inverted index implies membership.
 	// Only store values with >1 term freq.
 	// float tf = 1.0f;
 	float tf = 0.0f;
-	for (const std::pair<uint32_t, uint16_t>& term_freq : term_freqs[line_num]) {
+	for (const std::pair<uint64_t, uint16_t>& term_freq : term_freqs[line_num]) {
 		if (term_freq.first == term_idx) {
 			tf = term_freq.second;
 			return tf;
@@ -944,10 +1124,10 @@ _BM25::_BM25(
 	auto overall_start = std::chrono::high_resolution_clock::now();
 	
 	// Read file to get documents, line offsets, and columns
-	std::vector<uint32_t> terms;
+	std::vector<uint64_t> terms;
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
-		// read_csv(terms);
-		read_csv_fast(terms);
+		read_csv(terms);
+		// read_csv_hash(terms);
 		file_type = CSV;
 	}
 	else if (filename.substr(filename.size() - 4, 4) == "json") {
@@ -974,13 +1154,13 @@ _BM25::_BM25(
 	// Accumulate document frequencies
 	uint64_t terms_seen = 0;
 	for (size_t doc_id = 0; doc_id < num_docs; ++doc_id) {
-		robin_hood::unordered_flat_set<uint32_t> seen_terms;
+		robin_hood::unordered_flat_set<uint64_t> seen_terms;
 
-		uint32_t doc_size = doc_sizes[doc_id];
-		size_t end = terms_seen + doc_size;
+		uint64_t doc_size = doc_sizes[doc_id];
+		uint64_t end = terms_seen + doc_size;
 
-		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
-			uint32_t mapped_term_idx = terms[term_idx];
+		for (uint64_t term_idx = terms_seen; term_idx < end; ++term_idx) {
+			uint64_t mapped_term_idx = terms[term_idx];
 
 			if (seen_terms.find(mapped_term_idx) != seen_terms.end()) {
 				++terms_seen;
@@ -988,6 +1168,14 @@ _BM25::_BM25(
 			}
 
 			++doc_term_freqs[mapped_term_idx];
+			/*
+			if (doc_term_freqs_map.find(mapped_term_idx) == doc_term_freqs_map.end()) {
+				doc_term_freqs_map[mapped_term_idx] = 1;
+			}
+			else {
+				++doc_term_freqs_map[mapped_term_idx];
+			}
+			*/
 
 			seen_terms.insert(mapped_term_idx);
 			++terms_seen;
@@ -1000,20 +1188,20 @@ _BM25::_BM25(
 		std::cout << "Finished accumulating document frequencies in " << elapsed_seconds.count() << "s" << std::endl;
 	}
 
-
 	start = std::chrono::high_resolution_clock::now();
 
-	uint32_t max_number_of_occurrences = max_df * num_docs;
-	robin_hood::unordered_set<uint32_t> blacklisted_terms;
+	uint64_t max_number_of_occurrences = max_df * num_docs;
+	robin_hood::unordered_set<uint64_t> blacklisted_terms;
 
 	// Filter terms by min_df and max_df
 	for (size_t term_id = 0; term_id < doc_term_freqs.size(); ++term_id) {
-		uint32_t term_count = doc_term_freqs[term_id];
+		uint64_t term_count = doc_term_freqs[term_id];
 		if (term_count < min_df || term_count > max_number_of_occurrences) {
 			blacklisted_terms.insert(term_id);
 			doc_term_freqs[term_id] = 0;
 		}
 		inverted_index[term_id].reserve(term_count);
+		// inverted_index_map[term_id].reserve(term_count);
 	}
 	end = std::chrono::high_resolution_clock::now();
 	elapsed_seconds = end - start;
@@ -1024,15 +1212,15 @@ _BM25::_BM25(
 
 	start = std::chrono::high_resolution_clock::now();
 	terms_seen = 0;
-	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
+	for (uint64_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		uint32_t doc_size = doc_sizes[doc_id];
 
 		size_t end = terms_seen + doc_size;
 
-		robin_hood::unordered_flat_map<uint32_t, uint16_t> local_term_freqs;
+		robin_hood::unordered_flat_map<uint64_t, uint16_t> local_term_freqs;
 		local_term_freqs.reserve(doc_size);
 		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
-			uint32_t mapped_term_idx = terms[term_idx];
+			uint64_t mapped_term_idx = terms[term_idx];
 			++terms_seen;
 
 			if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
@@ -1045,6 +1233,7 @@ _BM25::_BM25(
 			else {
 				local_term_freqs[mapped_term_idx] = 1;
 				inverted_index[mapped_term_idx].push_back(doc_id);
+				// inverted_index_map[mapped_term_idx].push_back(doc_id);
 			}
 		}
 
@@ -1079,21 +1268,20 @@ _BM25::_BM25(
 	}
 
 	if (DEBUG) {
-		// Get mem usage of inverted_index
 		uint64_t bytes_used = 0;
 		for (const auto& vec : inverted_index) {
-			bytes_used += 4 * vec.size();
+			bytes_used += sizeof(vec[0]) * vec.size();
 		}
 		std::cout << "Inverted Index MB: " << bytes_used / (1024 * 1024) << std::endl;
 
 		bytes_used = 0;
 		for (const auto& vec : term_freqs) {
-			bytes_used += 6 * vec.size();
+			bytes_used += (sizeof(vec[0].first) + sizeof(vec[0].second)) * vec.size();
 		}
 		std::cout << "Term Freqs MB:     " << bytes_used / (1024 * 1024) << std::endl;
-		std::cout << "Doc Term Freqs MB: " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-		std::cout << "Doc Sizes MB:      " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-		std::cout << "Line Offsets MB:   " << (8 * line_offsets.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Doc Term Freqs MB: " << (sizeof(doc_term_freqs[0]) * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Doc Sizes MB:      " << (sizeof(doc_sizes[0]) * doc_sizes.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Line Offsets MB:   " << (sizeof(line_offsets[0]) * line_offsets.size()) / (1024 * 1024) << std::endl;
 
 		std::cout << "Num unique terms:  " << unique_term_mapping.size() << std::endl;
 	}
@@ -1117,7 +1305,7 @@ _BM25::_BM25(
 
 	num_docs = documents.size();
 
-	std::vector<uint32_t> terms;
+	std::vector<uint64_t> terms;
 	terms.reserve(documents.size() * documents[0].size());
 
 	uint64_t unique_terms_found = 0;
@@ -1163,13 +1351,13 @@ _BM25::_BM25(
 	// Accumulate document frequencies
 	uint64_t terms_seen = 0;
 	for (size_t doc_id = 0; doc_id < num_docs; ++doc_id) {
-		robin_hood::unordered_flat_set<uint32_t> seen_terms;
+		robin_hood::unordered_flat_set<uint64_t> seen_terms;
 
 		uint32_t doc_size = doc_sizes[doc_id];
 		size_t end = terms_seen + doc_size;
 
 		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
-			uint32_t mapped_term_idx = terms[term_idx];
+			uint64_t mapped_term_idx = terms[term_idx];
 
 			if (seen_terms.find(mapped_term_idx) != seen_terms.end()) {
 				++terms_seen;
@@ -1192,12 +1380,12 @@ _BM25::_BM25(
 
 	start = std::chrono::high_resolution_clock::now();
 
-	uint32_t max_number_of_occurrences = max_df * num_docs;
-	robin_hood::unordered_set<uint32_t> blacklisted_terms;
+	uint64_t max_number_of_occurrences = max_df * num_docs;
+	robin_hood::unordered_set<uint64_t> blacklisted_terms;
 
 	// Filter terms by min_df and max_df
 	for (size_t term_id = 0; term_id < doc_term_freqs.size(); ++term_id) {
-		uint32_t term_count = doc_term_freqs[term_id];
+		uint64_t term_count = doc_term_freqs[term_id];
 		if (term_count < min_df || term_count > max_number_of_occurrences) {
 			blacklisted_terms.insert(term_id);
 			doc_term_freqs[term_id] = 0;
@@ -1213,15 +1401,15 @@ _BM25::_BM25(
 
 	start = std::chrono::high_resolution_clock::now();
 	terms_seen = 0;
-	for (uint32_t doc_id = 0; doc_id < num_docs; ++doc_id) {
-		uint32_t doc_size = doc_sizes[doc_id];
+	for (uint64_t doc_id = 0; doc_id < num_docs; ++doc_id) {
+		uint64_t doc_size = doc_sizes[doc_id];
 
 		size_t end = terms_seen + doc_size;
 
-		robin_hood::unordered_flat_map<uint32_t, uint16_t> local_term_freqs;
+		robin_hood::unordered_flat_map<uint64_t, uint16_t> local_term_freqs;
 		local_term_freqs.reserve(doc_size);
 		for (size_t term_idx = terms_seen; term_idx < end; ++term_idx) {
-			uint32_t mapped_term_idx = terms[term_idx];
+			uint64_t mapped_term_idx = terms[term_idx];
 			++terms_seen;
 
 			if (blacklisted_terms.find(mapped_term_idx) != blacklisted_terms.end()) {
@@ -1265,33 +1453,32 @@ _BM25::_BM25(
 	std::cout << "Largest doc size: " << max_doc_size << std::endl;
 
 	if (DEBUG) {
-		// Get mem usage of inverted_index
 		uint64_t bytes_used = 0;
 		for (const auto& vec : inverted_index) {
-			bytes_used += 4 * vec.size();
+			bytes_used += sizeof(vec[0]) * vec.size();
 		}
 		std::cout << "Inverted Index MB: " << bytes_used / (1024 * 1024) << std::endl;
 
 		bytes_used = 0;
 		for (const auto& vec : term_freqs) {
-			bytes_used += 6 * vec.size();
+			bytes_used += (sizeof(vec[0].first) + sizeof(vec[0].second)) * vec.size();
 		}
 		std::cout << "Term Freqs MB:     " << bytes_used / (1024 * 1024) << std::endl;
-		std::cout << "Doc Term Freqs MB: " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-		std::cout << "Doc Sizes MB:      " << (4 * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
-		std::cout << "Line Offsets MB:   " << (8 * line_offsets.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Doc Term Freqs MB: " << (sizeof(doc_term_freqs[0]) * doc_term_freqs.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Doc Sizes MB:      " << (sizeof(doc_sizes[0]) * doc_sizes.size()) / (1024 * 1024) << std::endl;
+		std::cout << "Line Offsets MB:   " << (sizeof(line_offsets[0]) * line_offsets.size()) / (1024 * 1024) << std::endl;
 
 		std::cout << "Num unique terms:  " << unique_term_mapping.size() << std::endl;
 	}
 }
 
-inline float _BM25::_compute_idf(const uint32_t& term_idx) {
-	uint32_t df = get_doc_term_freq_db(term_idx);
+inline float _BM25::_compute_idf(const uint64_t& term_idx) {
+	uint64_t df = get_doc_term_freq_db(term_idx);
 	return log((num_docs - df + 0.5) / (df + 0.5));
 }
 
 inline float _BM25::_compute_bm25(
-		uint32_t doc_id,
+		uint64_t doc_id,
 		float tf,
 		float idf
 		) {
@@ -1301,12 +1488,12 @@ inline float _BM25::_compute_bm25(
 }
 
 
-std::vector<std::pair<uint32_t, float>> _BM25::query(
+std::vector<std::pair<uint64_t, float>> _BM25::query(
 		std::string& query, 
 		uint32_t k,
 		uint32_t init_max_df 
 		) {
-	std::vector<uint32_t> term_idxs;
+	std::vector<uint64_t> term_idxs;
 
 	std::string substr = "";
 	for (const char& c : query) {
@@ -1325,17 +1512,17 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	}
 
 	if (term_idxs.size() == 0) {
-		return std::vector<std::pair<uint32_t, float>>();
+		return std::vector<std::pair<uint64_t, float>>();
 	}
 
 	// Gather docs that contain at least one term from the query
 	// Uses dynamic max_df for performance
 	int local_max_df = init_max_df;
-	robin_hood::unordered_set<uint32_t> candidate_docs;
+	robin_hood::unordered_set<uint64_t> candidate_docs;
 
 	while (candidate_docs.size() == 0) {
-		for (const uint32_t& term_idx : term_idxs) {
-			std::vector<uint32_t> doc_ids = get_inverted_index_db(term_idx);
+		for (const uint64_t& term_idx : term_idxs) {
+			std::vector<uint64_t> doc_ids = get_inverted_index_db(term_idx);
 
 			if (doc_ids.size() == 0) {
 				continue;
@@ -1345,7 +1532,7 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 				continue;
 			}
 
-			for (const uint32_t& doc_id : doc_ids) {
+			for (const uint64_t& doc_id : doc_ids) {
 				candidate_docs.insert(doc_id);
 			}
 		}
@@ -1357,23 +1544,23 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	}
 	
 	if (candidate_docs.size() == 0) {
-		return std::vector<std::pair<uint32_t, float>>();
+		return std::vector<std::pair<uint64_t, float>>();
 	}
 
 	// Priority queue to store top k docs
 	// Largest to smallest scores
 	std::priority_queue<
-		std::pair<uint32_t, float>, 
-		std::vector<std::pair<uint32_t, float>>, 
+		std::pair<uint64_t, float>, 
+		std::vector<std::pair<uint64_t, float>>, 
 		_compare> top_k_docs;
 
 	// Compute BM25 scores for each candidate doc
 	std::vector<float> idfs(term_idxs.size(), 0.0f);
 	int idx = 0;
-	for (const uint32_t& doc_id : candidate_docs) {
+	for (const uint64_t& doc_id : candidate_docs) {
 		float score = 0;
 		int   jdx = 0;
-		for (const uint32_t& term_idx : term_idxs) {
+		for (const uint64_t& term_idx : term_idxs) {
 			if (idx == 0) {
 				idfs[jdx] = _compute_idf(term_idx);
 			}
@@ -1390,7 +1577,7 @@ std::vector<std::pair<uint32_t, float>> _BM25::query(
 	}
 	
 
-	std::vector<std::pair<uint32_t, float>> result(top_k_docs.size());
+	std::vector<std::pair<uint64_t, float>> result(top_k_docs.size());
 	idx = top_k_docs.size() - 1;
 	while (!top_k_docs.empty()) {
 		result[idx] = top_k_docs.top();
@@ -1408,7 +1595,7 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		uint32_t init_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	std::vector<std::pair<uint32_t, float>> top_k_docs = query(_query, top_k, init_max_df);
+	std::vector<std::pair<uint64_t, float>> top_k_docs = query(_query, top_k, init_max_df);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;
