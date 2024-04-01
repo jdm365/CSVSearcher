@@ -99,6 +99,7 @@ typedef struct {
 	// Then elements are doc_ids followed by term_freqs.
 
 	std::vector<robin_hood::unordered_flat_map<uint64_t, uint64_t>> accumulator;
+	// std::vector<std::vector<std::pair<uint64_t, uint64_t>>> accumulator;
 	std::vector<uint64_t> doc_term_freqs_accumulator;
 
 	std::vector<std::vector<uint8_t>> inverted_index_compressed;

@@ -387,6 +387,9 @@ void _BM25::read_csv_new() {
 	doc.reserve(22);
 
 	while ((read = getline(&line, &len, file)) != -1) {
+		if (line_num % 100000 == 0) {
+			std::cout << "Lines read: " << line_num << std::endl;
+		}
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
