@@ -30,6 +30,7 @@ cdef extern from "engine.h":
                 float b
                 ) nogil
         vector[pair[uint64_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
+        vector[pair[uint64_t, float]] query_new(string& term, uint32_t top_k, uint32_t init_max_df)
         vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df)
         void save_to_disk()
         void load_from_disk(string db_dir)
@@ -172,7 +173,8 @@ cdef class BM25:
         ## self.save()
 
     def query(self, str query, int init_max_df = 1000):
-        results = self.bm25.query(query.upper().encode("utf-8"), 10, init_max_df)
+        ## results = self.bm25.query(query.upper().encode("utf-8"), 10, init_max_df)
+        results = self.bm25.query_new(query.upper().encode("utf-8"), 10, init_max_df)
 
         scores  = []
         indices = []

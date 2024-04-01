@@ -145,7 +145,7 @@ def test_sklearn(csv_filename: str):
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
+    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
 
     ## test_okapi_bm25(FILENAME)
     ## test_retriv(FILENAME)

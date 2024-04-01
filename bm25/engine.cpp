@@ -21,8 +21,25 @@
 
 #include "engine.h"
 #include "robin_hood.h"
-#include "xxhash64.h"
+#include "vbyte_encoding.h"
 
+
+std::vector<uint64_t> get_II_row(
+		InvertedIndex* II, 
+		uint64_t term_idx
+		) {
+	std::vector<uint64_t> results_vector;
+	decompress_uint64(
+			II->inverted_index_compressed[term_idx],
+			results_vector
+			);
+
+	// Convert doc_ids back to absolute values
+	// for (size_t i = 1; i < (results_vector.size() - 1) / 2; ++i) {
+		// results_vector[i] += results_vector[i - 1];
+	// }
+	return results_vector;
+}
 
 std::vector<std::string> process_csv(const char* filepath) {
     int fd = open(filepath, O_RDONLY);
@@ -257,7 +274,6 @@ void _BM25::read_csv(std::vector<uint64_t>& terms) {
 	byte_offset += ftell(file);
 
 	uint64_t unique_terms_found = 0;
-
 	std::string doc = "";
 
 	// Small string optimization limit on most platforms
@@ -323,7 +339,7 @@ void _BM25::read_csv(std::vector<uint64_t>& terms) {
 	num_docs = doc_sizes.size();
 }
 
-void _BM25::read_csv_hash(std::vector<uint64_t>& terms) {
+void _BM25::read_csv_new() {
 	// Open the file
 	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
@@ -356,7 +372,7 @@ void _BM25::read_csv_hash(std::vector<uint64_t>& terms) {
 
 	if (search_column_index == -1) {
 		std::cerr << "Search column not found in header" << std::endl;
-		for (int i = 0; i < columns.size(); ++i) {
+		for (size_t i = 0; i < columns.size(); ++i) {
 			std::cerr << columns[i] << ",";
 		}
 		std::cerr << std::endl;
@@ -364,6 +380,7 @@ void _BM25::read_csv_hash(std::vector<uint64_t>& terms) {
 	}
 	byte_offset += ftell(file);
 
+	uint64_t unique_terms_found = 0;
 	std::string doc = "";
 
 	// Small string optimization limit on most platforms
@@ -373,12 +390,11 @@ void _BM25::read_csv_hash(std::vector<uint64_t>& terms) {
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
-		++line_num;
+		robin_hood::unordered_flat_set<uint64_t> terms_seen;
 
 		// Iterate of line chars until we get to relevant column.
 		int char_idx = 0;
 		int col_idx  = 0;
-		bool in_quotes = false;
 		while (col_idx != search_column_index) {
 			if (line[char_idx] == '"') {
 				// Skip to next quote.
@@ -404,17 +420,72 @@ void _BM25::read_csv_hash(std::vector<uint64_t>& terms) {
 
 		while (line[char_idx] != end_delim) {
 			if (line[char_idx] == ' ') {
-				terms.push_back(hasher.hash(doc.data(), doc.size(), SEED));
+				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+				unique_terms_found += (uint64_t)add;
+
+				if (add) {
+					// New term
+					// Push back new term to terms vector
+					robin_hood::unordered_flat_map<uint64_t, uint64_t> new_term = {{line_num, 1}};
+					II.accumulator.emplace_back(new_term);
+
+					II.doc_term_freqs_accumulator.push_back(1);
+					terms_seen.insert(it->second);
+				}
+				else {
+					// Term already exists
+					// Do another try emplace for this term's doc freq
+					auto [it2, add2] = II.accumulator[it->second].try_emplace(line_num, 1);
+					it2->second += (uint64_t)!add2;
+
+					// II.doc_term_freqs_accumulator
+					if (terms_seen.find(it->second) == terms_seen.end()) {
+						terms_seen.insert(it->second);
+						++II.doc_term_freqs_accumulator[it->second];
+					}
+				}
+
 				++doc_size;
 				doc.clear();
+
+				// II.doc_term_freqs_accumulator
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert(it->second);
+					++II.doc_term_freqs_accumulator[it->second];
+				}
 
 				++char_idx;
 				continue;
 			}
+
 			doc += toupper(line[char_idx]);
 			++char_idx;
 		}
-		terms.push_back(hasher.hash(doc.data(), doc.size(), SEED));
+
+		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+		unique_terms_found += (uint64_t)add;
+
+		if (add) {
+			// New term
+			// Push back new term to terms vector
+			robin_hood::unordered_flat_map<uint64_t, uint64_t> new_term = {{line_num, 1}};
+			II.accumulator.emplace_back(new_term);
+
+			II.doc_term_freqs_accumulator.push_back(1);
+		}
+		else {
+			// Term already exists
+			// Do another try emplace for this term's doc freq
+			auto [it2, add2] = II.accumulator[it->second].try_emplace(line_num, 1);
+			it2->second += (uint64_t)!add2;
+
+			// II.doc_term_freqs_accumulator
+			if (terms_seen.find(it->second) == terms_seen.end()) {
+				++II.doc_term_freqs_accumulator[it->second];
+			}
+		}
+
+		++line_num;
 		++doc_size;
 		doc_sizes.push_back(doc_size);
 		doc.clear();
@@ -423,6 +494,65 @@ void _BM25::read_csv_hash(std::vector<uint64_t>& terms) {
 	fclose(file);
 
 	num_docs = doc_sizes.size();
+	// Calc avg_doc_size
+	float sum = 0;
+	for (const auto& size : doc_sizes) {
+		sum += size;
+	}
+	avg_doc_size = sum / num_docs;
+
+	// Now get inverted_index_compressed from accumulator.
+	II.inverted_index_compressed.resize(unique_terms_found);
+	uint64_t idx = 0;
+	for (const auto& row : II.accumulator) {
+		std::vector<uint64_t> uncompressed_buffer(row.size() * 2 + 1);
+		uncompressed_buffer[0] = II.doc_term_freqs_accumulator[idx];
+
+		uint64_t cntr = 1;
+		for (const auto& [doc_id, term_freq] : row) {
+			uncompressed_buffer[cntr] = doc_id;
+			uncompressed_buffer[cntr + row.size()] = term_freq;
+			++cntr;
+		}
+
+		// Inplace sort based on doc_ids
+		// Make sure term_freqs are sorted in the same order as doc_ids
+
+		/*
+		std::sort(uncompressed_buffer.begin() + 1, uncompressed_buffer.begin() + 1 + row.size(),
+				  [&](uint64_t a, uint64_t b) {
+					  return a < b;
+				  });
+
+		// Reorder term_freqs based on the sorted doc_ids
+		std::vector<uint64_t> sorted_term_freqs(row.size());
+		for (uint64_t i = 0; i < row.size(); ++i) {
+			const auto term_freq = uncompressed_buffer[i + 1 + row.size()];
+			sorted_term_freqs[i] = term_freq;
+		}
+		std::copy(
+				sorted_term_freqs.begin(), 
+				sorted_term_freqs.end(), 
+				uncompressed_buffer.begin() + 1 + row.size()
+				);
+
+		// Make doc_ids differential
+		for (uint64_t i = 1; i < row.size() + 1; ++i) {
+			uncompressed_buffer[i] -= uncompressed_buffer[i - row.size()];
+		}
+		*/
+
+		compress_uint64(
+				uncompressed_buffer,
+				II.inverted_index_compressed[idx]
+				);
+		++idx;
+	}
+
+	II.accumulator.clear();
+	II.accumulator.shrink_to_fit();
+	II.doc_term_freqs_accumulator.clear();
+	II.doc_term_freqs_accumulator.shrink_to_fit();
 }
 
 
@@ -1079,12 +1209,10 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 
 uint64_t _BM25::get_doc_term_freq_db(const uint64_t& term_idx) {
 	return doc_term_freqs[term_idx];
-	// return doc_term_freqs_map[term_idx];
 }
 
 std::vector<uint64_t> _BM25::get_inverted_index_db(const uint64_t& term_idx) {
 	return inverted_index[term_idx];
-	// return inverted_index_map[term_idx];
 }
 
 
@@ -1106,7 +1234,6 @@ uint16_t _BM25::get_term_freq_from_file(
 	return tf;
 }
 
-
 _BM25::_BM25(
 		std::string filename,
 		std::string search_col,
@@ -1126,9 +1253,12 @@ _BM25::_BM25(
 	// Read file to get documents, line offsets, and columns
 	std::vector<uint64_t> terms;
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
-		read_csv(terms);
-		// read_csv_hash(terms);
+		// read_csv(terms);
 		file_type = CSV;
+
+		// TESTING
+		read_csv_new();
+		return;
 	}
 	else if (filename.substr(filename.size() - 4, 4) == "json") {
 		read_json(terms);
@@ -1168,14 +1298,6 @@ _BM25::_BM25(
 			}
 
 			++doc_term_freqs[mapped_term_idx];
-			/*
-			if (doc_term_freqs_map.find(mapped_term_idx) == doc_term_freqs_map.end()) {
-				doc_term_freqs_map[mapped_term_idx] = 1;
-			}
-			else {
-				++doc_term_freqs_map[mapped_term_idx];
-			}
-			*/
 
 			seen_terms.insert(mapped_term_idx);
 			++terms_seen;
@@ -1201,7 +1323,6 @@ _BM25::_BM25(
 			doc_term_freqs[term_id] = 0;
 		}
 		inverted_index[term_id].reserve(term_count);
-		// inverted_index_map[term_id].reserve(term_count);
 	}
 	end = std::chrono::high_resolution_clock::now();
 	elapsed_seconds = end - start;
@@ -1233,7 +1354,6 @@ _BM25::_BM25(
 			else {
 				local_term_freqs[mapped_term_idx] = 1;
 				inverted_index[mapped_term_idx].push_back(doc_id);
-				// inverted_index_map[mapped_term_idx].push_back(doc_id);
 			}
 		}
 
@@ -1517,18 +1637,18 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 
 	// Gather docs that contain at least one term from the query
 	// Uses dynamic max_df for performance
-	int local_max_df = init_max_df;
+	uint64_t local_max_df = init_max_df;
 	robin_hood::unordered_set<uint64_t> candidate_docs;
 
 	while (candidate_docs.size() == 0) {
 		for (const uint64_t& term_idx : term_idxs) {
 			std::vector<uint64_t> doc_ids = get_inverted_index_db(term_idx);
 
-			if (doc_ids.size() == 0) {
+			if ((uint64_t)doc_ids.size() == 0) {
 				continue;
 			}
 
-			if (doc_ids.size() > local_max_df) {
+			if ((uint64_t)doc_ids.size() > local_max_df) {
 				continue;
 			}
 
@@ -1588,6 +1708,102 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 	return result;
 }
 
+std::vector<std::pair<uint64_t, float>> _BM25::query_new(
+		std::string& query, 
+		uint32_t k,
+		uint32_t init_max_df 
+		) {
+	std::vector<uint64_t> term_idxs;
+
+	std::string substr = "";
+	for (const char& c : query) {
+		if (c != ' ') {
+			substr += c; 
+			continue;
+		}
+		if (unique_term_mapping.find(substr) == unique_term_mapping.end()) {
+			continue;
+		}
+		term_idxs.push_back(unique_term_mapping[substr]);
+		substr.clear();
+	}
+	if (unique_term_mapping.find(substr) != unique_term_mapping.end()) {
+		term_idxs.push_back(unique_term_mapping[substr]);
+	}
+
+	if (term_idxs.size() == 0) {
+		return std::vector<std::pair<uint64_t, float>>();
+	}
+
+	// Gather docs that contain at least one term from the query
+	// Uses dynamic max_df for performance
+	uint64_t local_max_df = init_max_df;
+	robin_hood::unordered_map<uint64_t, float> doc_scores;
+
+	while (doc_scores.size() == 0) {
+		for (const uint64_t& term_idx : term_idxs) {
+			std::vector<uint64_t> results_vector = get_II_row(&II, term_idx);
+			uint64_t term_freqs_offset = (results_vector.size() + 1) / 2;
+
+			uint64_t df = results_vector[0];
+			float idf = log((num_docs - df + 0.5) / (df + 0.5));
+
+			if (results_vector.size() < 2) {
+				continue;
+			}
+
+			if (term_freqs_offset > local_max_df) {
+				continue;
+			}
+
+			for (size_t i = 1; i < term_freqs_offset - 1; ++i) {
+				uint64_t doc_id = results_vector[i];
+				float tf = (float)results_vector[i + term_freqs_offset];
+				float bm25_score = _compute_bm25(doc_id, tf, idf);
+
+				if (doc_scores.find(doc_id) == doc_scores.end()) {
+					doc_scores[doc_id] = bm25_score;
+				}
+				else {
+					doc_scores[doc_id] += bm25_score;
+				}
+			}
+
+		}
+		local_max_df *= 20;
+
+		if (local_max_df > num_docs || local_max_df > (int)max_df * num_docs) {
+			break;
+		}
+	}
+	
+	if (doc_scores.size() == 0) {
+		return std::vector<std::pair<uint64_t, float>>();
+	}
+
+	std::priority_queue<
+		std::pair<uint64_t, float>, 
+		std::vector<std::pair<uint64_t, float>>, 
+		_compare> top_k_docs;
+
+	for (const auto& pair : doc_scores) {
+		top_k_docs.push(std::make_pair(pair.first, pair.second));
+		if (top_k_docs.size() > k) {
+			top_k_docs.pop();
+		}
+	}
+
+	std::vector<std::pair<uint64_t, float>> result(doc_scores.size());
+	int idx = doc_scores.size() - 1;
+	while (!top_k_docs.empty()) {
+		result[idx] = top_k_docs.top();
+		top_k_docs.pop();
+		--idx;
+	}
+
+	return result;
+}
+
 
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& _query,
@@ -1595,7 +1811,8 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		uint32_t init_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	std::vector<std::pair<uint64_t, float>> top_k_docs = query(_query, top_k, init_max_df);
+	// std::vector<std::pair<uint64_t, float>> top_k_docs = query(_query, top_k, init_max_df);
+	std::vector<std::pair<uint64_t, float>> top_k_docs = query_new(_query, top_k, init_max_df);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;

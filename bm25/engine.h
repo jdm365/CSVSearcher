@@ -4,6 +4,7 @@
 
 #include "robin_hood.h"
 #include "xxhash64.h"
+#include "vbyte_encoding.h"
 
 static const std::string DIR_NAME      			  = "bm25_db";
 static const std::string UNIQUE_TERM_MAPPING_PATH = DIR_NAME + "/" + "UNIQUE_TERM_MAPPING.bin";
@@ -22,6 +23,12 @@ static XXHash64 hasher(SEED);
 
 struct _compare {
 	inline bool operator()(const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
+		return a.second > b.second;
+	}
+};
+
+struct _compare_64 {
+	inline bool operator()(const std::pair<uint64_t, float>& a, const std::pair<uint64_t, float>& b) {
 		return a.second > b.second;
 	}
 };
@@ -87,16 +94,32 @@ void deserialize_vector_of_vectors_pair_u64_u16(
 		const std::string& filename
 		);
 
+typedef struct {
+	// First element of inverted index is doc_freq.
+	// Then elements are doc_ids followed by term_freqs.
+
+	std::vector<robin_hood::unordered_flat_map<uint64_t, uint64_t>> accumulator;
+	std::vector<uint64_t> doc_term_freqs_accumulator;
+
+	std::vector<std::vector<uint8_t>> inverted_index_compressed;
+
+} InvertedIndex;
+
+inline std::vector<uint64_t> get_II_row(
+		InvertedIndex* II, 
+		uint64_t term_idx
+		);
+
 class _BM25 {
 	public:
 		robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
 		std::vector<std::vector<uint64_t>> inverted_index;
-		// robin_hood::unordered_flat_map<uint64_t, std::vector<uint64_t>> inverted_index_map;
 		std::vector<std::vector<std::pair<uint64_t, uint16_t>>> term_freqs;
 		std::vector<uint64_t> doc_term_freqs;
-		// robin_hood::unordered_flat_map<uint64_t, uint16_t> doc_term_freqs_map;
 		std::vector<uint64_t> doc_sizes;
 		std::vector<uint64_t> line_offsets;
+
+		InvertedIndex II;
 
 		uint64_t num_docs;
 		int      min_df;
@@ -107,9 +130,9 @@ class _BM25 {
 
 		SupportedFileTypes file_type;
 
+		std::string search_col;
 		std::string filename;
 		std::vector<std::string> columns;
-		std::string search_col;
 
 		_BM25(
 				std::string filename,
@@ -138,7 +161,7 @@ class _BM25 {
 
 		void read_json(std::vector<uint64_t>& terms);
 		void read_csv(std::vector<uint64_t>& terms);
-		void read_csv_hash(std::vector<uint64_t>& terms);
+		void read_csv_new();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num);
 
@@ -175,12 +198,10 @@ class _BM25 {
 				uint32_t top_k,
 				uint32_t init_max_df
 				);
-		std::vector<std::pair<uint64_t, float>> query(
+		std::vector<std::pair<uint64_t, float>> query_new(
 				std::string& query,
 				uint32_t top_k,
-				uint32_t init_max_df,
-				uint32_t* mask_idxs,
-				uint32_t mask_len
+				uint32_t init_max_df
 				);
 
 		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(

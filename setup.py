@@ -35,7 +35,7 @@ if OS == "Darwin":
 extensions = [
     Extension(
         MODULE_NAME,
-        sources=["bm25/bm25.pyx", "bm25/engine.cpp"],
+        sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp"],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=[np.get_include(), "bm25"],
