@@ -424,16 +424,17 @@ void _BM25::read_csv_new() {
 		while (line[char_idx] != end_delim) {
 			if (line[char_idx] == ' ') {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				unique_terms_found += (uint64_t)add;
-
 				if (add) {
 					// New term
 					// Push back new term to terms vector
-					robin_hood::unordered_flat_map<uint64_t, uint64_t> new_term = {{line_num, 1}};
-					II.accumulator.emplace_back(new_term);
+					II.accumulator.emplace_back(
+							robin_hood::unordered_flat_map<uint64_t, uint64_t>{{line_num, 1}}
+							);
 
-					II.doc_term_freqs_accumulator.push_back(1);
+					II.doc_term_freqs_accumulator.emplace_back(1);
 					terms_seen.insert(it->second);
+
+					++unique_terms_found;
 				}
 				else {
 					// Term already exists
@@ -451,12 +452,6 @@ void _BM25::read_csv_new() {
 				++doc_size;
 				doc.clear();
 
-				// II.doc_term_freqs_accumulator
-				if (terms_seen.find(it->second) == terms_seen.end()) {
-					terms_seen.insert(it->second);
-					++II.doc_term_freqs_accumulator[it->second];
-				}
-
 				++char_idx;
 				continue;
 			}
@@ -466,15 +461,17 @@ void _BM25::read_csv_new() {
 		}
 
 		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-		unique_terms_found += (uint64_t)add;
 
 		if (add) {
 			// New term
 			// Push back new term to terms vector
-			robin_hood::unordered_flat_map<uint64_t, uint64_t> new_term = {{line_num, 1}};
-			II.accumulator.emplace_back(new_term);
+			II.accumulator.emplace_back(
+					robin_hood::unordered_flat_map<uint64_t, uint64_t>{{line_num, 1}}
+					);
 
-			II.doc_term_freqs_accumulator.push_back(1);
+			II.doc_term_freqs_accumulator.emplace_back(1);
+
+			++unique_terms_found;
 		}
 		else {
 			// Term already exists
