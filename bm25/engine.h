@@ -98,13 +98,37 @@ typedef struct {
 	// First element of inverted index is doc_freq.
 	// Then elements are doc_ids followed by term_freqs.
 
-	std::vector<robin_hood::unordered_flat_map<uint64_t, uint64_t>> accumulator;
-	// std::vector<std::vector<std::pair<uint64_t, uint64_t>>> accumulator;
+	// std::vector<robin_hood::unordered_flat_map<uint64_t, uint64_t>> accumulator;
+	std::vector<std::vector<std::pair<uint64_t, uint64_t>>> accumulator;
 	std::vector<uint64_t> doc_term_freqs_accumulator;
 
 	std::vector<std::vector<uint8_t>> inverted_index_compressed;
 
 } InvertedIndex;
+
+struct SmallSet_u64 {
+	alignas(16) uint64_t data[64];
+	uint8_t  size;
+
+	bool try_emplace(uint64_t key) {
+		if (size == 64) {
+			return false;
+		}
+
+		for (uint8_t i = 0; i < size; ++i) {
+			if (data[i] == key) {
+				return false;
+			}
+		}
+
+		data[size++] = key;
+		return true;
+	};
+
+	void clear() {
+		size = 0;
+	};
+};
 
 inline std::vector<uint64_t> get_II_row(
 		InvertedIndex* II, 

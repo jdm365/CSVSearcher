@@ -386,6 +386,9 @@ void _BM25::read_csv_new() {
 	// Small string optimization limit on most platforms
 	doc.reserve(22);
 
+	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+	// SmallSet_u64 terms_seen;
+
 	while ((read = getline(&line, &len, file)) != -1) {
 		if (line_num % 100000 == 0) {
 			std::cout << "Lines read: " << line_num << std::endl;
@@ -393,7 +396,7 @@ void _BM25::read_csv_new() {
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
-		robin_hood::unordered_flat_set<uint64_t> terms_seen;
+		terms_seen.clear();
 
 		// Iterate of line chars until we get to relevant column.
 		int char_idx = 0;
@@ -428,24 +431,35 @@ void _BM25::read_csv_new() {
 					// New term
 					// Push back new term to terms vector
 					II.accumulator.emplace_back(
-							robin_hood::unordered_flat_map<uint64_t, uint64_t>{{line_num, 1}}
+							std::vector<std::pair<uint64_t, uint64_t>>{{line_num, 1}}
 							);
 
 					II.doc_term_freqs_accumulator.emplace_back(1);
 					terms_seen.insert(it->second);
+					// terms_seen.try_emplace(it->second);
 
 					++unique_terms_found;
 				}
 				else {
 					// Term already exists
 					// Do another try emplace for this term's doc freq
-					auto [it2, add2] = II.accumulator[it->second].try_emplace(line_num, 1);
-					it2->second += (uint64_t)!add2;
 
 					// II.doc_term_freqs_accumulator
+					// bool add2 = terms_seen.try_emplace(it->second);
+					// if (add2) {
 					if (terms_seen.find(it->second) == terms_seen.end()) {
 						terms_seen.insert(it->second);
 						++II.doc_term_freqs_accumulator[it->second];
+
+						II.accumulator[it->second].emplace_back(line_num, 1);
+					}
+					else {
+						for (auto& [doc_id, term_freq] : II.accumulator[it->second]) {
+							if (doc_id == line_num) {
+								++term_freq;
+								break;
+							}
+						}
 					}
 				}
 
@@ -466,7 +480,7 @@ void _BM25::read_csv_new() {
 			// New term
 			// Push back new term to terms vector
 			II.accumulator.emplace_back(
-					robin_hood::unordered_flat_map<uint64_t, uint64_t>{{line_num, 1}}
+					std::vector<std::pair<uint64_t, uint64_t>>{{line_num, 1}}
 					);
 
 			II.doc_term_freqs_accumulator.emplace_back(1);
@@ -476,12 +490,20 @@ void _BM25::read_csv_new() {
 		else {
 			// Term already exists
 			// Do another try emplace for this term's doc freq
-			auto [it2, add2] = II.accumulator[it->second].try_emplace(line_num, 1);
-			it2->second += (uint64_t)!add2;
 
 			// II.doc_term_freqs_accumulator
+			// bool add2 = terms_seen.try_emplace(it->second);
+			// if (add2) {
 			if (terms_seen.find(it->second) == terms_seen.end()) {
-				++II.doc_term_freqs_accumulator[it->second];
+				II.accumulator[it->second].emplace_back(line_num, 1);
+			}
+			else {
+				for (auto& [doc_id, term_freq] : II.accumulator[it->second]) {
+					if (doc_id == line_num) {
+						++term_freq;
+						break;
+					}
+				}
 			}
 		}
 
