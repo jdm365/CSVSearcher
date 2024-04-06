@@ -35,9 +35,9 @@ std::vector<uint64_t> get_II_row(
 			);
 
 	// Convert doc_ids back to absolute values
-	// for (size_t i = 1; i < (results_vector.size() - 1) / 2; ++i) {
-		// results_vector[i] += results_vector[i - 1];
-	// }
+	for (size_t i = 2; i < (results_vector.size() - 1) / 2; ++i) {
+		results_vector[i] += results_vector[i - 1];
+	}
 	return results_vector;
 }
 
@@ -509,10 +509,13 @@ void _BM25::read_csv_new() {
 		uint64_t cntr = 1;
 		uint64_t last_doc_id = UINT64_MAX;
 		uint64_t same_count = 1;
+		bool first = true;
 		while (!row.empty()) {
 			auto doc_id = row.top();
 
-			uncompressed_buffer[cntr] = doc_id;
+			// uncompressed_buffer[cntr] = doc_id;
+			// Make doc ids differential
+			uncompressed_buffer[cntr] = doc_id - !first * last_doc_id;
 
 			if (doc_id == last_doc_id) {
 				++same_count;
@@ -526,6 +529,8 @@ void _BM25::read_csv_new() {
 			// remove top element
 			row.pop();
 			last_doc_id = doc_id;
+
+			first = false;
 		}
 
 		// Inplace sort based on doc_ids
