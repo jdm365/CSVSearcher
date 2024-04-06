@@ -510,6 +510,7 @@ void _BM25::read_csv_new() {
 		uint64_t last_doc_id = UINT64_MAX;
 		uint64_t same_count = 1;
 		bool first = true;
+		uint64_t row_size = row.size();
 		while (!row.empty()) {
 			auto doc_id = row.top();
 
@@ -523,7 +524,7 @@ void _BM25::read_csv_new() {
 			else {
 				same_count = 1;
 			}
-			uncompressed_buffer[cntr + row.size()] = same_count;
+			uncompressed_buffer[cntr + row_size] = same_count;
 			++cntr;
 
 			// remove top element
@@ -1764,6 +1765,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query_new(
 			for (size_t i = 1; i < term_freqs_offset - 1; ++i) {
 				uint64_t doc_id = results_vector[i];
 				float tf = (float)results_vector[i + term_freqs_offset];
+				// printf("Doc ID: %lu, TF: %f, IDF: %f, Avg doc size: %f\n", doc_id, tf, idf, avg_doc_size);
 				float bm25_score = _compute_bm25(doc_id, tf, idf);
 
 				if (doc_scores.find(doc_id) == doc_scores.end()) {
@@ -1816,7 +1818,6 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		uint32_t init_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	// std::vector<std::pair<uint64_t, float>> top_k_docs = query(_query, top_k, init_max_df);
 	std::vector<std::pair<uint64_t, float>> top_k_docs = query_new(_query, top_k, init_max_df);
 	result.reserve(top_k_docs.size());
 
