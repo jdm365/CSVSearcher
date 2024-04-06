@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdint>
 #include <queue>
+#include <unordered_map>
 
 #include "robin_hood.h"
 #include "xxhash64.h"

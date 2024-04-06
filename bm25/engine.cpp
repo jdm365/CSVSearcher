@@ -431,7 +431,7 @@ void _BM25::read_csv_new() {
 					// Push back new term to terms vector
 					std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
 					pq.push(line_num);
-					II.accumulator.emplace_back(pq);
+					II.accumulator.push_back(std::move(pq));
 
 					II.doc_term_freqs_accumulator.emplace_back(1);
 					terms_seen.insert(it->second);
@@ -467,7 +467,7 @@ void _BM25::read_csv_new() {
 			// Push back new term to terms vector
 			std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
 			pq.push(line_num);
-			II.accumulator.emplace_back(pq);
+			II.accumulator.push_back(std::move(pq));
 
 			II.doc_term_freqs_accumulator.push_back(1);
 
