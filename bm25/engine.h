@@ -98,7 +98,6 @@ typedef struct {
 	// First element of inverted index is doc_freq.
 	// Then elements are doc_ids followed by term_freqs.
 
-	// std::vector<robin_hood::unordered_flat_map<uint64_t, uint64_t>> accumulator;
 	std::vector<std::vector<std::pair<uint64_t, uint64_t>>> accumulator;
 	std::vector<uint64_t> doc_term_freqs_accumulator;
 
@@ -137,7 +136,8 @@ inline std::vector<uint64_t> get_II_row(
 
 class _BM25 {
 	public:
-		robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
+		// robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
+		robin_hood::unordered_map<std::string, uint64_t> unique_term_mapping;
 		std::vector<std::vector<uint64_t>> inverted_index;
 		std::vector<std::vector<std::pair<uint64_t, uint16_t>>> term_freqs;
 		std::vector<uint64_t> doc_term_freqs;

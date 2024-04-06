@@ -246,7 +246,6 @@ void _BM25::read_csv(std::vector<uint64_t>& terms) {
 	char*    line = NULL;
 	size_t   len = 0;
 	ssize_t  read;
-	uint64_t line_num = 0;
 	uint64_t byte_offset = 0;
 
 	// Get col names
@@ -265,7 +264,7 @@ void _BM25::read_csv(std::vector<uint64_t>& terms) {
 
 	if (search_column_index == -1) {
 		std::cerr << "Search column not found in header" << std::endl;
-		for (int i = 0; i < columns.size(); ++i) {
+		for (size_t i = 0; i < columns.size(); ++i) {
 			std::cerr << columns[i] << ",";
 		}
 		std::cerr << std::endl;
@@ -283,12 +282,9 @@ void _BM25::read_csv(std::vector<uint64_t>& terms) {
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
-		++line_num;
-
 		// Iterate of line chars until we get to relevant column.
 		int char_idx = 0;
 		int col_idx  = 0;
-		bool in_quotes = false;
 		while (col_idx != search_column_index) {
 			if (line[char_idx] == '"') {
 				// Skip to next quote.
@@ -419,6 +415,9 @@ void _BM25::read_csv_new() {
 		// Split by commas not inside double quotes
 		uint32_t doc_size = 0;
 		char end_delim = ',';
+		if (search_column_index == (int)columns.size() - 1) {
+			end_delim = '\n';
+		}
 		if (line[char_idx] == '"') {
 			end_delim = '"';
 			++char_idx;
@@ -483,7 +482,7 @@ void _BM25::read_csv_new() {
 					std::vector<std::pair<uint64_t, uint64_t>>{{line_num, 1}}
 					);
 
-			II.doc_term_freqs_accumulator.emplace_back(1);
+			II.doc_term_freqs_accumulator.push_back(1);
 
 			++unique_terms_found;
 		}
@@ -575,6 +574,15 @@ void _BM25::read_csv_new() {
 	II.accumulator.shrink_to_fit();
 	II.doc_term_freqs_accumulator.clear();
 	II.doc_term_freqs_accumulator.shrink_to_fit();
+
+	if (DEBUG) {
+		uint64_t total_size = 0;
+		for (const auto& row : II.inverted_index_compressed) {
+			total_size += row.size();
+		}
+		total_size /= 1024 * 1024;
+		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
+	}
 }
 
 
@@ -1274,6 +1282,8 @@ _BM25::_BM25(
 	
 	// Read file to get documents, line offsets, and columns
 	std::vector<uint64_t> terms;
+	std::cout << "End delim: " << std::endl;
+	std::cout << std::flush;
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
 		// read_csv(terms);
 		file_type = CSV;
@@ -1587,7 +1597,7 @@ _BM25::_BM25(
 
 	uint64_t max_doc_size = 0;
 	avg_doc_size = 0.0f;
-	for (int doc_id = 0; doc_id < num_docs; ++doc_id) {
+	for (uint64_t doc_id = 0; doc_id < num_docs; ++doc_id) {
 		avg_doc_size += (float)doc_sizes[doc_id];
 		max_doc_size = std::max((uint64_t)doc_sizes[doc_id], max_doc_size);
 	}
