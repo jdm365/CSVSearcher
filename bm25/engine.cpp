@@ -429,13 +429,12 @@ void _BM25::read_csv_new() {
 				if (add) {
 					// New term
 					// Push back new term to terms vector
-					II.accumulator.emplace_back(
-							std::vector<std::pair<uint64_t, uint64_t>>{{line_num, 1}}
-							);
+					std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
+					pq.push(line_num);
+					II.accumulator.emplace_back(pq);
 
 					II.doc_term_freqs_accumulator.emplace_back(1);
 					terms_seen.insert(it->second);
-					// terms_seen.try_emplace(it->second);
 
 					++unique_terms_found;
 				}
@@ -444,21 +443,9 @@ void _BM25::read_csv_new() {
 					// Do another try emplace for this term's doc freq
 
 					// II.doc_term_freqs_accumulator
-					// bool add2 = terms_seen.try_emplace(it->second);
-					// if (add2) {
 					if (terms_seen.find(it->second) == terms_seen.end()) {
 						terms_seen.insert(it->second);
-						++II.doc_term_freqs_accumulator[it->second];
-
-						II.accumulator[it->second].emplace_back(line_num, 1);
-					}
-					else {
-						for (auto& [doc_id, term_freq] : II.accumulator[it->second]) {
-							if (doc_id == line_num) {
-								++term_freq;
-								break;
-							}
-						}
+						II.accumulator[it->second].push(line_num);
 					}
 				}
 
@@ -478,9 +465,9 @@ void _BM25::read_csv_new() {
 		if (add) {
 			// New term
 			// Push back new term to terms vector
-			II.accumulator.emplace_back(
-					std::vector<std::pair<uint64_t, uint64_t>>{{line_num, 1}}
-					);
+			std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
+			pq.push(line_num);
+			II.accumulator.emplace_back(pq);
 
 			II.doc_term_freqs_accumulator.push_back(1);
 
@@ -491,18 +478,8 @@ void _BM25::read_csv_new() {
 			// Do another try emplace for this term's doc freq
 
 			// II.doc_term_freqs_accumulator
-			// bool add2 = terms_seen.try_emplace(it->second);
-			// if (add2) {
 			if (terms_seen.find(it->second) == terms_seen.end()) {
-				II.accumulator[it->second].emplace_back(line_num, 1);
-			}
-			else {
-				for (auto& [doc_id, term_freq] : II.accumulator[it->second]) {
-					if (doc_id == line_num) {
-						++term_freq;
-						break;
-					}
-				}
+				II.accumulator[it->second].push(line_num);
 			}
 		}
 
@@ -525,43 +502,34 @@ void _BM25::read_csv_new() {
 	// Now get inverted_index_compressed from accumulator.
 	II.inverted_index_compressed.resize(unique_terms_found);
 	uint64_t idx = 0;
-	for (const auto& row : II.accumulator) {
+	for (auto& row : II.accumulator) {
 		std::vector<uint64_t> uncompressed_buffer(row.size() * 2 + 1);
 		uncompressed_buffer[0] = II.doc_term_freqs_accumulator[idx];
 
 		uint64_t cntr = 1;
-		for (const auto& [doc_id, term_freq] : row) {
+		uint64_t last_doc_id = UINT64_MAX;
+		uint64_t same_count = 1;
+		while (!row.empty()) {
+			auto doc_id = row.top();
+
 			uncompressed_buffer[cntr] = doc_id;
-			uncompressed_buffer[cntr + row.size()] = term_freq;
+
+			if (doc_id == last_doc_id) {
+				++same_count;
+			}
+			else {
+				same_count = 1;
+			}
+			uncompressed_buffer[cntr + row.size()] = same_count;
 			++cntr;
+
+			// remove top element
+			row.pop();
+			last_doc_id = doc_id;
 		}
 
 		// Inplace sort based on doc_ids
 		// Make sure term_freqs are sorted in the same order as doc_ids
-
-		/*
-		std::sort(uncompressed_buffer.begin() + 1, uncompressed_buffer.begin() + 1 + row.size(),
-				  [&](uint64_t a, uint64_t b) {
-					  return a < b;
-				  });
-
-		// Reorder term_freqs based on the sorted doc_ids
-		std::vector<uint64_t> sorted_term_freqs(row.size());
-		for (uint64_t i = 0; i < row.size(); ++i) {
-			const auto term_freq = uncompressed_buffer[i + 1 + row.size()];
-			sorted_term_freqs[i] = term_freq;
-		}
-		std::copy(
-				sorted_term_freqs.begin(), 
-				sorted_term_freqs.end(), 
-				uncompressed_buffer.begin() + 1 + row.size()
-				);
-
-		// Make doc_ids differential
-		for (uint64_t i = 1; i < row.size() + 1; ++i) {
-			uncompressed_buffer[i] -= uncompressed_buffer[i - row.size()];
-		}
-		*/
 
 		compress_uint64(
 				uncompressed_buffer,

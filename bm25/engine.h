@@ -1,6 +1,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <queue>
 
 #include "robin_hood.h"
 #include "xxhash64.h"
@@ -98,7 +99,7 @@ typedef struct {
 	// First element of inverted index is doc_freq.
 	// Then elements are doc_ids followed by term_freqs.
 
-	std::vector<std::vector<std::pair<uint64_t, uint64_t>>> accumulator;
+	std::vector<std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>>> accumulator;
 	std::vector<uint64_t> doc_term_freqs_accumulator;
 
 	std::vector<std::vector<uint8_t>> inverted_index_compressed;
