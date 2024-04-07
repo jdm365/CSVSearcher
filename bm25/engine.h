@@ -2,7 +2,6 @@
 #include <string>
 #include <cstdint>
 #include <queue>
-#include <unordered_map>
 
 #include "robin_hood.h"
 #include "xxhash64.h"
@@ -101,7 +100,6 @@ typedef struct {
 	// Then elements are doc_ids followed by term_freqs.
 
 	std::vector<std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>>> accumulator;
-	std::vector<uint64_t> doc_term_freqs_accumulator;
 
 	std::vector<std::vector<uint8_t>> inverted_index_compressed;
 

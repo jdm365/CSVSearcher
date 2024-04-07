@@ -383,7 +383,6 @@ void _BM25::read_csv_new() {
 	doc.reserve(22);
 
 	robin_hood::unordered_flat_set<uint64_t> terms_seen;
-	// SmallSet_u64 terms_seen;
 
 	while ((read = getline(&line, &len, file)) != -1) {
 		if (line_num % 100000 == 0) {
@@ -428,21 +427,16 @@ void _BM25::read_csv_new() {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 				if (add) {
 					// New term
-					// Push back new term to terms vector
 					std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
 					pq.push(line_num);
 					II.accumulator.push_back(std::move(pq));
 
-					II.doc_term_freqs_accumulator.emplace_back(1);
 					terms_seen.insert(it->second);
 
 					++unique_terms_found;
 				}
 				else {
 					// Term already exists
-					// Do another try emplace for this term's doc freq
-
-					// II.doc_term_freqs_accumulator
 					if (terms_seen.find(it->second) == terms_seen.end()) {
 						terms_seen.insert(it->second);
 						II.accumulator[it->second].push(line_num);
@@ -464,20 +458,14 @@ void _BM25::read_csv_new() {
 
 		if (add) {
 			// New term
-			// Push back new term to terms vector
 			std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
 			pq.push(line_num);
 			II.accumulator.push_back(std::move(pq));
-
-			II.doc_term_freqs_accumulator.push_back(1);
 
 			++unique_terms_found;
 		}
 		else {
 			// Term already exists
-			// Do another try emplace for this term's doc freq
-
-			// II.doc_term_freqs_accumulator
 			if (terms_seen.find(it->second) == terms_seen.end()) {
 				II.accumulator[it->second].push(line_num);
 			}
@@ -488,8 +476,11 @@ void _BM25::read_csv_new() {
 		doc_sizes.push_back(doc_size);
 		doc.clear();
 	}
-
 	fclose(file);
+
+	if (DEBUG) {
+		std::cout << "Vocab size: " << unique_terms_found << std::endl;
+	}
 
 	num_docs = doc_sizes.size();
 	// Calc avg_doc_size
@@ -499,12 +490,13 @@ void _BM25::read_csv_new() {
 	}
 	avg_doc_size = sum / num_docs;
 
+	auto start = std::chrono::system_clock::now();
+
 	// Now get inverted_index_compressed from accumulator.
 	II.inverted_index_compressed.resize(unique_terms_found);
 	uint64_t idx = 0;
 	for (auto& row : II.accumulator) {
-		std::vector<uint64_t> uncompressed_buffer(row.size() * 2 + 1);
-		uncompressed_buffer[0] = II.doc_term_freqs_accumulator[idx];
+		std::vector<uint64_t> uncompressed_buffer(row.size() * 2 + 1, 0);
 
 		uint64_t cntr = 1;
 		uint64_t last_doc_id = UINT64_MAX;
@@ -514,7 +506,6 @@ void _BM25::read_csv_new() {
 		while (!row.empty()) {
 			auto doc_id = row.top();
 
-			// uncompressed_buffer[cntr] = doc_id;
 			// Make doc ids differential
 			uncompressed_buffer[cntr] = doc_id - !first * last_doc_id;
 
@@ -523,6 +514,7 @@ void _BM25::read_csv_new() {
 			}
 			else {
 				same_count = 1;
+				++uncompressed_buffer[0];
 			}
 			uncompressed_buffer[cntr + row_size] = same_count;
 			++cntr;
@@ -537,6 +529,7 @@ void _BM25::read_csv_new() {
 		// Inplace sort based on doc_ids
 		// Make sure term_freqs are sorted in the same order as doc_ids
 
+		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
 		compress_uint64(
 				uncompressed_buffer,
 				II.inverted_index_compressed[idx]
@@ -544,10 +537,12 @@ void _BM25::read_csv_new() {
 		++idx;
 	}
 
+	auto end = std::chrono::system_clock::now();
+	std::chrono::duration<double> elapsed_seconds = end - start;
+	std::cout << "Time to compress: " << elapsed_seconds.count() << std::endl;
+
 	II.accumulator.clear();
 	II.accumulator.shrink_to_fit();
-	II.doc_term_freqs_accumulator.clear();
-	II.doc_term_freqs_accumulator.shrink_to_fit();
 
 	if (DEBUG) {
 		uint64_t total_size = 0;
