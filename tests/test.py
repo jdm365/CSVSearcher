@@ -145,7 +145,9 @@ def test_sklearn(csv_filename: str):
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_1M.csv')
 
     ## test_okapi_bm25(FILENAME)
     ## test_retriv(FILENAME)
@@ -153,7 +155,7 @@ if __name__ == '__main__':
     ## test_anserini(FILENAME)
     ## test_sklearn(FILENAME)
 
-    ## names = pd.read_csv(FILENAME, usecols=['name'], nrows=10000).reset_index(drop=True).name.tolist()
+    ## names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True)
 
     init = perf_counter()
     model = BM25(
@@ -168,20 +170,23 @@ if __name__ == '__main__':
             )
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
-    N = 10_000
-    names = pd.read_csv(FILENAME, usecols=['name'], nrows=N).reset_index(drop=True).name.tolist()
+    ## N = 10_000
+    ## names = pd.read_csv(FILENAME, usecols=['name'], nrows=N).reset_index(drop=True).name.tolist()
 
+    '''
     init = perf_counter()
     for idx, name in enumerate(tqdm(names, desc="Querying")):
         model.query(name, init_max_df=500)
 
     time = perf_counter() - init
     print(f"Queries per second: {N / time:.2f}")
+    '''
 
     QUERY = "netflix inc"
 
     records = model.get_topk_docs(QUERY, k=10, init_max_df=500)
-    print(pd.DataFrame(records))
+    df = pd.DataFrame(records)
+    print(df)
 
     ## scores, indices = model.get_topk_docs(query, k=10, init_max_df=500)
     ## print(names.iloc[indices])

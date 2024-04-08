@@ -35,7 +35,7 @@ std::vector<uint64_t> get_II_row(
 			);
 
 	// Convert doc_ids back to absolute values
-	for (size_t i = 2; i < (results_vector.size() - 1) / 2; ++i) {
+	for (size_t i = 2; i < (results_vector.size() + 1) / 2; ++i) {
 		results_vector[i] += results_vector[i - 1];
 	}
 	return results_vector;
@@ -377,9 +377,9 @@ void _BM25::read_csv_new() {
 	byte_offset += ftell(file);
 
 	uint64_t unique_terms_found = 0;
-	std::string doc = "";
 
 	// Small string optimization limit on most platforms
+	std::string doc = "";
 	doc.reserve(22);
 
 	robin_hood::unordered_flat_set<uint64_t> terms_seen;
@@ -496,28 +496,29 @@ void _BM25::read_csv_new() {
 	II.inverted_index_compressed.resize(unique_terms_found);
 	uint64_t idx = 0;
 	for (auto& row : II.accumulator) {
-		std::vector<uint64_t> uncompressed_buffer(row.size() * 2 + 1, 0);
+		std::vector<uint64_t> uncompressed_buffer(1, 0);
+		uncompressed_buffer.reserve(row.size() * 2 + 1);
+		// std::vector<uint64_t> tfs(1, 0);
+		std::vector<uint64_t> tfs;
 
-		uint64_t cntr = 1;
 		uint64_t last_doc_id = UINT64_MAX;
 		uint64_t same_count = 1;
 		bool first = true;
-		uint64_t row_size = row.size();
 		while (!row.empty()) {
 			auto doc_id = row.top();
-
-			// Make doc ids differential
-			uncompressed_buffer[cntr] = doc_id - !first * last_doc_id;
 
 			if (doc_id == last_doc_id) {
 				++same_count;
 			}
 			else {
-				same_count = 1;
 				++uncompressed_buffer[0];
+
+				// Make doc ids differential
+				uncompressed_buffer.push_back(doc_id - !first * last_doc_id);
+				tfs.push_back(same_count);
+
+				same_count = 1;
 			}
-			uncompressed_buffer[cntr + row_size] = same_count;
-			++cntr;
 
 			// remove top element
 			row.pop();
@@ -525,9 +526,10 @@ void _BM25::read_csv_new() {
 
 			first = false;
 		}
-
-		// Inplace sort based on doc_ids
-		// Make sure term_freqs are sorted in the same order as doc_ids
+		// Add tfs to end of uncompressed_buffer
+		for (const auto& tf : tfs) {
+			uncompressed_buffer.push_back(tf);
+		}
 
 		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
 		compress_uint64(
@@ -1251,8 +1253,6 @@ _BM25::_BM25(
 	
 	// Read file to get documents, line offsets, and columns
 	std::vector<uint64_t> terms;
-	std::cout << "End delim: " << std::endl;
-	std::cout << std::flush;
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
 		// read_csv(terms);
 		file_type = CSV;
@@ -1744,23 +1744,22 @@ std::vector<std::pair<uint64_t, float>> _BM25::query_new(
 	while (doc_scores.size() == 0) {
 		for (const uint64_t& term_idx : term_idxs) {
 			std::vector<uint64_t> results_vector = get_II_row(&II, term_idx);
-			uint64_t term_freqs_offset = (results_vector.size() + 1) / 2;
+			uint64_t num_matches = (results_vector.size() - 1) / 2;
 
-			uint64_t df = results_vector[0];
-			float idf = log((num_docs - df + 0.5) / (df + 0.5));
+			uint64_t df  = results_vector[0];
+			float    idf = log((num_docs - df + 0.5) / (df + 0.5));
 
-			if (results_vector.size() < 2) {
+			if (num_matches == 0) {
 				continue;
 			}
 
-			if (term_freqs_offset > local_max_df) {
+			if (num_matches > local_max_df) {
 				continue;
 			}
 
-			for (size_t i = 1; i < term_freqs_offset - 1; ++i) {
-				uint64_t doc_id = results_vector[i];
-				float tf = (float)results_vector[i + term_freqs_offset];
-				// printf("Doc ID: %lu, TF: %f, IDF: %f, Avg doc size: %f\n", doc_id, tf, idf, avg_doc_size);
+			for (size_t i = 0; i < num_matches; ++i) {
+				uint64_t doc_id  = results_vector[i + 1];
+				float tf 		 = (float)results_vector[i + num_matches + 1];
 				float bm25_score = _compute_bm25(doc_id, tf, idf);
 
 				if (doc_scores.find(doc_id) == doc_scores.end()) {
@@ -1786,7 +1785,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query_new(
 	std::priority_queue<
 		std::pair<uint64_t, float>, 
 		std::vector<std::pair<uint64_t, float>>, 
-		_compare> top_k_docs;
+		_compare_64> top_k_docs;
 
 	for (const auto& pair : doc_scores) {
 		top_k_docs.push(std::make_pair(pair.first, pair.second));
@@ -1795,8 +1794,8 @@ std::vector<std::pair<uint64_t, float>> _BM25::query_new(
 		}
 	}
 
-	std::vector<std::pair<uint64_t, float>> result(doc_scores.size());
-	int idx = doc_scores.size() - 1;
+	std::vector<std::pair<uint64_t, float>> result(top_k_docs.size());
+	int idx = top_k_docs.size() - 1;
 	while (!top_k_docs.empty()) {
 		result[idx] = top_k_docs.top();
 		top_k_docs.pop();

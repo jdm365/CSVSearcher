@@ -11,9 +11,9 @@
 int main() {
 	std::string query = "apple";
 
-	// std::string FILENAME   = "/home/jdm365/SearchApp/data/companies_sorted_100M.csv";
+	std::string FILENAME   = "/home/jdm365/SearchApp/data/companies_sorted_100M.csv";
 	// std::string FILENAME   = "/home/jdm365/SearchApp/data/companies_sorted.csv";
-	std::string FILENAME   = "/home/jdm365/SearchApp/data/companies_sorted_name_only.csv";
+	// std::string FILENAME   = "/home/jdm365/SearchApp/data/companies_sorted_name_only.csv";
 	// std::string FILENAME   = "/home/jdm365/SearchApp/data/companies_sorted_1M.csv";
 	// std::string FILENAME   = "/home/jdm365/SearchApp/data/companies_sorted_100k.csv";
 	std::string SEARCH_COL = "name";
