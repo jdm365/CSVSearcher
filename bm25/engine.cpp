@@ -1741,19 +1741,25 @@ std::vector<std::pair<uint64_t, float>> _BM25::query_new(
 	uint64_t local_max_df = init_max_df;
 	robin_hood::unordered_map<uint64_t, float> doc_scores;
 
+	auto start = std::chrono::high_resolution_clock::now();
 	while (doc_scores.size() == 0) {
 		for (const uint64_t& term_idx : term_idxs) {
-			std::vector<uint64_t> results_vector = get_II_row(&II, term_idx);
-			uint64_t num_matches = (results_vector.size() - 1) / 2;
-
-			uint64_t df  = results_vector[0];
-			float    idf = log((num_docs - df + 0.5) / (df + 0.5));
-
-			if (num_matches == 0) {
+			uint64_t df;
+			vbyte_decode_uint64(
+					II.inverted_index_compressed[term_idx].data(),
+					&df
+					);
+			if (df > local_max_df) {
 				continue;
 			}
 
-			if (num_matches > local_max_df) {
+			std::vector<uint64_t> results_vector = get_II_row(&II, term_idx);
+			uint64_t num_matches = (results_vector.size() - 1) / 2;
+
+			// uint64_t df  = results_vector[0];
+			float    idf = log((num_docs - df + 0.5) / (df + 0.5));
+
+			if (num_matches == 0) {
 				continue;
 			}
 
@@ -1776,6 +1782,11 @@ std::vector<std::pair<uint64_t, float>> _BM25::query_new(
 		if (local_max_df > num_docs || local_max_df > (int)max_df * num_docs) {
 			break;
 		}
+	}
+	if (DEBUG) {
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> elapsed_seconds = end - start;
+		std::cout << "Collection time: " << elapsed_seconds.count() << std::endl;
 	}
 	
 	if (doc_scores.size() == 0) {

@@ -64,8 +64,7 @@ void vbyte_encode_uint64(
 
 void vbyte_decode_uint64(
 	uint8_t*  compressed_value, 
-	uint64_t* value, 
-	uint64_t* compressed_size
+	uint64_t* value
 	);
 
 void compress_uint64(

@@ -16,7 +16,7 @@ static const std::string DOC_SIZES_PATH      	  = DIR_NAME + "/" + "DOC_SIZES.bi
 static const std::string LINE_OFFSETS_PATH    	  = DIR_NAME + "/" + "LINE_OFFSETS.bin";
 static const std::string METADATA_PATH			  = DIR_NAME + "/" + "METADATA.bin";
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define SEED 42
 

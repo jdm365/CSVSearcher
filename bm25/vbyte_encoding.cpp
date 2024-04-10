@@ -1,6 +1,5 @@
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
 
 #include <vector>
 
@@ -32,6 +31,20 @@ void compress_uint32(
 
 	// realloc to remove the extra space
 	// *compressed_buffer = (uint8_t*)realloc(*compressed_buffer, *compressed_size);
+}
+
+void vbyte_decode_uint64(
+	uint8_t*  compressed_value, 
+	uint64_t* value
+	) {
+	*value = 0;
+	uint64_t shift = 0;
+	uint8_t byte;
+	do {
+		byte = *compressed_value++;
+		*value |= (byte & 127) << shift;
+		shift += 7;
+	} while (byte & 128);
 }
 
 void decompress_uint32(

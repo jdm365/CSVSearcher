@@ -95,9 +95,12 @@ def test_anserini(csv_filename: str):
 
     ## convert to json
     df = pd.read_csv(csv_filename).fillna('')
-    companies_sample = df['name'].sample(10_000)
+    ## companies_sample = df['name'].sample(10_000)
+    companies_sample = df['text'].sample(10_000)
 
-    df.rename(columns={'name': 'contents', 'domain': 'id'}, inplace=True)
+    ## df.rename(columns={'name': 'contents', 'domain': 'id'}, inplace=True)
+    df.rename(columns={'text': 'contents'}, inplace=True)
+    df['id'] = df.index.astype(str)
     os.system('rm -rf tmp_data_dir')
     os.system('mkdir tmp_data_dir')
 
@@ -145,42 +148,48 @@ def test_sklearn(csv_filename: str):
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
+    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_1M.csv')
 
-    ## test_okapi_bm25(FILENAME)
-    ## test_retriv(FILENAME)
+    test_okapi_bm25(FILENAME)
+    test_retriv(FILENAME)
     ## test_duckdb(FILENAME)
     ## test_anserini(FILENAME)
-    ## test_sklearn(FILENAME)
+    test_sklearn(FILENAME)
 
     ## names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True)
 
     init = perf_counter()
     model = BM25(
             filename=FILENAME, 
-            ## filename='corpus.json', 
             ## text_col='text',
             text_col='name',
             ## documents=names,
             ## db_dir='bm25_db'
-            ## max_df=(10000/7.2e6)
+            max_df=(10000/7.2e6)
             ## max_df=(100/7.2e6)
             )
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
+    exit()
 
-    ## N = 10_000
+    N = 10_000
     ## names = pd.read_csv(FILENAME, usecols=['name'], nrows=N).reset_index(drop=True).name.tolist()
+    names = pd.read_csv(FILENAME, usecols=['text'], nrows=N).reset_index(drop=True).fillna('').text.tolist()
+    final_names = []
+    for name in names:
+        if len(name) > 0:
+            final_names.append(' '.join(np.random.choice(name.split(), 2)))
+        else:
+            final_names.append(name)
 
-    '''
     init = perf_counter()
-    for idx, name in enumerate(tqdm(names, desc="Querying")):
+    for idx, name in enumerate(tqdm(final_names, desc="Querying")):
         model.query(name, init_max_df=500)
 
     time = perf_counter() - init
     print(f"Queries per second: {N / time:.2f}")
-    '''
 
     QUERY = "netflix inc"
 
