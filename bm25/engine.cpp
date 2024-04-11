@@ -18,7 +18,6 @@
 #include <ctime>
 #include <sys/mman.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
 
 #include "engine.h"
 #include "robin_hood.h"
@@ -66,13 +65,26 @@ std::vector<uint64_t> get_II_row(
 }
 
 
-void _BM25::read_json(std::vector<uint64_t>& terms) {
+void _BM25::read_json() {
 	// Open the file
 	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
 		std::cerr << "Unable to open file: " << filename << std::endl;
 		exit(1);
 	}
+
+	// Quickly count number of lines in file
+	uint64_t num_lines = 0;
+	char buf[1024 * 1024];
+	while (size_t bytes_read = fread(buf, 1, sizeof(buf), file)) {
+		for (size_t i = 0; i < bytes_read; ++i) {
+			if (buf[i] == '\n') {
+				++num_lines;
+			}
+		}
+	}
+	// Reset file pointer to beginning
+	rewind(file);
 
 	// Read the file line by line
 	char*    line = NULL;
@@ -82,9 +94,21 @@ void _BM25::read_json(std::vector<uint64_t>& terms) {
 
 	uint64_t unique_terms_found = 0;
 
+	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+
+	std::string doc = "";
+	doc.reserve(22);
+
+	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, file)) != -1) {
+		if (line_num % UPDATE_INTERVAL == 0) {
+			update_progress(line_num, num_lines);
+		}
+
 		line_offsets.push_back(ftello(file) - read);
 		++line_num;
+
+		terms_seen.clear();
 
 		// Iterate of line chars until we get to relevant column.
 		int char_idx   = 0;
@@ -133,13 +157,12 @@ void _BM25::read_json(std::vector<uint64_t>& terms) {
 				std::exit(1);
 			}
 		}
-		if (line_num % 100000 == 0) {
-			std::cout << "Lines read: " << line_num << std::endl;
-		}
+
+		std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
+		pq.push(line_num);
 
 		// Split by commas not inside double quotes
-		std::string doc = "";
-		uint32_t doc_size = 0;
+		uint64_t doc_size = 0;
 		while (line[char_idx] != '"') {
 			if (line[char_idx] == ' ' && doc == "") {
 				++char_idx;
@@ -148,38 +171,137 @@ void _BM25::read_json(std::vector<uint64_t>& terms) {
 
 			if (line[char_idx] == ' ') {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				unique_terms_found += (uint64_t)add;
-				terms.push_back(it->second);
+				if (add) {
+					// New term
+					II.accumulator.push_back(pq);
+
+					terms_seen.insert(it->second);
+
+					++unique_terms_found;
+				}
+				else {
+					// Term already exists
+					if (terms_seen.find(it->second) == terms_seen.end()) {
+						terms_seen.insert(it->second);
+						II.accumulator[it->second].push(line_num);
+					}
+				}
 
 				++doc_size;
 				doc.clear();
-			}
-			else {
-				doc += toupper(line[char_idx]);
-			}
-			++char_idx;
 
-			if (char_idx > 10000000) {
-				std::cout << "String too large. Code is broken" << std::endl;
-				std::exit(1);
+				++char_idx;
+				continue;
+			}
+
+			doc += toupper(line[char_idx]);
+			++char_idx;
+		}
+
+		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+
+		if (add) {
+			// New term
+			II.accumulator.push_back(pq);
+
+			++unique_terms_found;
+		}
+		else {
+			// Term already exists
+			if (terms_seen.find(it->second) == terms_seen.end()) {
+				II.accumulator[it->second].push(line_num);
 			}
 		}
-		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-		unique_terms_found += (uint64_t)add;
-		terms.push_back(it->second);
+
 		++doc_size;
 		doc_sizes.push_back(doc_size);
+		doc.clear();
 	}
 	fclose(file);
 
-	num_docs = doc_sizes.size();
-	std::cout << "Million Terms: " << terms.size() / 1000000 << std::endl;
-	std::cout << "Num docs: " << num_docs << std::endl;
+	std::cout << std::endl << std::flush;
+	std::cout << "Compressing index" << std::endl;
+
+	if (DEBUG) {
+		std::cout << "Vocab size: " << unique_terms_found << std::endl;
+	}
+
+	num_docs = num_lines;
+	// Calc avg_doc_size
+	float sum = 0;
+	for (const auto& size : doc_sizes) {
+		sum += size;
+	}
+	avg_doc_size = sum / num_docs;
+
+	auto start = std::chrono::system_clock::now();
+
+	// Now get inverted_index_compressed from accumulator.
+	II.inverted_index_compressed.resize(unique_terms_found);
+	uint64_t idx = 0;
+	for (auto& row : II.accumulator) {
+		std::vector<uint64_t> uncompressed_buffer(1, 0);
+		uncompressed_buffer.reserve(row.size() * 2 + 1);
+		std::vector<uint64_t> tfs;
+
+		uint64_t last_doc_id = UINT64_MAX;
+		uint64_t same_count = 1;
+		bool first = true;
+		while (!row.empty()) {
+			auto doc_id = row.top();
+
+			if (doc_id == last_doc_id) {
+				++same_count;
+			}
+			else {
+				++uncompressed_buffer[0];
+
+				// Make doc ids differential
+				uncompressed_buffer.push_back(doc_id - !first * last_doc_id);
+				tfs.push_back(same_count);
+
+				same_count = 1;
+			}
+
+			// remove top element
+			row.pop();
+			last_doc_id = doc_id;
+
+			first = false;
+		}
+		// Add tfs to end of uncompressed_buffer
+		for (const auto& tf : tfs) {
+			uncompressed_buffer.push_back(tf);
+		}
+
+		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
+		compress_uint64(
+				uncompressed_buffer,
+				II.inverted_index_compressed[idx]
+				);
+		++idx;
+	}
+
+	auto end = std::chrono::system_clock::now();
+	std::chrono::duration<double> elapsed_seconds = end - start;
+	std::cout << "Time to compress: " << elapsed_seconds.count() << std::endl;
+
+	II.accumulator.clear();
+	II.accumulator.shrink_to_fit();
+
+	if (DEBUG) {
+		uint64_t total_size = 0;
+		for (const auto& row : II.inverted_index_compressed) {
+			total_size += row.size();
+		}
+		total_size /= 1024 * 1024;
+		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
+	}
 }
 
 
 
-void _BM25::read_csv_new() {
+void _BM25::read_csv() {
 	// Open the file
 	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
@@ -188,7 +310,6 @@ void _BM25::read_csv_new() {
 	}
 
 	// Quickly count number of lines in file
-	// Read in 1MB chunks
 	uint64_t num_lines = 0;
 	char buf[1024 * 1024];
 	while (size_t bytes_read = fread(buf, 1, sizeof(buf), file)) {
@@ -246,7 +367,6 @@ void _BM25::read_csv_new() {
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, file)) != -1) {
 		if (line_num % UPDATE_INTERVAL == 0) {
-			// Clear existing line and print progress
 			update_progress(line_num, num_lines);
 		}
 		line_offsets.push_back(byte_offset);
@@ -273,7 +393,7 @@ void _BM25::read_csv_new() {
 		}
 
 		// Split by commas not inside double quotes
-		uint32_t doc_size = 0;
+		uint64_t doc_size = 0;
 		char end_delim = ',';
 		if (search_column_index == (int)columns.size() - 1) {
 			end_delim = '\n';
@@ -459,7 +579,6 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
-	bool in_quotes = false;
 	size_t col_idx = 0;
 
 	std::string first  = "";
@@ -498,6 +617,25 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 		}
 	}
 	return row;
+}
+
+void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& filename) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file when serializing u8 vector.\n";
+        return;
+    }
+
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint8_t));
+	}
+
+    out_file.close();
 }
 
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename) {
@@ -730,6 +868,25 @@ void serialize_vector_of_vectors_pair_u64_u16(
     out_file.close();
 }
 
+void deserialize_vector_u8(std::vector<uint8_t>& vec, const std::string& filename) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint8_t));
+    }
+
+    in_file.close();
+}
 
 void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename) {
 	std::ifstream in_file(filename, std::ios::binary);
@@ -1026,8 +1183,16 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 
 	serialize_robin_hood_flat_map_string_u64(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
 	serialize_vector_of_vectors_u8(II.inverted_index_compressed, INVERTED_INDEX_PATH);
-	serialize_vector_u64(doc_sizes, DOC_SIZES_PATH);
-	serialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
+	// serialize_vector_u64(doc_sizes, DOC_SIZES_PATH);
+	// serialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
+	std::vector<uint8_t> compressed_doc_sizes;
+	std::vector<uint8_t> compressed_line_offsets;
+	compressed_doc_sizes.reserve(doc_sizes.size() * 2);
+	compressed_line_offsets.reserve(line_offsets.size() * 2);
+	compress_uint64(doc_sizes, compressed_doc_sizes);
+	compress_uint64(line_offsets, compressed_line_offsets);
+	serialize_vector_u8(compressed_doc_sizes, DOC_SIZES_PATH);
+	serialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH);
 
 	// Serialize smaller members.
 	std::ofstream out_file(METADATA_PATH, std::ios::binary);
@@ -1089,8 +1254,14 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 
 	deserialize_robin_hood_flat_map_string_u64(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
 	deserialize_vector_of_vectors_u8(II.inverted_index_compressed, INVERTED_INDEX_PATH);
-	deserialize_vector_u64(doc_sizes, DOC_SIZES_PATH);
-	deserialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
+	// deserialize_vector_u64(doc_sizes, DOC_SIZES_PATH);
+	// deserialize_vector_u64(line_offsets, LINE_OFFSETS_PATH);
+	std::vector<uint8_t> compressed_doc_sizes;
+	std::vector<uint8_t> compressed_line_offsets;
+	deserialize_vector_u8(compressed_doc_sizes, DOC_SIZES_PATH);
+	deserialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH);
+	decompress_uint64(compressed_doc_sizes, doc_sizes);
+	decompress_uint64(compressed_line_offsets, line_offsets);
 
 	// Load smaller members.
 	std::ifstream in_file(METADATA_PATH, std::ios::binary);
@@ -1163,13 +1334,12 @@ _BM25::_BM25(
 	auto overall_start = std::chrono::high_resolution_clock::now();
 	
 	// Read file to get documents, line offsets, and columns
-	std::vector<uint64_t> terms;
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
-		read_csv_new();
+		read_csv();
 		file_type = CSV;
 	}
 	else if (filename.substr(filename.size() - 4, 4) == "json") {
-		read_json(terms);
+		read_json();
 		file_type = JSON;
 	}
 	else {
@@ -1203,6 +1373,160 @@ _BM25::_BM25(
 	file_type = IN_MEMORY;
 
 	num_docs = documents.size();
+
+	uint64_t unique_terms_found = 0;
+
+	std::string doc = "";
+	doc.reserve(22);
+
+	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+	const int UPDATE_INTERVAL = 10000;
+	uint64_t doc_id = 0;
+	for (const std::string& line : documents) {
+		terms_seen.clear();
+
+		if (doc_id % UPDATE_INTERVAL == 0) {
+			// Clear existing line and print progress
+			update_progress(doc_id, num_docs);
+		}
+
+		// Split by commas not inside double quotes
+		uint32_t doc_size = 0;
+
+		std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
+		pq.push(doc_id);
+
+		for (const char& c : line) {
+			if (c == ' ') {
+				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+				if (add) {
+					// New term
+					II.accumulator.push_back(pq);
+
+					terms_seen.insert(it->second);
+
+					++unique_terms_found;
+				}
+				else {
+					// Term already exists
+					if (terms_seen.find(it->second) == terms_seen.end()) {
+						terms_seen.insert(it->second);
+						II.accumulator[it->second].push(doc_id);
+					}
+				}
+
+				++doc_size;
+				doc.clear();
+				continue;
+			}
+
+			doc += toupper(c);
+		}
+
+		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+
+		if (add) {
+			// New term
+			II.accumulator.push_back(pq);
+
+			++unique_terms_found;
+		}
+		else {
+			// Term already exists
+			if (terms_seen.find(it->second) == terms_seen.end()) {
+				II.accumulator[it->second].push(doc_id);
+			}
+		}
+
+		doc_sizes.push_back(doc_size);
+		doc.clear();
+		++doc_id;
+	}
+
+	avg_doc_size = 0.0f;
+	for (const uint64_t& size : doc_sizes) {
+		avg_doc_size += size;
+	}
+	avg_doc_size /= num_docs;
+
+
+	std::cout << std::endl << std::flush;
+	std::cout << "Compressing index" << std::endl;
+
+	if (DEBUG) {
+		std::cout << "Vocab size: " << unique_terms_found << std::endl;
+	}
+
+	// Calc avg_doc_size
+	float sum = 0;
+	for (const auto& size : doc_sizes) {
+		sum += size;
+	}
+	avg_doc_size = sum / num_docs;
+
+	auto start = std::chrono::system_clock::now();
+
+	// Now get inverted_index_compressed from accumulator.
+	II.inverted_index_compressed.resize(unique_terms_found);
+	uint64_t idx = 0;
+	for (auto& row : II.accumulator) {
+		std::vector<uint64_t> uncompressed_buffer(1, 0);
+		uncompressed_buffer.reserve(row.size() * 2 + 1);
+		std::vector<uint64_t> tfs;
+
+		uint64_t last_doc_id = UINT64_MAX;
+		uint64_t same_count = 1;
+		bool first = true;
+		while (!row.empty()) {
+			auto doc_id = row.top();
+
+			if (doc_id == last_doc_id) {
+				++same_count;
+			}
+			else {
+				++uncompressed_buffer[0];
+
+				// Make doc ids differential
+				uncompressed_buffer.push_back(doc_id - !first * last_doc_id);
+				tfs.push_back(same_count);
+
+				same_count = 1;
+			}
+
+			// remove top element
+			row.pop();
+			last_doc_id = doc_id;
+
+			first = false;
+		}
+		// Add tfs to end of uncompressed_buffer
+		for (const auto& tf : tfs) {
+			uncompressed_buffer.push_back(tf);
+		}
+
+		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
+		compress_uint64(
+				uncompressed_buffer,
+				II.inverted_index_compressed[idx]
+				);
+		++idx;
+	}
+
+	auto end = std::chrono::system_clock::now();
+	std::chrono::duration<double> elapsed_seconds = end - start;
+	std::cout << "Time to compress: " << elapsed_seconds.count() << std::endl;
+
+	II.accumulator.clear();
+	II.accumulator.shrink_to_fit();
+
+	if (DEBUG) {
+		uint64_t total_size = 0;
+		for (const auto& row : II.inverted_index_compressed) {
+			total_size += row.size();
+		}
+		total_size /= 1024 * 1024;
+		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
+	}
 }
 
 inline float _BM25::_compute_bm25(

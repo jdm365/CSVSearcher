@@ -2,7 +2,7 @@
 
 cimport cython
 
-from libc.stdint cimport uint32_t, uint64_t
+from libc.stdint cimport uint32_t, uint64_t 
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp.pair cimport pair
@@ -10,6 +10,8 @@ from libcpp cimport bool
 
 import os
 
+
+cdef int INT_MAX = 2147483647
 
 cdef extern from "engine.h":
     cdef cppclass _BM25:
@@ -165,8 +167,8 @@ cdef class BM25:
                 self.b
                 )
 
-    def query(self, str query, int init_max_df = 1000):
-        results = self.bm25.query(query.upper().encode("utf-8"), 10, init_max_df)
+    def get_topk_indices(self, str query, int init_max_df = 1000, int k = 10):
+        results = self.bm25.query(query.upper().encode("utf-8"), k, init_max_df)
 
         scores  = []
         indices = []
@@ -181,7 +183,7 @@ cdef class BM25:
             self, 
             str query, 
             int k = 10, 
-            int init_max_df = 1000
+            int init_max_df = INT_MAX
             ):
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
@@ -198,6 +200,8 @@ cdef class BM25:
         for idx in range(len(results)):
             _dict = {}
             for jdx in range(len(results[idx])):
+                print(results[idx][jdx].first)
+                print(results[idx][jdx].second)
                 _dict[results[idx][jdx].first.decode("utf-8")] = results[idx][jdx].second.decode("utf-8")
 
             output.append(_dict)

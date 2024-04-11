@@ -32,6 +32,7 @@ enum SupportedFileTypes {
 	IN_MEMORY
 };
 
+void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& filename);
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename);
 void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& filename);
 void serialize_vector_of_vectors_u32(
@@ -64,6 +65,7 @@ void serialize_vector_of_vectors_u8(
 		);
 
 
+void deserialize_vector_u8(std::vector<uint8_t>& vec, const std::string& filename);
 void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename);
 void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filename);
 void deserialize_vector_of_vectors_u32(
@@ -178,9 +180,8 @@ class _BM25 {
 		void save_to_disk(const std::string& db_dir);
 		void load_from_disk(const std::string& db_dir);
 
-		void read_json(std::vector<uint64_t>& terms);
-		void read_csv(std::vector<uint64_t>& terms);
-		void read_csv_new();
+		void read_json();
+		void read_csv();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num);
 
