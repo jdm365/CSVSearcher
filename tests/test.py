@@ -149,34 +149,41 @@ def test_sklearn(csv_filename: str):
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
-    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_1M.csv')
 
-    test_okapi_bm25(FILENAME)
-    test_retriv(FILENAME)
+    ## test_okapi_bm25(FILENAME)
+    ## test_retriv(FILENAME)
     ## test_duckdb(FILENAME)
     ## test_anserini(FILENAME)
-    test_sklearn(FILENAME)
+    ## test_sklearn(FILENAME)
 
     ## names = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True)
 
     init = perf_counter()
     model = BM25(
-            filename=FILENAME, 
-            ## text_col='text',
-            text_col='name',
-            ## documents=names,
-            ## db_dir='bm25_db'
-            max_df=(10000/7.2e6)
-            ## max_df=(100/7.2e6)
+            max_df=10000
             )
+    '''
+    model.index_file(
+            filename=FILENAME, 
+            text_col='name'
+            )
+    model.save(db_dir='tmp_db')
+    '''
+    model.load(db_dir='tmp_db')
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
-    exit()
+    ## exit()
 
     N = 10_000
     ## names = pd.read_csv(FILENAME, usecols=['name'], nrows=N).reset_index(drop=True).name.tolist()
-    names = pd.read_csv(FILENAME, usecols=['text'], nrows=N).reset_index(drop=True).fillna('').text.tolist()
+    names = pd.read_csv(
+            FILENAME, 
+            ## usecols=['text'], 
+            usecols=['name'], 
+            nrows=N
+            ).reset_index(drop=True).fillna('').name.tolist()
     final_names = []
     for name in names:
         if len(name) > 0:
