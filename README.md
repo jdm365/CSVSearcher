@@ -44,8 +44,6 @@ K = 50
 ## and have limited impact on result ordering. If no documents
 ## are found with the given init_max_df, it is automatically increased 
 ## until results are found.
-## NOTE: terms with higher max_df will contribute to the final score,
-## but aren't used to fetch candidates with the inverted index.
 INIT_MAX_DF = 5000
 
 ## Returns topk records with "score" property in json (dict) format.
