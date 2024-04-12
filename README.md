@@ -10,7 +10,7 @@ pip install .
 
 ## Usage
 
-### Raw file constructor
+### From File
 ```python
 from bm25 import BM25
 
@@ -26,12 +26,14 @@ B = 0.75
 ## Pass in filename directly. Loaded in c++ backend and enables getting topk
 ## records with memory mapped files.
 model = BM25(
-    filename=filename,
-    text_col=search_col,
     min_df=1,
     max_df=0.0001,
     k1=K1,
     b=B
+)
+model.index_file(
+    filename=filename,
+    text_col=search_col
 )
 
 QUERY = 'hello world'
@@ -44,7 +46,7 @@ K = 50
 ## until results are found.
 ## NOTE: terms with higher max_df will contribute to the final score,
 ## but aren't used to fetch candidates with the inverted index.
-INIT_MAX_DF = 2000
+INIT_MAX_DF = 5000
 
 ## Returns topk records with "score" property in json (dict) format.
 top_k_records = model.get_topk_docs(
@@ -54,14 +56,19 @@ top_k_records = model.get_topk_docs(
 )
 
 ## Or use raw query to just get scores and indices.
-scores, indices = model.query(
+scores, indices = model.get_topk_indices(
     query=QUERY,
     k=K,
     init_max_df=INIT_MAX_DF
 )
+
+## Save and load
+DB_DIR = 'bm25_db'
+model.save(db_dir=DB_DIR)
+model.load(db_dir=DB_DIR)
 ```
 
-### Document constructor
+### From Documents
 ```python
 from bm25 import BM25
 
@@ -77,25 +84,32 @@ B = 0.75
 
 ## Documents constructor.
 model = BM25(
-    documents=documents,
     min_df=1,
     max_df=0.0001,
     k1=K1,
     b=B
 )
+model.index_documents(
+    documents=documents
+)
 
 QUERY = 'hello world'
 K = 50
-INIT_MAX_DF = 2000
+INIT_MAX_DF = 5000
 
 ## NOTE: get_topk_docs is not available without a file to fetch the documents from
 ## therefore it is only supported with the file constructor.
 
-scores, indices = model.query(
+scores, indices = model.get_topk_indices(
     query=QUERY,
     k=K,
     init_max_df=INIT_MAX_DF
 )
+
+## Save and load
+DB_DIR = 'bm25_db'
+model.save(db_dir=DB_DIR)
+model.load(db_dir=DB_DIR)
 ```
 
 In earlier stages at the moment and likely still buggy and potentially incorrect. 
@@ -113,4 +127,4 @@ equivalents (which use inverted indexees) and can index documents (especially sh
 much faster than other libraries I've tested like rank_bm25, retriv, and anserini, though
 this needs to be proved further.
 
-As of now there are also no dependencies except for the c++ std lib and openmp.
+As of now the only dependency is the c++ stdlib.
