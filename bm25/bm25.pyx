@@ -189,7 +189,9 @@ cdef class BM25:
         cdef list output = []
 
         if self.filename == "in_memory":
-            raise RuntimeError("Cannot get topk docs when documents were provided instead of a filename")
+            raise RuntimeError("""
+            Cannot get topk docs when documents were provided instead of a filename
+            """)
         else:
             results = self.bm25.get_topk_internal(
                     query.upper().encode("utf-8"), 
@@ -200,8 +202,6 @@ cdef class BM25:
         for idx in range(len(results)):
             _dict = {}
             for jdx in range(len(results[idx])):
-                print(results[idx][jdx].first)
-                print(results[idx][jdx].second)
                 _dict[results[idx][jdx].first.decode("utf-8")] = results[idx][jdx].second.decode("utf-8")
 
             output.append(_dict)

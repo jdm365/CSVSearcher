@@ -148,8 +148,9 @@ def test_sklearn(csv_filename: str):
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'og_corpus.json')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
+    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_1M.csv')
@@ -166,42 +167,39 @@ if __name__ == '__main__':
     model = BM25(
             max_df=10000
             )
-    model.index_file(
-            filename=FILENAME, 
-            ## text_col='name'
-            text_col='text'
-            )
-    ## model.index_documents(
-            ## values['name'].tolist()
-            ## )
-    ## model.save(db_dir='tmp_db')
+    model.index_file(filename=FILENAME, text_col='text')
+    ## model.index_documents(values['name'].tolist())
+    model.save(db_dir='tmp_db')
     ## model.load(db_dir='tmp_db')
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
     ## exit()
 
     N = 10_000
     ## names = pd.read_csv(FILENAME, usecols=['name'], nrows=N).reset_index(drop=True).name.tolist()
-    ## names = pd.read_csv(
-    names = pd.read_json(
+    names = pd.read_csv(
+            ## names = pd.read_json(
             FILENAME, 
-            ## usecols=['text'], 
+            usecols=['text'], 
             ## usecols=['name'], 
             nrows=N,
-            lines=True
+            ## lines=True
             ).reset_index(drop=True).fillna('').text.tolist()
     final_names = []
     for name in names:
+        name = name.strip()
         if len(name) > 0:
             final_names.append(' '.join(np.random.choice(name.split(), 2)))
         else:
             final_names.append(name)
 
+    '''
     init = perf_counter()
     for idx, name in enumerate(tqdm(final_names, desc="Querying")):
         model.get_topk_docs(name, init_max_df=500)
 
     time = perf_counter() - init
     print(f"Queries per second: {N / time:.2f}")
+    '''
 
     QUERY = "netflix inc"
 

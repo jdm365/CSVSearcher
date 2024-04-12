@@ -91,6 +91,7 @@ void _BM25::read_json() {
 	size_t   len = 0;
 	ssize_t  read;
 	uint64_t line_num = 0;
+	uint64_t byte_offset = 0;
 
 	uint64_t unique_terms_found = 0;
 
@@ -101,62 +102,86 @@ void _BM25::read_json() {
 
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, file)) != -1) {
-		if (line_num % UPDATE_INTERVAL == 0) {
-			update_progress(line_num, num_lines);
+		if (!DEBUG) {
+			if (line_num % UPDATE_INTERVAL == 0) {
+				update_progress(line_num, num_lines);
+			}
 		}
 
-		line_offsets.push_back(ftello(file) - read);
-		++line_num;
+		line_offsets.push_back(byte_offset);
+		byte_offset += read;
 
 		terms_seen.clear();
 
 		// Iterate of line chars until we get to relevant column.
-		int char_idx   = 0;
+
+		// First char is always `{`
+		int char_idx = 1;
 		while (true) {
 			start:
-			if (line[char_idx] == '"') {
-				// Found first key. Match against search_col
-				++char_idx;
-
-				for (const char& c : search_col) {
-					if (c != line[char_idx]) {
-						// Scan to next key and then goto start.
-						// Basically count until four unescaped quotes
-						// are found the goto start
-						size_t num_quotes = 0;
-						while (num_quotes < 4) {
-							num_quotes += (line[char_idx] == '"');
-							++char_idx;
-						}
-						--char_idx;
-						goto start;
-					}
+				while (line[char_idx] == ' ') {
 					++char_idx;
 				}
 
 				if (line[char_idx] == '"') {
-					// If we made it here we found the correct key.
-					// Now iterate just past 1 more unescaped num_quotes
-					// to get to the value.
+					// Found key. Match against search_col.
 					++char_idx;
-					while (line[char_idx] != '"') {
+
+					for (const char& c : search_col) {
+						if (c != line[char_idx]) {
+							// Scan until next key
+							bool in_quotes = true;
+							while (in_quotes) {
+								if (line[char_idx] == '"') {
+									in_quotes = !in_quotes;
+								}
+								++char_idx;
+							}
+							// End of key
+
+							// Scan until comma not in quotes
+							while (line[char_idx] != ',') {
+								if (line[char_idx] == '"') {
+									// Scan to next quote
+									while (line[char_idx] != '"') {
+										++char_idx;
+									}
+									while (line[char_idx] == ' ') {
+										++char_idx;
+									}
+									++char_idx;
+									continue;
+								}
+								++char_idx;
+							}
+							++char_idx;
+							goto start;
+						}
 						++char_idx;
 					}
-					++char_idx;
+
+					// Found key. 
+					// Iterate over quote and colon.
+					char_idx += 2;
+
+					// Check if quote, if so incremenet again then break.
+					if (line[char_idx] == '"') ++char_idx;
 					break;
 				}
-			}
-			else if (line[char_idx] == '}') {
-				std::cout << "Search field not found on line: " << line_num << std::endl;
-				std::exit(1);
-			}
-			++char_idx;
-
-			if (char_idx > 100000) {
-				std::cout << "Error in read json" << std::endl;
-				std::exit(1);
-			}
+				else if (line[char_idx] == '}') {
+					std::cout << "Search field not found on line: " << line_num << std::endl;
+					std::exit(1);
+				}
+				else {
+					std::cerr << "Invalid json." << std::endl;
+					std::cout << line << std::endl;
+					std::exit(1);
+				}
 		}
+		while (line[char_idx] == ' ') {
+			++char_idx;
+		}
+		++char_idx;
 
 		std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
 		pq.push(line_num);
@@ -164,6 +189,13 @@ void _BM25::read_json() {
 		// Split by commas not inside double quotes
 		uint64_t doc_size = 0;
 		while (line[char_idx] != '"') {
+			if (line[char_idx] == '\\') {
+				++char_idx;
+				doc += line[char_idx];
+				++char_idx;
+				continue;
+			}
+
 			if (line[char_idx] == ' ' && doc == "") {
 				++char_idx;
 				continue;
@@ -216,6 +248,7 @@ void _BM25::read_json() {
 		++doc_size;
 		doc_sizes.push_back(doc_size);
 		doc.clear();
+		++line_num;
 	}
 	fclose(file);
 
@@ -579,42 +612,81 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
-	size_t col_idx = 0;
 
 	std::string first  = "";
 	std::string second = "";
 
+	if (line[1] == '}') {
+		return row;
+	}
+
+	size_t char_idx = 2;
 	while (true) {
-		while (line[col_idx] != '"') {
-			++col_idx;
+		while (line[char_idx] != '"') {
+			if (line[char_idx] == '\\') {
+				++char_idx;
+				first += line[char_idx];
+				++char_idx;
+				continue;
+			}
+			first += line[char_idx];
+			++char_idx;
 		}
-		++col_idx;
+		char_idx += 2;
 
-		while (line[col_idx] != '"') {
-			first += line[col_idx];
-			++col_idx;
+		if (line[char_idx] == '"') {
+			++char_idx;
+
+			while (line[char_idx] != '"') {
+				if (line[char_idx] == '\\') {
+					++char_idx;
+					first += line[char_idx];
+					++char_idx;
+					continue;
+				}
+
+				second += line[char_idx];
+				++char_idx;
+			}
+			++char_idx;
+
+			if (line[char_idx] == '}') {
+				row.emplace_back(first, second);
+				return row;
+			}
+
+			row.emplace_back(first, second);
+			first.clear();
+			second.clear();
+			++char_idx;
 		}
-		++col_idx;
+		else {
+			while (line[char_idx] != ',') {
+				if (line[char_idx] == '}') {
+					row.emplace_back(first, second);
+					return row;
+				}
+				if (line[char_idx] == '\\') {
+					++char_idx;
+					first += line[char_idx];
+					++char_idx;
+					continue;
+				}
 
-		while (line[col_idx] != '"') {
-			++col_idx;
+				second += line[char_idx];
+				++char_idx;
+			}
+			char_idx += 2;
+
+			row.emplace_back(first, second);
+			first.clear();
+			second.clear();
 		}
-		++col_idx;
-
-		while (line[col_idx] != '"') {
-			second += line[col_idx];
-			++col_idx;
+		if (line[char_idx] != '"') {
+			std::cout << line << std::endl;
+			std::cout << char_idx << std::endl << std::endl;
 		}
-
-		row.emplace_back(first, second);
-		first.clear();
-		second.clear();
-
-		++col_idx;
-		
-		if (line[col_idx] == '}') {
-			return row;
-		}
+		++char_idx;
 	}
 	return row;
 }
