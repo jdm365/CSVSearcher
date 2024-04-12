@@ -2,7 +2,7 @@
 
 cimport cython
 
-from libc.stdint cimport uint32_t, uint64_t
+from libc.stdint cimport uint32_t, uint64_t 
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp.pair cimport pair
@@ -10,6 +10,8 @@ from libcpp cimport bool
 
 import os
 
+
+cdef int INT_MAX = 2147483647
 
 cdef extern from "engine.h":
     cdef cppclass _BM25:
@@ -30,8 +32,12 @@ cdef extern from "engine.h":
                 float b
                 ) nogil
         vector[pair[uint64_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
-        vector[vector[pair[string, string]]] get_topk_internal(string& term, uint32_t k, uint32_t init_max_df)
-        void save_to_disk()
+        vector[vector[pair[string, string]]] get_topk_internal(
+                string& term, 
+                uint32_t k, 
+                uint32_t init_max_df
+                )
+        void save_to_disk(string db_dir)
         void load_from_disk(string db_dir)
 
 
@@ -49,82 +55,31 @@ cdef class BM25:
 
     def __init__(
             self, 
-            str  filename = None, 
-            str  text_col = None,
-            str  db_dir   = None,
-            list documents = [], 
             int   min_df = 1,
             float max_df = 1.0,
             float k1     = 1.2,
             float b      = 0.4
             ):
-        self.filename = filename 
-        self.text_col = text_col
-
         self.min_df = min_df
         self.max_df = max_df
         self.k1     = k1
         self.b      = b
 
-        self.db_dir = 'bm25_db'
 
-        if documents != []:
-            self._init_with_documents(documents)
+    def index_file(self, str filename, str text_col):
+        self.filename = filename
+        self.text_col = text_col
 
-        else:
-            success = self.load()
-            if not success:
-                self._init_with_file()
+        self._init_with_file(filename, text_col)
 
-
-
-    def __cinit__(
-            self, 
-            *args,
-            **kwargs
-            ):
-        pass
-
-    cdef bool load(self):
-        ## First check if db_dir exists
-        if not os.path.exists(self.db_dir):
-            return False
-
-        ## Check if db_dir has been modified since last save
-        with open(os.path.join(self.db_dir, "last_modified.txt"), "r") as f:
-            last_modified = f.read()
-
-        new_time = str(os.path.getmtime(self.db_dir))
-        new_time = new_time.split('.')[0]
-        last_modified = last_modified.split('.')[0]
-
-        if new_time != last_modified:
-            return False
-
-        with open(os.path.join(self.db_dir, "filename.txt"), "r") as f:
-            last_filename = f.read()
-
-        if self.filename != last_filename:
-            return False
-
-        ## Check if source_file has been modified since last save
-        with open(os.path.join(self.db_dir, "last_modified_file.txt"), "r") as f:
-            last_modified = f.read()
-
-        new_time = str(os.path.getmtime(self.filename))
-        new_time = new_time.split('.')[0]
-        last_modified = last_modified.split('.')[0]
-
-        if new_time != last_modified:
-            return False
-
-        self.bm25 = new _BM25(self.db_dir.encode("utf-8"))
-        return True
+    def index_documents(self, list documents):
+        self._init_with_documents(documents)
 
 
-    cdef save(self):
-        ## self.bm25.save_to_disk(db_dir.encode("utf-8"))
-        self.bm25.save_to_disk()
+    cpdef save(self, db_dir):
+        self.db_dir = db_dir
+
+        self.bm25.save_to_disk(db_dir.encode("utf-8"))
 
         ## Get from os when dir was last modified
         last_modified = os.path.getmtime(self.db_dir)
@@ -144,6 +99,48 @@ cdef class BM25:
             f.write(str(last_modified))
 
 
+    cpdef bool load(self, str db_dir):
+        self.db_dir = db_dir
+
+        ## First check if db_dir exists
+        if not os.path.exists(self.db_dir):
+            raise RuntimeError("Database directory does not exist")
+
+        ## Check if db_dir has been modified since last save
+        with open(os.path.join(self.db_dir, "last_modified.txt"), "r") as f:
+            last_modified = f.read()
+
+        new_time = str(os.path.getmtime(self.db_dir))
+        new_time = new_time.split('.')[0]
+        last_modified = last_modified.split('.')[0]
+
+        if new_time != last_modified:
+            raise RuntimeError("Database directory has been modified since last save")
+
+        '''
+        with open(os.path.join(self.db_dir, "filename.txt"), "r") as f:
+            last_filename = f.read()
+
+        if self.filename != last_filename:
+            raise RuntimeError("Filename is different from the one used to save the model")
+
+        ## Check if source_file has been modified since last save
+        with open(os.path.join(self.db_dir, "last_modified_file.txt"), "r") as f:
+            last_modified = f.read()
+
+        new_time = str(os.path.getmtime(self.filename))
+        new_time = new_time.split('.')[0]
+        last_modified = last_modified.split('.')[0]
+
+        if new_time != last_modified:
+            raise RuntimeError("Source file has been modified since last save")
+        '''
+
+        self.bm25 = new _BM25(self.db_dir.encode("utf-8"))
+        return True
+
+
+
     cdef void _init_with_documents(self, list documents):
         self.filename = "in_memory"
 
@@ -160,19 +157,18 @@ cdef class BM25:
                 self.b
                 )
 
-    cdef void _init_with_file(self):
+    cdef void _init_with_file(self, str filename, str text_col):
         self.bm25 = new _BM25(
-                self.filename.encode("utf-8"),
-                self.text_col.encode("utf-8"),
+                filename.encode("utf-8"),
+                text_col.encode("utf-8"),
                 self.min_df,
                 self.max_df,
                 self.k1,
                 self.b
                 )
-        ## self.save()
 
-    def query(self, str query, int init_max_df = 1000):
-        results = self.bm25.query(query.upper().encode("utf-8"), 10, init_max_df)
+    def get_topk_indices(self, str query, int init_max_df = 1000, int k = 10):
+        results = self.bm25.query(query.upper().encode("utf-8"), k, init_max_df)
 
         scores  = []
         indices = []
@@ -187,13 +183,15 @@ cdef class BM25:
             self, 
             str query, 
             int k = 10, 
-            int init_max_df = 1000
+            int init_max_df = INT_MAX
             ):
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
 
         if self.filename == "in_memory":
-            raise RuntimeError("Cannot get topk docs when documents were provided instead of a filename")
+            raise RuntimeError("""
+            Cannot get topk docs when documents were provided instead of a filename
+            """)
         else:
             results = self.bm25.get_topk_internal(
                     query.upper().encode("utf-8"), 
