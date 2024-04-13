@@ -1,3 +1,4 @@
+#include <iostream>
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -155,6 +156,8 @@ class _BM25 {
 		std::string filename;
 		std::vector<std::string> columns;
 
+		FILE* reference_file;
+
 		_BM25(
 				std::string filename,
 				std::string search_col,
@@ -165,6 +168,21 @@ class _BM25 {
 				);
 		_BM25(std::string db_dir) {
 			load_from_disk(db_dir);
+			// filename found ind db_dir/filename.txt
+			std::string fn_file = db_dir + "/filename.txt";
+			// read fn_file contents into filename 
+			FILE* f = fopen(fn_file.c_str(), "r");
+			if (f == nullptr) {
+				std::cerr << "Error opening file: " << fn_file << std::endl;
+				exit(1);
+			}
+			char buf[1024];
+			fgets(buf, 1024, f);
+			fclose(f);
+			filename = std::string(buf);
+
+			// Open the reference file
+			reference_file = fopen(filename.c_str(), "r");
 		}
 
 		_BM25(
@@ -175,7 +193,11 @@ class _BM25 {
 				float b
 				);
 
-		~_BM25() {}
+		~_BM25() {
+			if (reference_file != nullptr) {
+				fclose(reference_file);
+			}
+		}
 
 		void save_to_disk(const std::string& db_dir);
 		void load_from_disk(const std::string& db_dir);

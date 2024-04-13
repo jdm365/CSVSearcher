@@ -71,15 +71,15 @@ def test_duckdb(csv_filename: str):
                  """)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
-    companies_sample = CONN.execute("SELECT name FROM companies ORDER BY RANDOM() LIMIT 10000").fetchdf()['name']
+    companies_sample = pd.read_csv(csv_filename)['name'].sample(10_000)
 
     init = perf_counter()
     for company in tqdm(companies_sample, desc="Querying"):
         CONN.execute(f"""
-                     SELECT name, score, domain FROM (
+                     SELECT name, domain, score FROM (
                          SELECT *, fts_main_documents.match_bm25(
                              domain,
-                             '{company}'
+                             "{company}"
                              ) AS score
                          FROM companies
                          LIMIT 10
@@ -156,7 +156,7 @@ if __name__ == '__main__':
     FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_1M.csv')
 
-    ## test_okapi_bm25(FILENAME)
+    test_okapi_bm25(FILENAME)
     ## test_retriv(FILENAME)
     ## test_duckdb(FILENAME)
     ## test_anserini(FILENAME)
@@ -169,12 +169,12 @@ if __name__ == '__main__':
 
     init = perf_counter()
     model = BM25(
-            ## max_df=10000
+            max_df=10000
             )
-    ## model.index_file(filename=FILENAME, text_col=SEARCH_COL)
+    model.index_file(filename=FILENAME, text_col=SEARCH_COL)
     ## model.index_documents(values['name'].tolist())
-    ## model.save(db_dir='tmp_db')
-    model.load(db_dir='tmp_db')
+    model.save(db_dir='tmp_db')
+    ## model.load(db_dir='tmp_db')
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
     ## exit()
 

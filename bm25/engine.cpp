@@ -71,17 +71,19 @@ std::vector<uint64_t> get_II_row(
 
 
 void _BM25::read_json() {
+	/*
 	// Open the file
 	FILE* file = fopen(filename.c_str(), "r");
 	if (file == NULL) {
 		std::cerr << "Unable to open file: " << filename << std::endl;
 		exit(1);
 	}
+	*/
 
 	// Quickly count number of lines in file
 	uint64_t num_lines = 0;
 	char buf[1024 * 1024];
-	while (size_t bytes_read = fread(buf, 1, sizeof(buf), file)) {
+	while (size_t bytes_read = fread(buf, 1, sizeof(buf), reference_file)) {
 		for (size_t i = 0; i < bytes_read; ++i) {
 			if (buf[i] == '\n') {
 				++num_lines;
@@ -89,7 +91,7 @@ void _BM25::read_json() {
 		}
 	}
 	// Reset file pointer to beginning
-	rewind(file);
+	rewind(reference_file);
 
 	// Read the file line by line
 	char*    line = NULL;
@@ -106,7 +108,7 @@ void _BM25::read_json() {
 	doc.reserve(22);
 
 	const int UPDATE_INTERVAL = 10000;
-	while ((read = getline(&line, &len, file)) != -1) {
+	while ((read = getline(&line, &len, reference_file)) != -1) {
 		if (!DEBUG) {
 			if (line_num % UPDATE_INTERVAL == 0) {
 				update_progress(line_num, num_lines);
@@ -254,8 +256,10 @@ void _BM25::read_json() {
 		doc_sizes.push_back(doc_size);
 		doc.clear();
 		++line_num;
+
+		std::exit(1);
 	}
-	fclose(file);
+	// fclose(reference_file);
 
 	update_progress(line_num, num_lines);
 
@@ -342,17 +346,10 @@ void _BM25::read_json() {
 
 
 void _BM25::read_csv() {
-	// Open the file
-	FILE* file = fopen(filename.c_str(), "r");
-	if (file == NULL) {
-		std::cerr << "Unable to open file: " << filename << std::endl;
-		exit(1);
-	}
-
 	// Quickly count number of lines in file
 	uint64_t num_lines = 0;
 	char buf[1024 * 1024];
-	while (size_t bytes_read = fread(buf, 1, sizeof(buf), file)) {
+	while (size_t bytes_read = fread(buf, 1, sizeof(buf), reference_file)) {
 		for (size_t i = 0; i < bytes_read; ++i) {
 			if (buf[i] == '\n') {
 				++num_lines;
@@ -360,7 +357,7 @@ void _BM25::read_csv() {
 		}
 	}
 	// Reset file pointer to beginning
-	rewind(file);
+	rewind(reference_file);
 
 	int search_column_index = -1;
 
@@ -372,7 +369,7 @@ void _BM25::read_csv() {
 	uint64_t byte_offset = 0;
 
 	// Get col names
-	read = getline(&line, &len, file);
+	read = getline(&line, &len, reference_file);
 	std::istringstream iss(line);
 	std::string value;
 	while (std::getline(iss, value, ',')) {
@@ -394,7 +391,7 @@ void _BM25::read_csv() {
 		std::cerr << std::endl;
 		exit(1);
 	}
-	byte_offset += ftell(file);
+	byte_offset += ftell(reference_file);
 
 	uint64_t unique_terms_found = 0;
 
@@ -405,7 +402,7 @@ void _BM25::read_csv() {
 	robin_hood::unordered_flat_set<uint64_t> terms_seen;
 
 	const int UPDATE_INTERVAL = 10000;
-	while ((read = getline(&line, &len, file)) != -1) {
+	while ((read = getline(&line, &len, reference_file)) != -1) {
 		if (line_num % UPDATE_INTERVAL == 0) {
 			update_progress(line_num, num_lines);
 		}
@@ -496,7 +493,6 @@ void _BM25::read_csv() {
 		doc_sizes.push_back(doc_size);
 		doc.clear();
 	}
-	fclose(file);
 	update_progress(line_num + 1, num_lines);
 
 	std::cout << std::endl << std::flush;
@@ -581,11 +577,11 @@ void _BM25::read_csv() {
 
 
 std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num) {
-	std::ifstream file(filename);
-	std::string line;
-	file.seekg(line_offsets[line_num]);
-	std::getline(file, line);
-	file.close();
+	// seek from FILE* reference_file which is already open
+	fseek(reference_file, line_offsets[line_num], SEEK_SET);
+	char* line = NULL;
+	size_t len = 0;
+	ssize_t read = getline(&line, &len, reference_file);
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
@@ -593,7 +589,8 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 	bool in_quotes = false;
 	size_t col_idx = 0;
 
-	for (size_t i = 0; i < line.size(); ++i) {
+	// for (size_t i = 0; i < line.size(); ++i) {
+	for (size_t i = 0; i < (size_t)read - 1; ++i) {
 		if (line[i] == '"') {
 			in_quotes = !in_quotes;
 		}
@@ -612,11 +609,11 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 
 
 std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_num) {
-	std::ifstream file(filename);
-	std::string line;
-	file.seekg(line_offsets[line_num]);
-	std::getline(file, line);
-	file.close();
+	// seek from FILE* reference_file which is already open
+	fseek(reference_file, line_offsets[line_num], SEEK_SET);
+	char* line = NULL;
+	size_t len = 0;
+	getline(&line, &len, reference_file);
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
@@ -1410,6 +1407,11 @@ _BM25::_BM25(
 			b(b),
 			search_col(search_col), 
 			filename(filename) {
+	reference_file = fopen(filename.c_str(), "r");
+	if (reference_file == NULL) {
+		std::cerr << "Unable to open file: " << filename << std::endl;
+		exit(1);
+	}
 
 	auto overall_start = std::chrono::high_resolution_clock::now();
 	
@@ -1436,6 +1438,7 @@ _BM25::_BM25(
 		std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
 		std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
 	}
+	std::cout << "Avg doc size: " << avg_doc_size << std::endl;
 }
 
 
