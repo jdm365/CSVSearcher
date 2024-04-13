@@ -143,6 +143,7 @@ def test_sklearn(csv_filename: str):
         cosine_similarity(X, company_vec)
 
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
+
     
 
 
@@ -150,9 +151,9 @@ if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
     ## FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'og_corpus.json')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
-    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
+    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
     ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_1M.csv')
 
     ## test_okapi_bm25(FILENAME)
@@ -163,27 +164,29 @@ if __name__ == '__main__':
 
     ## values = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True)
 
+    SEARCH_COL = 'name'
+    ## SEARCH_COL = 'text'
+
     init = perf_counter()
     model = BM25(
-            max_df=10000
+            ## max_df=10000
             )
-    model.index_file(filename=FILENAME, text_col='text')
+    ## model.index_file(filename=FILENAME, text_col=SEARCH_COL)
     ## model.index_documents(values['name'].tolist())
-    model.save(db_dir='tmp_db')
-    ## model.load(db_dir='tmp_db')
+    ## model.save(db_dir='tmp_db')
+    model.load(db_dir='tmp_db')
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
     ## exit()
 
     N = 10_000
-    ## names = pd.read_csv(FILENAME, usecols=['name'], nrows=N).reset_index(drop=True).name.tolist()
+    ## names = pd.read_csv(FILENAME, usecols=[SEARCH_COL], nrows=N).reset_index(drop=True).name.tolist()
     names = pd.read_csv(
             ## names = pd.read_json(
             FILENAME, 
-            usecols=['text'], 
-            ## usecols=['name'], 
+            usecols=[SEARCH_COL],
             nrows=N,
             ## lines=True
-            ).reset_index(drop=True).fillna('').text.tolist()
+            ).reset_index(drop=True).fillna('')[SEARCH_COL].tolist()
     final_names = []
     for name in names:
         name = name.strip()
@@ -192,18 +195,17 @@ if __name__ == '__main__':
         else:
             final_names.append(name)
 
-    '''
     init = perf_counter()
     for idx, name in enumerate(tqdm(final_names, desc="Querying")):
-        model.get_topk_docs(name, init_max_df=500)
+        model.get_topk_docs(name, init_max_df=10000)
+        ## model.get_topk_indices(name, init_max_df=10000)
 
     time = perf_counter() - init
     print(f"Queries per second: {N / time:.2f}")
-    '''
 
     QUERY = "netflix inc"
 
-    records = model.get_topk_docs(QUERY, k=10, init_max_df=500)
+    records = model.get_topk_docs(QUERY, k=10, init_max_df=10000)
     '''
     scores, indices = model.get_topk_indices(QUERY, k=10, init_max_df=500)
     df = pd.DataFrame({

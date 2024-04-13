@@ -24,7 +24,6 @@
 #include "vbyte_encoding.h"
 
 
-// const std::string magenta("\033[0;95m");
 
 void update_progress(int line_num, int num_lines) {
 	const int bar_width = 121;
@@ -33,12 +32,18 @@ void update_progress(int line_num, int num_lines) {
 	int   pos = bar_width * percentage;
 
 	// Create the progress bar
-    std::string bar = "[" + std::string(pos, '=') + ">" + std::string(bar_width - pos - 1, ' ') + "]";
+	std::string bar;
+	if (pos == bar_width) {
+		bar = "[" + std::string(bar_width - 1, '=') + ">" + "]";
+	}
+	else {
+		bar = "[" + std::string(pos, '=') + ">" + std::string(bar_width - pos - 1, ' ') + "]";
+	}
 
     // Build the progress string
 	// Print percentage instead
 	std::string info = std::to_string((int)(percentage * 100)) + "% " +
-                           std::to_string(line_num) + " / " + std::to_string(num_lines) + " docs read.";
+                           std::to_string(line_num) + " / " + std::to_string(num_lines) + " docs read";
 	std::string output =  "\r Indexing Documents " + bar + " " + info;
 	output += std::string(std::max(0, bar_width - static_cast<int>(output.length())), ' ');
     
@@ -251,6 +256,8 @@ void _BM25::read_json() {
 		++line_num;
 	}
 	fclose(file);
+
+	update_progress(line_num, num_lines);
 
 	std::cout << std::endl << std::flush;
 	std::cout << "Compressing index" << std::endl;
@@ -490,6 +497,7 @@ void _BM25::read_csv() {
 		doc.clear();
 	}
 	fclose(file);
+	update_progress(line_num + 1, num_lines);
 
 	std::cout << std::endl << std::flush;
 	std::cout << "Compressing index" << std::endl;
@@ -1514,6 +1522,7 @@ _BM25::_BM25(
 		doc.clear();
 		++doc_id;
 	}
+	update_progress(doc_id, num_docs);
 
 	avg_doc_size = 0.0f;
 	for (const uint64_t& size : doc_sizes) {
