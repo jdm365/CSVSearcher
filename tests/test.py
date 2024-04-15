@@ -25,12 +25,10 @@ def test_csv_constructor(csv_filename: str, search_col: str = 'name'):
     rank_bm25_model = BM25Okapi(tokenized_names)
 
     bm25_model = BM25()
-    ## bm25_model.index_file(filename=FILENAME, text_col=search_col)
     bm25_model.index_documents(documents=names.tolist())
 
     for company in tqdm(companies_sample, desc="Querying"):
         tok_company = company.split()
-        ## results_rank_bm25 = rank_bm25_model.get_top_n(tok_company, corpus_indices, n=100000)
         scores = rank_bm25_model.get_scores(tok_company)
         results_rank_bm25 = np.argsort(scores)[::-1]
         results_rank_bm25 = results_rank_bm25[scores[results_rank_bm25] > 0]

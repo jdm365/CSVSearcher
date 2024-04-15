@@ -49,6 +49,7 @@ void update_progress(int line_num, int num_lines) {
     
     // Output the progress in one go
     std::cout << output << std::flush;
+	if (pos == bar_width) std::cout << std::endl;
 }
 
 
@@ -71,15 +72,6 @@ std::vector<uint64_t> get_II_row(
 
 
 void _BM25::read_json() {
-	/*
-	// Open the file
-	FILE* file = fopen(filename.c_str(), "r");
-	if (file == NULL) {
-		std::cerr << "Unable to open file: " << filename << std::endl;
-		exit(1);
-	}
-	*/
-
 	// Quickly count number of lines in file
 	uint64_t num_lines = 0;
 	char buf[1024 * 1024];
@@ -130,17 +122,18 @@ void _BM25::read_json() {
 					++char_idx;
 				}
 
+				// Found key. Match against search_col.
 				if (line[char_idx] == '"') {
-					// Found key. Match against search_col.
+					// Iter over quote.
 					++char_idx;
 
 					for (const char& c : search_col) {
+						// Scan until next key
 						if (c != line[char_idx]) {
-							// Scan until next key
-							bool in_quotes = true;
-							while (in_quotes) {
-								if (line[char_idx] == '"') {
-									in_quotes = !in_quotes;
+							while (line[char_idx] != ':') {
+								if (line[char_idx] == '\\') {
+									char_idx += 2;
+									continue;
 								}
 								++char_idx;
 							}
@@ -148,16 +141,20 @@ void _BM25::read_json() {
 
 							// Scan until comma not in quotes
 							while (line[char_idx] != ',') {
+								if (line[char_idx] == '\\') {
+									char_idx += 2;
+									continue;
+								}
+
 								if (line[char_idx] == '"') {
 									// Scan to next quote
 									while (line[char_idx] != '"') {
+										if (line[char_idx] == '\\') {
+											char_idx += 2;
+											continue;
+										}
 										++char_idx;
 									}
-									while (line[char_idx] == ' ') {
-										++char_idx;
-									}
-									++char_idx;
-									continue;
 								}
 								++char_idx;
 							}
@@ -168,27 +165,31 @@ void _BM25::read_json() {
 					}
 
 					// Found key. 
-					// Iterate over quote and colon.
-					char_idx += 2;
+					while (line[char_idx] != ':') {
+						++char_idx;
+					}
+					++char_idx;
 
-					// Check if quote, if so incremenet again then break.
-					if (line[char_idx] == '"') ++char_idx;
+					// Go to first char of value.
+					while (line[char_idx] == '"' || line[char_idx] == ' ') {
+						++char_idx;
+					}
 					break;
 				}
 				else if (line[char_idx] == '}') {
 					std::cout << "Search field not found on line: " << line_num << std::endl;
+					std::cout << std::flush;
 					std::exit(1);
 				}
 				else {
 					std::cerr << "Invalid json." << std::endl;
 					std::cout << line << std::endl;
+					std::cout << line[char_idx] << std::endl;
+					std::cout << char_idx << std::endl;
+					std::cout << std::flush;
 					std::exit(1);
 				}
 		}
-		while (line[char_idx] == ' ') {
-			++char_idx;
-		}
-		++char_idx;
 
 		std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
 		pq.push(line_num);
@@ -237,33 +238,31 @@ void _BM25::read_json() {
 			++char_idx;
 		}
 
-		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+		if (doc != "") {
+			auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 
-		if (add) {
-			// New term
-			II.accumulator.push_back(pq);
+			if (add) {
+				// New term
+				II.accumulator.push_back(pq);
 
-			++unique_terms_found;
-		}
-		else {
-			// Term already exists
-			if (terms_seen.find(it->second) == terms_seen.end()) {
-				II.accumulator[it->second].push(line_num);
+				++unique_terms_found;
 			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					II.accumulator[it->second].push(line_num);
+				}
+			}
+
+			++doc_size;
+			doc_sizes.push_back(doc_size);
 		}
 
-		++doc_size;
-		doc_sizes.push_back(doc_size);
 		doc.clear();
 		++line_num;
-
-		std::exit(1);
 	}
-	// fclose(reference_file);
-
 	update_progress(line_num, num_lines);
 
-	std::cout << std::endl << std::flush;
 	std::cout << "Compressing index" << std::endl;
 
 	if (DEBUG) {
@@ -473,29 +472,31 @@ void _BM25::read_csv() {
 			++char_idx;
 		}
 
-		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
+		if (doc != "") {
+			auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 
-		if (add) {
-			// New term
-			II.accumulator.push_back(pq);
+			if (add) {
+				// New term
+				II.accumulator.push_back(pq);
 
-			++unique_terms_found;
-		}
-		else {
-			// Term already exists
-			if (terms_seen.find(it->second) == terms_seen.end()) {
-				II.accumulator[it->second].push(line_num);
+				++unique_terms_found;
 			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					II.accumulator[it->second].push(line_num);
+				}
+			}
+
+			++doc_size;
+			doc_sizes.push_back(doc_size);
 		}
 
 		++line_num;
-		++doc_size;
-		doc_sizes.push_back(doc_size);
 		doc.clear();
 	}
 	update_progress(line_num + 1, num_lines);
 
-	std::cout << std::endl << std::flush;
 	std::cout << "Compressing index" << std::endl;
 
 	if (DEBUG) {
@@ -639,59 +640,30 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 		}
 		char_idx += 2;
 
-		if (line[char_idx] == '"') {
+		// Go to first char of value.
+		while (line[char_idx] == '"' || line[char_idx] == ' ') {
 			++char_idx;
+		}
 
-			while (line[char_idx] != '"') {
-				if (line[char_idx] == '\\') {
-					++char_idx;
-					first += line[char_idx];
-					++char_idx;
-					continue;
-				}
-
+		while (line[char_idx] != '}' || line[char_idx] != '"' || line[char_idx] != ',') {
+			if (line[char_idx] == '\\') {
+				++char_idx;
 				second += line[char_idx];
 				++char_idx;
+				continue;
 			}
-			++char_idx;
-
-			if (line[char_idx] == '}') {
+			else if (line[char_idx] == '}') {
+				second += line[char_idx];
 				row.emplace_back(first, second);
 				return row;
 			}
-
-			row.emplace_back(first, second);
-			first.clear();
-			second.clear();
+			second += line[char_idx];
 			++char_idx;
 		}
-		else {
-			while (line[char_idx] != ',') {
-				if (line[char_idx] == '}') {
-					row.emplace_back(first, second);
-					return row;
-				}
-				if (line[char_idx] == '\\') {
-					++char_idx;
-					first += line[char_idx];
-					++char_idx;
-					continue;
-				}
-
-				second += line[char_idx];
-				++char_idx;
-			}
-			char_idx += 2;
-
-			row.emplace_back(first, second);
-			first.clear();
-			second.clear();
-		}
-		if (line[char_idx] != '"') {
-			std::cout << line << std::endl;
-			std::cout << char_idx << std::endl << std::endl;
-		}
 		++char_idx;
+		if (line[char_idx] == '}') {
+			return row;
+		}
 	}
 	return row;
 }
@@ -1430,7 +1402,7 @@ _BM25::_BM25(
 	}
 
 	if (max_df <= 1.0) {
-		max_df = (int)num_docs * max_df;
+		this->max_df = (int)num_docs * max_df;
 	}
 
 	if (DEBUG) {
@@ -1438,7 +1410,8 @@ _BM25::_BM25(
 		std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
 		std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
 	}
-	std::cout << "Avg doc size: " << avg_doc_size << std::endl;
+
+	std::cout << "Max df: " << max_df << std::endl;
 }
 
 
@@ -1456,6 +1429,10 @@ _BM25::_BM25(
 	file_type = IN_MEMORY;
 
 	num_docs = documents.size();
+
+	if (max_df <= 1.0) {
+		this->max_df = (int)num_docs * max_df;
+	}
 
 	uint64_t unique_terms_found = 0;
 
@@ -1628,6 +1605,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		uint32_t k,
 		uint32_t init_max_df 
 		) {
+	auto start = std::chrono::high_resolution_clock::now();
 	std::vector<uint64_t> term_idxs;
 
 	std::string substr = "";
@@ -1652,10 +1630,9 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 
 	// Gather docs that contain at least one term from the query
 	// Uses dynamic max_df for performance
-	uint64_t local_max_df = init_max_df;
+	uint64_t local_max_df = std::min((uint64_t)init_max_df, (uint64_t)max_df);
 	robin_hood::unordered_map<uint64_t, float> doc_scores;
 
-	auto start = std::chrono::high_resolution_clock::now();
 	while (doc_scores.size() == 0) {
 		for (const uint64_t& term_idx : term_idxs) {
 			uint64_t df;
@@ -1697,8 +1674,10 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 	}
 	if (DEBUG) {
 		auto end = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double> elapsed_seconds = end - start;
-		std::cout << "Collection time: " << elapsed_seconds.count() << std::endl;
+		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+		std::cout << "Number of docs: " << doc_scores.size() << "    ";
+		std::cout << elapsed_ms.count() << "ms" << std::endl;
+		std::cout << max_df << std::endl;
 	}
 	
 	if (doc_scores.size() == 0) {

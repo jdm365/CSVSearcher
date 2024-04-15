@@ -144,79 +144,55 @@ def test_sklearn(csv_filename: str):
 
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
+
+def test_bm25_json(json_filename: str, search_col: str):
+    df = pd.read_json(json_filename, lines=True, nrows=10_000)
+    sample = df[search_col].values
+
+    init = perf_counter()
+    model = BM25()
+    model.index_file(filename=json_filename, text_col=search_col)
+    print(f"Time to index: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
+    for query in tqdm(sample, desc="Querying"):
+        model.get_topk_docs(query, k=10)
+    time = perf_counter() - init
+
+    print(f"Queries per second: {10_000 / time:.2f}")
     
+
+def test_bm25_csv(csv_filename: str, search_col: str):
+    df = pd.read_csv(csv_filename, usecols=[search_col], nrows=10_000)
+    sample = df[search_col]
+
+    init = perf_counter()
+    model = BM25(max_df=20_000)
+    model.index_file(filename=csv_filename, text_col=search_col)
+    print(f"Time to index: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
+    for query in tqdm(sample, desc="Querying"):
+        model.get_topk_docs(query, k=10)
+    time = perf_counter() - init
+
+    print(f"Queries per second: {10_000 / time:.2f}")
+
 
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'og_corpus.json')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_100M.csv')
-    FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
-    ## FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted_1M.csv')
 
-    test_okapi_bm25(FILENAME)
+    JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'og_corpus.json')
+    ## JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
+
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+
+    ## test_okapi_bm25(FILENAME)
     ## test_retriv(FILENAME)
     ## test_duckdb(FILENAME)
     ## test_anserini(FILENAME)
     ## test_sklearn(FILENAME)
-
-    ## values = pd.read_csv(FILENAME, usecols=['name']).reset_index(drop=True)
-
-    SEARCH_COL = 'name'
-    ## SEARCH_COL = 'text'
-
-    init = perf_counter()
-    model = BM25(
-            max_df=10000
-            )
-    model.index_file(filename=FILENAME, text_col=SEARCH_COL)
-    ## model.index_documents(values['name'].tolist())
-    model.save(db_dir='tmp_db')
-    ## model.load(db_dir='tmp_db')
-    print(f"Time to index: {perf_counter() - init:.2f} seconds")
-    ## exit()
-
-    N = 10_000
-    ## names = pd.read_csv(FILENAME, usecols=[SEARCH_COL], nrows=N).reset_index(drop=True).name.tolist()
-    names = pd.read_csv(
-            ## names = pd.read_json(
-            FILENAME, 
-            usecols=[SEARCH_COL],
-            nrows=N,
-            ## lines=True
-            ).reset_index(drop=True).fillna('')[SEARCH_COL].tolist()
-    final_names = []
-    for name in names:
-        name = name.strip()
-        if len(name) > 0:
-            final_names.append(' '.join(np.random.choice(name.split(), 2)))
-        else:
-            final_names.append(name)
-
-    init = perf_counter()
-    for idx, name in enumerate(tqdm(final_names, desc="Querying")):
-        model.get_topk_docs(name, init_max_df=10000)
-        ## model.get_topk_indices(name, init_max_df=10000)
-
-    time = perf_counter() - init
-    print(f"Queries per second: {N / time:.2f}")
-
-    QUERY = "netflix inc"
-
-    records = model.get_topk_docs(QUERY, k=10, init_max_df=10000)
-    '''
-    scores, indices = model.get_topk_indices(QUERY, k=10, init_max_df=500)
-    df = pd.DataFrame({
-        'name': values['name'].iloc[indices].values,
-        'scores': scores,
-        'indices': indices
-        })
-    '''
-    df = pd.DataFrame(records)
-    print(df)
-
-    ## scores, indices = model.get_topk_docs(query, k=10, init_max_df=500)
-    ## print(names.iloc[indices])
-
+    test_bm25_csv(CSV_FILENAME, search_col='name')
+    test_bm25_json(JSON_FILENAME, search_col='text')
