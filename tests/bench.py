@@ -164,7 +164,7 @@ def test_bm25_json(json_filename: str, search_col: str):
 
 def test_bm25_csv(csv_filename: str, search_col: str):
     df = pd.read_csv(csv_filename, usecols=[search_col], nrows=10_000)
-    sample = df[search_col]
+    sample = df[search_col].fillna('').astype(str).values
 
     init = perf_counter()
     model = BM25(max_df=20_000)
@@ -186,13 +186,14 @@ if __name__ == '__main__':
     JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'og_corpus.json')
     ## JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
 
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
 
     ## test_okapi_bm25(FILENAME)
     ## test_retriv(FILENAME)
     ## test_duckdb(FILENAME)
     ## test_anserini(FILENAME)
     ## test_sklearn(FILENAME)
-    test_bm25_csv(CSV_FILENAME, search_col='name')
+    ## test_bm25_csv(CSV_FILENAME, search_col='name')
+    test_bm25_csv(CSV_FILENAME, search_col='text')
     test_bm25_json(JSON_FILENAME, search_col='text')

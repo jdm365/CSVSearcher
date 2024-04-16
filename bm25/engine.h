@@ -101,8 +101,8 @@ void deserialize_vector_of_vector_u8(
 // First element of inverted index compressed structure is doc_freq.
 // Then elements are doc_ids followed by term_freqs.
 typedef struct {
-	std::vector<std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>>> accumulator;
-	// std::vector<std::vector<uint64_t>> accumulator;
+	// std::vector<std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>>> accumulator;
+	std::vector<std::vector<uint64_t>> accumulator;
 
 	std::vector<std::vector<uint8_t>> inverted_index_compressed;
 

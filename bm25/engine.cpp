@@ -191,8 +191,9 @@ void _BM25::read_json() {
 				}
 		}
 
-		std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
-		pq.push(line_num);
+		// std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
+		// pq.push(line_num);
+		std::vector<uint64_t> entry(1, line_num);
 
 		// Split by commas not inside double quotes
 		uint64_t doc_size = 0;
@@ -213,7 +214,7 @@ void _BM25::read_json() {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 				if (add) {
 					// New term
-					II.accumulator.push_back(pq);
+					II.accumulator.push_back(entry);
 
 					terms_seen.insert(it->second);
 
@@ -223,7 +224,8 @@ void _BM25::read_json() {
 					// Term already exists
 					if (terms_seen.find(it->second) == terms_seen.end()) {
 						terms_seen.insert(it->second);
-						II.accumulator[it->second].push(line_num);
+						// II.accumulator[it->second].push(line_num);
+						II.accumulator[it->second].push_back(line_num);
 					}
 				}
 
@@ -243,14 +245,15 @@ void _BM25::read_json() {
 
 			if (add) {
 				// New term
-				II.accumulator.push_back(pq);
+				II.accumulator.push_back(entry);
 
 				++unique_terms_found;
 			}
 			else {
 				// Term already exists
 				if (terms_seen.find(it->second) == terms_seen.end()) {
-					II.accumulator[it->second].push(line_num);
+					// II.accumulator[it->second].push(line_num);
+					II.accumulator[it->second].push_back(line_num);
 				}
 			}
 
@@ -290,8 +293,9 @@ void _BM25::read_json() {
 		uint64_t last_doc_id = UINT64_MAX;
 		uint64_t same_count = 1;
 		bool first = true;
-		while (!row.empty()) {
-			auto doc_id = row.top();
+		// while (!row.empty()) {
+		for (const auto& doc_id : row) {
+			// auto doc_id = row.top();
 
 			if (doc_id == last_doc_id) {
 				++same_count;
@@ -307,7 +311,7 @@ void _BM25::read_json() {
 			}
 
 			// remove top element
-			row.pop();
+			// row.pop();
 			last_doc_id = doc_id;
 
 			first = false;
@@ -439,15 +443,16 @@ void _BM25::read_csv() {
 			++char_idx;
 		}
 
-		std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
-		pq.push(line_num);
+		// std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
+		// pq.push(line_num);
+		std::vector<uint64_t> entry(1, line_num);
 
 		while (line[char_idx] != end_delim) {
 			if (line[char_idx] == ' ') {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 				if (add) {
 					// New term
-					II.accumulator.push_back(pq);
+					II.accumulator.push_back(entry);
 
 					terms_seen.insert(it->second);
 
@@ -457,7 +462,7 @@ void _BM25::read_csv() {
 					// Term already exists
 					if (terms_seen.find(it->second) == terms_seen.end()) {
 						terms_seen.insert(it->second);
-						II.accumulator[it->second].push(line_num);
+						II.accumulator[it->second].push_back(line_num);
 					}
 				}
 
@@ -477,14 +482,14 @@ void _BM25::read_csv() {
 
 			if (add) {
 				// New term
-				II.accumulator.push_back(pq);
+				II.accumulator.push_back(entry);
 
 				++unique_terms_found;
 			}
 			else {
 				// Term already exists
 				if (terms_seen.find(it->second) == terms_seen.end()) {
-					II.accumulator[it->second].push(line_num);
+					II.accumulator[it->second].push_back(line_num);
 				}
 			}
 
@@ -524,8 +529,9 @@ void _BM25::read_csv() {
 		uint64_t last_doc_id = UINT64_MAX;
 		uint64_t same_count = 1;
 		bool first = true;
-		while (!row.empty()) {
-			auto doc_id = row.top();
+		// while (!row.empty()) {
+		for (const auto& doc_id : row) {
+			// auto doc_id = row.top();
 
 			if (doc_id == last_doc_id) {
 				++same_count;
@@ -541,7 +547,7 @@ void _BM25::read_csv() {
 			}
 
 			// remove top element
-			row.pop();
+			// row.pop();
 			last_doc_id = doc_id;
 
 			first = false;
@@ -1453,15 +1459,16 @@ _BM25::_BM25(
 		// Split by commas not inside double quotes
 		uint32_t doc_size = 0;
 
-		std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
-		pq.push(doc_id);
+		// std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
+		// pq.push(doc_id);
+		std::vector<uint64_t> entry(1, doc_id);
 
 		for (const char& c : line) {
 			if (c == ' ') {
 				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
 				if (add) {
 					// New term
-					II.accumulator.push_back(pq);
+					II.accumulator.push_back(entry);
 
 					terms_seen.insert(it->second);
 
@@ -1471,7 +1478,7 @@ _BM25::_BM25(
 					// Term already exists
 					if (terms_seen.find(it->second) == terms_seen.end()) {
 						terms_seen.insert(it->second);
-						II.accumulator[it->second].push(doc_id);
+						II.accumulator[it->second].push_back(doc_id);
 					}
 				}
 
@@ -1487,14 +1494,14 @@ _BM25::_BM25(
 
 		if (add) {
 			// New term
-			II.accumulator.push_back(pq);
+			II.accumulator.push_back(entry);
 
 			++unique_terms_found;
 		}
 		else {
 			// Term already exists
 			if (terms_seen.find(it->second) == terms_seen.end()) {
-				II.accumulator[it->second].push(doc_id);
+				II.accumulator[it->second].push_back(doc_id);
 			}
 		}
 
@@ -1538,8 +1545,9 @@ _BM25::_BM25(
 		uint64_t last_doc_id = UINT64_MAX;
 		uint64_t same_count = 1;
 		bool first = true;
-		while (!row.empty()) {
-			auto doc_id = row.top();
+		// while (!row.empty()) {
+		for (const auto& doc_id : row) {
+			// auto doc_id = row.top();
 
 			if (doc_id == last_doc_id) {
 				++same_count;
@@ -1555,7 +1563,7 @@ _BM25::_BM25(
 			}
 
 			// remove top element
-			row.pop();
+			// row.pop();
 			last_doc_id = doc_id;
 
 			first = false;
