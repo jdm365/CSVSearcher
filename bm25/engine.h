@@ -2,7 +2,6 @@
 #include <vector>
 #include <string>
 #include <cstdint>
-#include <queue>
 
 #include "robin_hood.h"
 #include "xxhash64.h"
@@ -169,8 +168,10 @@ class _BM25 {
 				);
 		_BM25(std::string db_dir) {
 			load_from_disk(db_dir);
-			// filename found ind db_dir/filename.txt
+
+			// filename found in db_dir/filename.txt
 			std::string fn_file = db_dir + "/filename.txt";
+
 			// read fn_file contents into filename 
 			FILE* f = fopen(fn_file.c_str(), "r");
 			if (f == nullptr) {

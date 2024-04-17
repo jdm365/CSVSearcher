@@ -1416,8 +1416,6 @@ _BM25::_BM25(
 		std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
 		std::cout << "Read file in " << read_elapsed_seconds.count() << " seconds" << std::endl;
 	}
-
-	std::cout << "Max df: " << max_df << std::endl;
 }
 
 
@@ -1683,6 +1681,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 	if (DEBUG) {
 		auto end = std::chrono::high_resolution_clock::now();
 		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+		std::cout << "QUERY: " << query << std::endl;
 		std::cout << "Number of docs: " << doc_scores.size() << "    ";
 		std::cout << elapsed_ms.count() << "ms" << std::endl;
 		std::cout << max_df << std::endl;
@@ -1692,6 +1691,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		return std::vector<std::pair<uint64_t, float>>();
 	}
 
+	start = std::chrono::high_resolution_clock::now();
 	std::priority_queue<
 		std::pair<uint64_t, float>, 
 		std::vector<std::pair<uint64_t, float>>, 
@@ -1710,6 +1710,12 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		result[idx] = top_k_docs.top();
 		top_k_docs.pop();
 		--idx;
+	}
+	if (DEBUG) {
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+		std::cout << "Time to get top k: " << elapsed_ms.count() << "ms" << std::endl;
+		std::cout << std::endl << std::endl;
 	}
 
 	return result;

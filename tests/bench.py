@@ -89,17 +89,18 @@ def test_duckdb(csv_filename: str):
                      """)
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
+
 def test_anserini(csv_filename: str):
     from pyserini.search import LuceneSearcher
     from pyserini.index.lucene import LuceneIndexer
 
     ## convert to json
     df = pd.read_csv(csv_filename).fillna('')
-    ## companies_sample = df['name'].sample(10_000)
-    companies_sample = df['text'].sample(10_000)
+    companies_sample = df['name'].sample(10_000)
+    ## companies_sample = df['text'].sample(10_000)
 
-    ## df.rename(columns={'name': 'contents', 'domain': 'id'}, inplace=True)
-    df.rename(columns={'text': 'contents'}, inplace=True)
+    df.rename(columns={'name': 'contents', 'domain': 'id'}, inplace=True)
+    ## df.rename(columns={'text': 'contents'}, inplace=True)
     df['id'] = df.index.astype(str)
     os.system('rm -rf tmp_data_dir')
     os.system('mkdir tmp_data_dir')
@@ -120,6 +121,8 @@ def test_anserini(csv_filename: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
     os.system('rm -rf tmp_data_dir')
+
+    del searcher, writer
 
 
 def test_sklearn(csv_filename: str):
@@ -167,7 +170,7 @@ def test_bm25_csv(csv_filename: str, search_col: str):
     sample = df[search_col].fillna('').astype(str).values
 
     init = perf_counter()
-    model = BM25(max_df=20_000)
+    model = BM25(max_df=50_000)
     model.index_file(filename=csv_filename, text_col=search_col)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -178,6 +181,41 @@ def test_bm25_csv(csv_filename: str, search_col: str):
 
     print(f"Queries per second: {10_000 / time:.2f}")
 
+def test_documents(csv_filename: str, search_col: str):
+    df = pd.read_csv(csv_filename)
+    names = df[search_col].tolist()
+
+    rand_idxs = np.random.choice(len(names), 10_000, replace=False)
+    companies_sample = [names[i] for i in rand_idxs]
+
+    bm25 = BM25(max_df=50_000)
+
+    init = perf_counter()
+    bm25.index_documents(documents=names)
+    print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
+
+    for company in tqdm(companies_sample, desc="Querying"):
+        bm25.get_topk_indices(company, k=10)
+
+    print(f"Time to query: {perf_counter() - init:.2f} seconds")
+
+    ## Try saving and loading
+    bm25.save(db_dir='bm25_model')
+    bm25.load(db_dir='bm25_model')
+
+    ## Go again.
+
+    init = perf_counter()
+    bm25.index_documents(documents=names)
+    print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
+
+    for company in tqdm(companies_sample[:10], desc="Querying"):
+        bm25.get_topk_indices(company, k=10)
+
+    print(f"Time to query: {perf_counter() - init:.2f} seconds")
+
+    os.system('rm -rf bm25_model')
+
 
 
 if __name__ == '__main__':
@@ -186,14 +224,15 @@ if __name__ == '__main__':
     JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'og_corpus.json')
     ## JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
 
-    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
 
     ## test_okapi_bm25(FILENAME)
-    ## test_retriv(FILENAME)
+    ## test_retriv(CSV_FILENAME)
     ## test_duckdb(FILENAME)
-    ## test_anserini(FILENAME)
+    ## test_anserini(CSV_FILENAME)
     ## test_sklearn(FILENAME)
-    ## test_bm25_csv(CSV_FILENAME, search_col='name')
-    test_bm25_csv(CSV_FILENAME, search_col='text')
+    ## test_bm25_csv(CSV_FILENAME, search_col='text')
+    test_bm25_csv(CSV_FILENAME, search_col='name')
     test_bm25_json(JSON_FILENAME, search_col='text')
+    test_documents(CSV_FILENAME, search_col='name')

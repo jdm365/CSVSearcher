@@ -6,9 +6,16 @@ import os
 
 MODULE_NAME = "bm25"
 
+## Optionally choose compiler ##
+
+COMPILER = "clang++"
+## COMPILER = "g++"
+os.environ["CXX"] = COMPILER
+
+COMPILER = os.environ["CXX"]
+
 COMPILER_FLAGS = [
     "-std=c++17",
-    "-stdlib=libc++",
     "-O3",
     "-Wall",
     "-Wextra",
@@ -24,6 +31,13 @@ LINK_ARGS = [
     "-L/usr/local/lib",
 ]
 
+if COMPILER == "clang++":
+    COMPILER_FLAGS += [
+            "-stdlib=libc++"
+    ]
+
+
+'''
 if OS == "Darwin":
     COMPILER_FLAGS += [
         "-fopenmp",
@@ -31,6 +45,7 @@ if OS == "Darwin":
     LINK_ARGS += [
         "-fopenmp"
     ]
+'''
 
 extensions = [
     Extension(

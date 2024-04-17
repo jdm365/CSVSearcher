@@ -76,7 +76,7 @@ cdef class BM25:
         self._init_with_documents(documents)
 
 
-    cpdef save(self, db_dir):
+    def save(self, db_dir):
         self.db_dir = db_dir
 
         self.bm25.save_to_disk(db_dir.encode("utf-8"))
@@ -92,14 +92,17 @@ cdef class BM25:
         with open(os.path.join(self.db_dir, "filename.txt"), "w") as f:
             f.write(self.filename)
 
-        last_modified = os.path.getmtime(self.filename)
+        if self.filename != "in_memory":
+            last_modified = os.path.getmtime(self.filename)
+        else:
+            last_modified = "in_memory"
 
         ## Write to a file
         with open(os.path.join(self.db_dir, "last_modified_file.txt"), "w") as f:
             f.write(str(last_modified))
 
 
-    cpdef bool load(self, str db_dir):
+    def load(self, db_dir):
         self.db_dir = db_dir
 
         ## First check if db_dir exists
@@ -117,7 +120,6 @@ cdef class BM25:
         if new_time != last_modified:
             raise RuntimeError("Database directory has been modified since last save")
 
-        '''
         with open(os.path.join(self.db_dir, "filename.txt"), "r") as f:
             last_filename = f.read()
 
@@ -128,13 +130,13 @@ cdef class BM25:
         with open(os.path.join(self.db_dir, "last_modified_file.txt"), "r") as f:
             last_modified = f.read()
 
-        new_time = str(os.path.getmtime(self.filename))
-        new_time = new_time.split('.')[0]
-        last_modified = last_modified.split('.')[0]
+        if last_modified != "in_memory":
+            new_time = str(os.path.getmtime(self.filename))
+            new_time = new_time.split('.')[0]
+            last_modified = last_modified.split('.')[0]
 
-        if new_time != last_modified:
-            raise RuntimeError("Source file has been modified since last save")
-        '''
+            if new_time != last_modified:
+                raise RuntimeError("Source file has been modified since last save")
 
         self.bm25 = new _BM25(self.db_dir.encode("utf-8"))
         return True
@@ -167,7 +169,7 @@ cdef class BM25:
                 self.b
                 )
 
-    def get_topk_indices(self, str query, int init_max_df = 1000, int k = 10):
+    def get_topk_indices(self, str query, int init_max_df = INT_MAX, int k = 10):
         results = self.bm25.query(query.upper().encode("utf-8"), k, init_max_df)
 
         scores  = []
