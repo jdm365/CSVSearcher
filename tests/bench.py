@@ -153,7 +153,7 @@ def test_bm25_json(json_filename: str, search_col: str):
     sample = df[search_col].values
 
     init = perf_counter()
-    model = BM25()
+    model = BM25(max_df=10_000)
     model.index_file(filename=json_filename, text_col=search_col)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -188,7 +188,7 @@ def test_documents(csv_filename: str, search_col: str):
     rand_idxs = np.random.choice(len(names), 10_000, replace=False)
     companies_sample = [names[i] for i in rand_idxs]
 
-    bm25 = BM25(max_df=50_000)
+    bm25 = BM25(min_df=10, max_df=50_000)
 
     init = perf_counter()
     bm25.index_documents(documents=names)
@@ -233,6 +233,6 @@ if __name__ == '__main__':
     ## test_anserini(CSV_FILENAME)
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_col='text')
-    test_bm25_csv(CSV_FILENAME, search_col='name')
     test_bm25_json(JSON_FILENAME, search_col='text')
+    test_bm25_csv(CSV_FILENAME, search_col='name')
     test_documents(CSV_FILENAME, search_col='name')

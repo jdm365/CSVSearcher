@@ -8,6 +8,7 @@ from libcpp.string cimport string
 from libcpp.pair cimport pair
 from libcpp cimport bool
 
+from time import perf_counter
 import os
 
 
@@ -39,7 +40,6 @@ cdef extern from "engine.h":
                 )
         void save_to_disk(string db_dir)
         void load_from_disk(string db_dir)
-
 
 
 cdef class BM25:
@@ -144,10 +144,12 @@ cdef class BM25:
 
 
     cdef void _init_with_documents(self, list documents):
+        init = perf_counter()
         self.filename = "in_memory"
 
         cdef vector[string] docs
         docs.reserve(len(documents))
+        cdef str doc
         for doc in documents:
             docs.push_back(doc.upper().encode("utf-8"))
 

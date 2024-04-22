@@ -204,6 +204,14 @@ class _BM25 {
 		void save_to_disk(const std::string& db_dir);
 		void load_from_disk(const std::string& db_dir);
 
+		void get_compressed_inverted_index();
+		void process_doc(
+				const char* doc,
+				const char terminator,
+				uint64_t doc_id,
+				uint64_t& unique_terms_found
+				);
+
 		void read_json();
 		void read_csv();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);

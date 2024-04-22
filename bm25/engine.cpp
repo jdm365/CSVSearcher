@@ -24,6 +24,154 @@
 #include "vbyte_encoding.h"
 
 
+void _BM25::get_compressed_inverted_index() {
+	uint64_t idx = 0;
+	robin_hood::unordered_flat_set<uint64_t> remove_idxs;
+
+	for (auto& row : II.accumulator) {
+		std::vector<uint64_t> uncompressed_buffer(1, row.size());
+		uncompressed_buffer.reserve(row.size() * 2 + 1);
+
+		std::vector<uint64_t> tfs;
+
+		uint64_t last_doc_id = UINT64_MAX;
+		uint64_t same_count = 1;
+		bool first = true;
+		for (const auto& doc_id : row) {
+			if (doc_id == last_doc_id) {
+				++same_count;
+				--uncompressed_buffer[0];
+			}
+			else {
+				// Make doc ids differential
+				uncompressed_buffer.push_back(doc_id - !first * last_doc_id);
+				tfs.push_back(same_count);
+
+				same_count = 1;
+			}
+
+			// remove top element
+			last_doc_id = doc_id;
+
+			first = false;
+		}
+
+		if (uncompressed_buffer[0] < (uint64_t)min_df || uncompressed_buffer[0] > max_df) {
+			// Delete from vocabulary
+			remove_idxs.insert(idx);
+
+			++idx;
+			continue;
+		}
+
+		// Add tfs to end of uncompressed_buffer
+		for (const auto& tf : tfs) {
+			uncompressed_buffer.push_back(tf);
+		}
+
+		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
+		compress_uint64(
+				uncompressed_buffer,
+				II.inverted_index_compressed[idx]
+				);
+		++idx;
+	}
+
+	// Remove terms from vocabulary
+	for (auto it = unique_term_mapping.begin(); it != unique_term_mapping.end(); ) {
+		if (remove_idxs.find(it->second) != remove_idxs.end()) {
+			it = unique_term_mapping.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+void _BM25::process_doc(
+		const char* doc,
+		const char terminator,
+		uint64_t doc_id,
+		uint64_t& unique_terms_found
+		) {
+	std::vector<uint64_t> entry(1, doc_id);
+
+	uint64_t char_idx = 0;
+
+	std::string term = "";
+	term.reserve(22);
+
+	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+
+	// Split by commas not inside double quotes
+	uint64_t doc_size = 0;
+	while (doc[char_idx] != terminator) {
+		if (char_idx > 1048576) {
+			std::cout << "Search field not found on line: " << doc_id << std::endl;
+			std::cout << "Doc: " << doc << std::endl;
+			std::cout << std::flush;
+			std::exit(1);
+		}
+		if (doc[char_idx] == '\\') {
+			++char_idx;
+			term += toupper(doc[char_idx]);
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ' && term == "") {
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ') {
+			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+			if (add) {
+				// New term
+				II.accumulator.push_back(entry);
+
+				terms_seen.insert(it->second);
+
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert(it->second);
+					II.accumulator[it->second].push_back(doc_id);
+				}
+			}
+
+			++doc_size;
+			term.clear();
+
+			++char_idx;
+			continue;
+		}
+
+		term += toupper(doc[char_idx]);
+		++char_idx;
+	}
+
+	if (term != "") {
+		auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+
+		if (add) {
+			// New term
+			II.accumulator.push_back(entry);
+
+			++unique_terms_found;
+		}
+		else {
+			// Term already exists
+			if (terms_seen.find(it->second) == terms_seen.end()) {
+				II.accumulator[it->second].push_back(doc_id);
+			}
+		}
+
+		++doc_size;
+	}
+	doc_sizes.push_back(doc_size);
+}
 
 void update_progress(int line_num, int num_lines) {
 	const int bar_width = 121;
@@ -94,11 +242,6 @@ void _BM25::read_json() {
 
 	uint64_t unique_terms_found = 0;
 
-	robin_hood::unordered_flat_set<uint64_t> terms_seen;
-
-	std::string doc = "";
-	doc.reserve(22);
-
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, reference_file)) != -1) {
 		if (!DEBUG) {
@@ -106,11 +249,13 @@ void _BM25::read_json() {
 				update_progress(line_num, num_lines);
 			}
 		}
+		if (strlen(line) == 0) {
+			std::cout << "Empty line found" << std::endl;
+			std::exit(1);
+		}
 
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
-
-		terms_seen.clear();
 
 		// Iterate of line chars until we get to relevant column.
 
@@ -181,6 +326,11 @@ void _BM25::read_json() {
 					std::cout << std::flush;
 					std::exit(1);
 				}
+				else if (char_idx > 1048576) {
+					std::cout << "Search field not found on line: " << line_num << std::endl;
+					std::cout << std::flush;
+					std::exit(1);
+				}
 				else {
 					std::cerr << "Invalid json." << std::endl;
 					std::cout << line << std::endl;
@@ -191,80 +341,11 @@ void _BM25::read_json() {
 				}
 		}
 
-		// std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
-		// pq.push(line_num);
-		std::vector<uint64_t> entry(1, line_num);
-
-		// Split by commas not inside double quotes
-		uint64_t doc_size = 0;
-		while (line[char_idx] != '"') {
-			if (line[char_idx] == '\\') {
-				++char_idx;
-				doc += line[char_idx];
-				++char_idx;
-				continue;
-			}
-
-			if (line[char_idx] == ' ' && doc == "") {
-				++char_idx;
-				continue;
-			}
-
-			if (line[char_idx] == ' ') {
-				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				if (add) {
-					// New term
-					II.accumulator.push_back(entry);
-
-					terms_seen.insert(it->second);
-
-					++unique_terms_found;
-				}
-				else {
-					// Term already exists
-					if (terms_seen.find(it->second) == terms_seen.end()) {
-						terms_seen.insert(it->second);
-						// II.accumulator[it->second].push(line_num);
-						II.accumulator[it->second].push_back(line_num);
-					}
-				}
-
-				++doc_size;
-				doc.clear();
-
-				++char_idx;
-				continue;
-			}
-
-			doc += toupper(line[char_idx]);
-			++char_idx;
-		}
-
-		if (doc != "") {
-			auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-
-			if (add) {
-				// New term
-				II.accumulator.push_back(entry);
-
-				++unique_terms_found;
-			}
-			else {
-				// Term already exists
-				if (terms_seen.find(it->second) == terms_seen.end()) {
-					// II.accumulator[it->second].push(line_num);
-					II.accumulator[it->second].push_back(line_num);
-				}
-			}
-
-			++doc_size;
-			doc_sizes.push_back(doc_size);
-		}
-
-		doc.clear();
+		process_doc(&line[char_idx], '"', line_num, unique_terms_found);
 		++line_num;
 	}
 	update_progress(line_num, num_lines);
+	free(line);
 
 	std::cout << "Compressing index" << std::endl;
 
@@ -284,50 +365,7 @@ void _BM25::read_json() {
 
 	// Now get inverted_index_compressed from accumulator.
 	II.inverted_index_compressed.resize(unique_terms_found);
-	uint64_t idx = 0;
-	for (auto& row : II.accumulator) {
-		std::vector<uint64_t> uncompressed_buffer(1, 0);
-		uncompressed_buffer.reserve(row.size() * 2 + 1);
-		std::vector<uint64_t> tfs;
-
-		uint64_t last_doc_id = UINT64_MAX;
-		uint64_t same_count = 1;
-		bool first = true;
-		// while (!row.empty()) {
-		for (const auto& doc_id : row) {
-			// auto doc_id = row.top();
-
-			if (doc_id == last_doc_id) {
-				++same_count;
-			}
-			else {
-				++uncompressed_buffer[0];
-
-				// Make doc ids differential
-				uncompressed_buffer.push_back(doc_id - !first * last_doc_id);
-				tfs.push_back(same_count);
-
-				same_count = 1;
-			}
-
-			// remove top element
-			// row.pop();
-			last_doc_id = doc_id;
-
-			first = false;
-		}
-		// Add tfs to end of uncompressed_buffer
-		for (const auto& tf : tfs) {
-			uncompressed_buffer.push_back(tf);
-		}
-
-		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
-		compress_uint64(
-				uncompressed_buffer,
-				II.inverted_index_compressed[idx]
-				);
-		++idx;
-	}
+	get_compressed_inverted_index();
 
 	auto end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed_seconds = end - start;
@@ -402,7 +440,7 @@ void _BM25::read_csv() {
 	std::string doc = "";
 	doc.reserve(22);
 
-	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
 
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, reference_file)) != -1) {
@@ -411,8 +449,6 @@ void _BM25::read_csv() {
 		}
 		line_offsets.push_back(byte_offset);
 		byte_offset += read;
-
-		terms_seen.clear();
 
 		// Iterate of line chars until we get to relevant column.
 		int char_idx = 0;
@@ -433,7 +469,6 @@ void _BM25::read_csv() {
 		}
 
 		// Split by commas not inside double quotes
-		uint64_t doc_size = 0;
 		char end_delim = ',';
 		if (search_column_index == (int)columns.size() - 1) {
 			end_delim = '\n';
@@ -443,62 +478,8 @@ void _BM25::read_csv() {
 			++char_idx;
 		}
 
-		// std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
-		// pq.push(line_num);
-		std::vector<uint64_t> entry(1, line_num);
-
-		while (line[char_idx] != end_delim) {
-			if (line[char_idx] == ' ') {
-				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				if (add) {
-					// New term
-					II.accumulator.push_back(entry);
-
-					terms_seen.insert(it->second);
-
-					++unique_terms_found;
-				}
-				else {
-					// Term already exists
-					if (terms_seen.find(it->second) == terms_seen.end()) {
-						terms_seen.insert(it->second);
-						II.accumulator[it->second].push_back(line_num);
-					}
-				}
-
-				++doc_size;
-				doc.clear();
-
-				++char_idx;
-				continue;
-			}
-
-			doc += toupper(line[char_idx]);
-			++char_idx;
-		}
-
-		if (doc != "") {
-			auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-
-			if (add) {
-				// New term
-				II.accumulator.push_back(entry);
-
-				++unique_terms_found;
-			}
-			else {
-				// Term already exists
-				if (terms_seen.find(it->second) == terms_seen.end()) {
-					II.accumulator[it->second].push_back(line_num);
-				}
-			}
-
-			++doc_size;
-			doc_sizes.push_back(doc_size);
-		}
-
+		process_doc(&line[char_idx], end_delim, line_num, unique_terms_found);
 		++line_num;
-		doc.clear();
 	}
 	update_progress(line_num + 1, num_lines);
 
@@ -520,50 +501,7 @@ void _BM25::read_csv() {
 
 	// Now get inverted_index_compressed from accumulator.
 	II.inverted_index_compressed.resize(unique_terms_found);
-	uint64_t idx = 0;
-	for (auto& row : II.accumulator) {
-		std::vector<uint64_t> uncompressed_buffer(1, 0);
-		uncompressed_buffer.reserve(row.size() * 2 + 1);
-		std::vector<uint64_t> tfs;
-
-		uint64_t last_doc_id = UINT64_MAX;
-		uint64_t same_count = 1;
-		bool first = true;
-		// while (!row.empty()) {
-		for (const auto& doc_id : row) {
-			// auto doc_id = row.top();
-
-			if (doc_id == last_doc_id) {
-				++same_count;
-			}
-			else {
-				++uncompressed_buffer[0];
-
-				// Make doc ids differential
-				uncompressed_buffer.push_back(doc_id - !first * last_doc_id);
-				tfs.push_back(same_count);
-
-				same_count = 1;
-			}
-
-			// remove top element
-			// row.pop();
-			last_doc_id = doc_id;
-
-			first = false;
-		}
-		// Add tfs to end of uncompressed_buffer
-		for (const auto& tf : tfs) {
-			uncompressed_buffer.push_back(tf);
-		}
-
-		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
-		compress_uint64(
-				uncompressed_buffer,
-				II.inverted_index_compressed[idx]
-				);
-		++idx;
-	}
+	get_compressed_inverted_index();
 
 	auto end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed_seconds = end - start;
@@ -1443,68 +1381,16 @@ _BM25::_BM25(
 	std::string doc = "";
 	doc.reserve(22);
 
-	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
 	const int UPDATE_INTERVAL = 10000;
 	uint64_t doc_id = 0;
 	for (const std::string& line : documents) {
-		terms_seen.clear();
-
 		if (doc_id % UPDATE_INTERVAL == 0) {
 			// Clear existing line and print progress
 			update_progress(doc_id, num_docs);
 		}
+		process_doc(line.c_str(), '\0', doc_id, unique_terms_found);
 
-		// Split by commas not inside double quotes
-		uint32_t doc_size = 0;
-
-		// std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>> pq;
-		// pq.push(doc_id);
-		std::vector<uint64_t> entry(1, doc_id);
-
-		for (const char& c : line) {
-			if (c == ' ') {
-				auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-				if (add) {
-					// New term
-					II.accumulator.push_back(entry);
-
-					terms_seen.insert(it->second);
-
-					++unique_terms_found;
-				}
-				else {
-					// Term already exists
-					if (terms_seen.find(it->second) == terms_seen.end()) {
-						terms_seen.insert(it->second);
-						II.accumulator[it->second].push_back(doc_id);
-					}
-				}
-
-				++doc_size;
-				doc.clear();
-				continue;
-			}
-
-			doc += toupper(c);
-		}
-
-		auto [it, add] = unique_term_mapping.try_emplace(doc, unique_terms_found);
-
-		if (add) {
-			// New term
-			II.accumulator.push_back(entry);
-
-			++unique_terms_found;
-		}
-		else {
-			// Term already exists
-			if (terms_seen.find(it->second) == terms_seen.end()) {
-				II.accumulator[it->second].push_back(doc_id);
-			}
-		}
-
-		doc_sizes.push_back(doc_size);
-		doc.clear();
 		++doc_id;
 	}
 	update_progress(doc_id, num_docs);
@@ -1534,50 +1420,7 @@ _BM25::_BM25(
 
 	// Now get inverted_index_compressed from accumulator.
 	II.inverted_index_compressed.resize(unique_terms_found);
-	uint64_t idx = 0;
-	for (auto& row : II.accumulator) {
-		std::vector<uint64_t> uncompressed_buffer(1, 0);
-		uncompressed_buffer.reserve(row.size() * 2 + 1);
-		std::vector<uint64_t> tfs;
-
-		uint64_t last_doc_id = UINT64_MAX;
-		uint64_t same_count = 1;
-		bool first = true;
-		// while (!row.empty()) {
-		for (const auto& doc_id : row) {
-			// auto doc_id = row.top();
-
-			if (doc_id == last_doc_id) {
-				++same_count;
-			}
-			else {
-				++uncompressed_buffer[0];
-
-				// Make doc ids differential
-				uncompressed_buffer.push_back(doc_id - !first * last_doc_id);
-				tfs.push_back(same_count);
-
-				same_count = 1;
-			}
-
-			// remove top element
-			// row.pop();
-			last_doc_id = doc_id;
-
-			first = false;
-		}
-		// Add tfs to end of uncompressed_buffer
-		for (const auto& tf : tfs) {
-			uncompressed_buffer.push_back(tf);
-		}
-
-		II.inverted_index_compressed[idx].reserve(2 * uncompressed_buffer.size());
-		compress_uint64(
-				uncompressed_buffer,
-				II.inverted_index_compressed[idx]
-				);
-		++idx;
-	}
+	get_compressed_inverted_index();
 
 	auto end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed_seconds = end - start;
@@ -1617,7 +1460,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 	std::string substr = "";
 	for (const char& c : query) {
 		if (c != ' ') {
-			substr += c; 
+			substr += toupper(c); 
 			continue;
 		}
 		if (unique_term_mapping.find(substr) == unique_term_mapping.end()) {
@@ -1626,6 +1469,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		term_idxs.push_back(unique_term_mapping[substr]);
 		substr.clear();
 	}
+
 	if (unique_term_mapping.find(substr) != unique_term_mapping.end()) {
 		term_idxs.push_back(unique_term_mapping[substr]);
 	}

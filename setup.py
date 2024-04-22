@@ -1,7 +1,6 @@
 from distutils.core import setup
 from Cython.Build import cythonize
 from distutils.extension import Extension
-import numpy as np
 import os
 
 MODULE_NAME = "bm25"
@@ -36,24 +35,14 @@ if COMPILER == "clang++":
             "-stdlib=libc++"
     ]
 
-
-'''
-if OS == "Darwin":
-    COMPILER_FLAGS += [
-        "-fopenmp",
-    ]
-    LINK_ARGS += [
-        "-fopenmp"
-    ]
-'''
-
 extensions = [
     Extension(
         MODULE_NAME,
         sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp"],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
-        include_dirs=[np.get_include(), "bm25"],
+        ## include_dirs=[np.get_include(), "bm25"],
+        include_dirs=["bm25"],
         extra_link_args=LINK_ARGS,
     ),
 ]
