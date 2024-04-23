@@ -181,6 +181,23 @@ def test_bm25_csv(csv_filename: str, search_col: str):
 
     print(f"Queries per second: {10_000 / time:.2f}")
 
+def test_bm25_parquet(filename: str, search_col: str):
+    df = pd.read_parquet(filename, columns=[search_col]).iloc[:10_000]
+    sample = df[search_col].fillna('').astype(str).values
+
+    init = perf_counter()
+    model = BM25(max_df=50_000)
+    model.index_file(filename=filename, text_col=search_col)
+    print(f"Time to index: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
+    for query in tqdm(sample, desc="Querying"):
+        result = model.get_topk_docs(query, k=10)
+    time = perf_counter() - init
+
+    print(result)
+    print(f"Queries per second: {10_000 / time:.2f}")
+
 def test_documents(csv_filename: str, search_col: str):
     df = pd.read_csv(csv_filename)
     names = df[search_col].tolist()
@@ -227,6 +244,8 @@ if __name__ == '__main__':
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
     CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
 
+    PARQUET_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.parquet')
+
     ## test_okapi_bm25(FILENAME)
     ## test_retriv(CSV_FILENAME)
     ## test_duckdb(FILENAME)
@@ -235,4 +254,5 @@ if __name__ == '__main__':
     ## test_bm25_csv(CSV_FILENAME, search_col='text')
     test_bm25_json(JSON_FILENAME, search_col='text')
     test_bm25_csv(CSV_FILENAME, search_col='name')
+    test_bm25_parquet(PARQUET_FILENAME, search_col='name')
     test_documents(CSV_FILENAME, search_col='name')

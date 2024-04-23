@@ -2,7 +2,7 @@
 
 cimport cython
 
-from libc.stdint cimport uint32_t, uint64_t 
+from libc.stdint cimport int32_t, uint32_t, uint64_t 
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp.pair cimport pair
@@ -51,6 +51,8 @@ cdef class BM25:
     cdef str    db_dir
     cdef float  k1 
     cdef float  b
+    cdef bool   is_parquet
+    cdef object arrow_table
 
 
     def __init__(
@@ -162,6 +164,12 @@ cdef class BM25:
                 )
 
     cdef void _init_with_file(self, str filename, str text_col):
+        if filename.endswith(".parquet"):
+            self.is_parquet = True
+            self._init_with_parquet(filename, text_col)
+            return
+
+        self.is_parquet = False
         self.bm25 = new _BM25(
                 filename.encode("utf-8"),
                 text_col.encode("utf-8"),
@@ -170,6 +178,32 @@ cdef class BM25:
                 self.k1,
                 self.b
                 )
+
+    cdef void _init_with_parquet(self, str filename, str text_col):
+        from pyarrow import parquet as pq
+
+        init = perf_counter()
+        self.arrow_table = pq.ParquetFile(filename, memory_map=True).read()
+
+        cdef list pydocs = self.arrow_table.column(text_col).to_pylist()
+
+        cdef vector[string] docs
+        cdef uint64_t num_docs = self.arrow_table.num_rows
+        cdef uint64_t idx
+
+        docs.reserve(num_docs)
+
+        for idx in range(num_docs):
+            docs.push_back(pydocs[idx].encode("utf-8"))
+
+        self.bm25 = new _BM25(
+                docs,
+                self.min_df,
+                self.max_df,
+                self.k1,
+                self.b
+                )
+        print(f"Reading parquet file took {perf_counter() - init:.2f} seconds")
 
     def get_topk_indices(self, str query, int init_max_df = INT_MAX, int k = 10):
         results = self.bm25.query(query.upper().encode("utf-8"), k, init_max_df)
@@ -182,6 +216,28 @@ cdef class BM25:
 
         return scores, indices
 
+    cdef list _get_topk_docs_parquet(self, str query, int k = 10, int init_max_df = INT_MAX):
+        cdef vector[pair[uint64_t, float]] results = self.bm25.query(
+                query.upper().encode("utf-8"), 
+                k, 
+                init_max_df
+                )
+        if results.size() == 0:
+            return []
+
+        cdef list scores = []
+        cdef list indices = []
+        for idx, score in results:
+            scores.append(score)
+            indices.append(idx)
+
+        rows = self.arrow_table.take(indices).to_pylist()
+
+        for idx, score in enumerate(scores):
+            rows[idx]["score"] = score
+
+        return rows
+
 
     def get_topk_docs(
             self, 
@@ -189,12 +245,15 @@ cdef class BM25:
             int k = 10, 
             int init_max_df = INT_MAX
             ):
+        if self.is_parquet:
+            return self._get_topk_docs_parquet(query, k, init_max_df)
+
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
 
         if self.filename == "in_memory":
             raise RuntimeError("""
-            Cannot get topk docs when documents were provided instead of a filename
+                Cannot get topk docs when documents were provided instead of a filename
             """)
         else:
             results = self.bm25.get_topk_internal(

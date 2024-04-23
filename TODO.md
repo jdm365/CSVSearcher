@@ -1,0 +1,4 @@
+- Make parquet integration more seemless and fast.
+- Find heuristics to speed up queries for high df terms.
+- Consider allowing ngram tokenization.
+- Publish to pypi.
