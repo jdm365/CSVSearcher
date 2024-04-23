@@ -12,6 +12,21 @@ from time import perf_counter
 import os
 
 
+cdef vector[string] ENGLISH_STOPWORDS = {
+	b"I", b"ME", b"MY", b"MYSELF", b"WE", b"OUR", b"OURS", b"OURSELVES", b"YOU", b"YOUR", b"YOURS",
+	b"YOURSELF", b"YOURSELVES", b"HE", b"HIM", b"HIS", b"HIMSELF", b"SHE", b"HER", b"HERS", b"HERSELF", b"IT",
+	b"ITS", b"ITSELF", b"THEY", b"THEM", b"THEIR", b"THEIRS", b"THEMSELVES", b"WHAT", b"WHICH", b"WHO", b"WHOM",
+	b"THIS", b"THAT", b"THESE", b"THOSE", b"AM", b"IS", b"ARE", b"WAS", b"WERE", b"BE", b"BEEN",
+	b"BEING", b"HAVE", b"HAS", b"HAD", b"HAVING", b"DO", b"DOES", b"DID", b"DOING", b"A", b"AN",
+	b"THE", b"AND", b"BUT", b"IF", b"OR", b"BECAUSE", b"AS", b"UNTIL", b"WHILE", b"OF", b"AT",
+	b"BY", b"FOR", b"WITH", b"ABOUT", b"AGAINST", b"BETWEEN", b"INTO", b"THROUGH", b"DURING", b"BEFORE", b"AFTER",
+	b"ABOVE", b"BELOW", b"TO", b"FROM", b"UP", b"DOWN", b"IN", b"OUT", b"ON", b"OFF", b"OVER",
+	b"UNDER", b"AGAIN", b"FURTHER", b"THEN", b"ONCE", b"HERE", b"THERE", b"WHEN", b"WHERE", b"WHY", b"HOW",
+	b"ALL", b"ANY", b"BOTH", b"EACH", b"FEW", b"MORE", b"MOST", b"OTHER", b"SOME", b"SUCH", b"NO",
+	b"NOR", b"NOT", b"ONLY", b"OWN", b"SAME", b"SO", b"THAN", b"TOO", b"VERY", b"S", b"T",
+	b"CAN", b"WILL", b"JUST", b"DON", b"SHOULD", b"NOW" 
+}
+
 cdef int INT_MAX = 2147483647
 
 cdef extern from "engine.h":
@@ -72,14 +87,10 @@ cdef class BM25:
         self.b      = b
 
         if stopwords == 'english':
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            stopwords_file = os.path.join(current_dir, "english_stopwords.txt")
-            with open(stopwords_file, "r") as f:
-                stopwords = f.read().split("\n")
-
-        cdef str stopword
-        for stopword in stopwords:
-            self.stopwords.push_back(stopword.encode("utf-8"))
+            self.stopwords = ENGLISH_STOPWORDS
+        else:
+            for stopword in stopwords:
+                self.stopwords.push_back(stopword.upper().encode("utf-8"))
 
 
     def index_file(self, str filename, str text_col):

@@ -1,4 +1,3 @@
-- Add stop-word removal.
 - Publish to pypi.
 - Speed up indexing and reduce memory usage by capping max_df items.
 - Make parquet integration more seemless and fast.

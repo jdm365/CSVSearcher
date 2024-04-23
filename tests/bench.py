@@ -186,7 +186,7 @@ def test_bm25_parquet(filename: str, search_col: str):
     sample = df[search_col].fillna('').astype(str).values
 
     init = perf_counter()
-    model = BM25(max_df=50_000)
+    model = BM25(max_df=50_000, stopwords=['netflix'])
     model.index_file(filename=filename, text_col=search_col)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
