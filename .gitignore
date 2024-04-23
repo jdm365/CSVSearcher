@@ -5,7 +5,6 @@ __pycache__/
 *.bin
 /bm25_db/
 gen_compile_commands/
-bm25.cpp
 /tmp_data_dir
 
 # C extensions

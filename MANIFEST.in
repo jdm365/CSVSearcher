@@ -1,1 +1,1 @@
-recursive-include bm25 *
+recursive-include bm25 *.txt *.h
