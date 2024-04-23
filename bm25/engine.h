@@ -4,15 +4,12 @@
 #include <cstdint>
 
 #include "robin_hood.h"
-#include "xxhash64.h"
 #include "vbyte_encoding.h"
 
 
 #define DEBUG 0
 
 #define SEED 42
-
-static XXHash64 hasher(SEED);
 
 struct _compare {
 	inline bool operator()(const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
@@ -100,7 +97,6 @@ void deserialize_vector_of_vector_u8(
 // First element of inverted index compressed structure is doc_freq.
 // Then elements are doc_ids followed by term_freqs.
 typedef struct {
-	// std::vector<std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>>> accumulator;
 	std::vector<std::vector<uint64_t>> accumulator;
 
 	std::vector<std::vector<uint8_t>> inverted_index_compressed;
@@ -142,6 +138,7 @@ class _BM25 {
 		robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
 		std::vector<uint64_t> doc_sizes;
 		std::vector<uint64_t> line_offsets;
+		robin_hood::unordered_flat_set<std::string> stop_words;
 
 		uint64_t num_docs;
 		int      min_df;
@@ -164,7 +161,8 @@ class _BM25 {
 				int   min_df,
 				float max_df,
 				float k1,
-				float b
+				float b,
+				const std::vector<std::string>& _stop_words = {}
 				);
 		_BM25(std::string db_dir) {
 			load_from_disk(db_dir);
@@ -192,7 +190,8 @@ class _BM25 {
 				int   min_df,
 				float max_df,
 				float k1,
-				float b
+				float b,
+				const std::vector<std::string>& _stop_words = {}
 				);
 
 		~_BM25() {

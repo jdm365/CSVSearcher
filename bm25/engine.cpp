@@ -98,7 +98,7 @@ void _BM25::process_doc(
 	uint64_t char_idx = 0;
 
 	std::string term = "";
-	term.reserve(22);
+	// term.reserve(22);
 
 	robin_hood::unordered_flat_set<uint64_t> terms_seen;
 
@@ -124,6 +124,13 @@ void _BM25::process_doc(
 		}
 
 		if (doc[char_idx] == ' ') {
+			if (stop_words.find(term) != stop_words.end()) {
+				term.clear();
+				++char_idx;
+				++doc_size;
+				continue;
+			}
+
 			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
 			if (add) {
 				// New term
@@ -153,21 +160,22 @@ void _BM25::process_doc(
 	}
 
 	if (term != "") {
-		auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+		if (stop_words.find(term) == stop_words.end()) {
+			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
 
-		if (add) {
-			// New term
-			II.accumulator.push_back(entry);
+			if (add) {
+				// New term
+				II.accumulator.push_back(entry);
 
-			++unique_terms_found;
-		}
-		else {
-			// Term already exists
-			if (terms_seen.find(it->second) == terms_seen.end()) {
-				II.accumulator[it->second].push_back(doc_id);
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					II.accumulator[it->second].push_back(doc_id);
+				}
 			}
 		}
-
 		++doc_size;
 	}
 	doc_sizes.push_back(doc_size);
@@ -1316,13 +1324,19 @@ _BM25::_BM25(
 		int min_df,
 		float max_df,
 		float k1,
-		float b
+		float b,
+		const std::vector<std::string>& _stop_words
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
 			b(b),
 			search_col(search_col), 
 			filename(filename) {
+
+	for (const std::string& stop_word : _stop_words) {
+		stop_words.insert(stop_word);
+	}
+
 	reference_file = fopen(filename.c_str(), "r");
 	if (reference_file == NULL) {
 		std::cerr << "Unable to open file: " << filename << std::endl;
@@ -1362,11 +1376,17 @@ _BM25::_BM25(
 		int min_df,
 		float max_df,
 		float k1,
-		float b
+		float b,
+		const std::vector<std::string>& _stop_words
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
 			b(b) {
+	
+	for (const std::string& stop_word : _stop_words) {
+		stop_words.insert(stop_word);
+	}
+
 	filename = "in_memory";
 	file_type = IN_MEMORY;
 

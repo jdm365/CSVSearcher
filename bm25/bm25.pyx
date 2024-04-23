@@ -22,7 +22,8 @@ cdef extern from "engine.h":
                 int   min_df,
                 float max_df,
                 float k1,
-                float b
+                float b,
+                const vector[string]& stopwords
                 ) nogil
         _BM25(string db_dir)
         _BM25(
@@ -30,7 +31,8 @@ cdef extern from "engine.h":
                 int   min_df,
                 float max_df,
                 float k1,
-                float b
+                float b,
+                const vector[string]& stopwords
                 ) nogil
         vector[pair[uint64_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
         vector[vector[pair[string, string]]] get_topk_internal(
@@ -53,6 +55,7 @@ cdef class BM25:
     cdef float  b
     cdef bool   is_parquet
     cdef object arrow_table
+    cdef vector[string] stopwords
 
 
     def __init__(
@@ -60,12 +63,23 @@ cdef class BM25:
             int   min_df = 1,
             float max_df = 1.0,
             float k1     = 1.2,
-            float b      = 0.4
+            float b      = 0.4,
+            stopwords = []
             ):
         self.min_df = min_df
         self.max_df = max_df
         self.k1     = k1
         self.b      = b
+
+        if stopwords == 'english':
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            stopwords_file = os.path.join(current_dir, "english_stopwords.txt")
+            with open(stopwords_file, "r") as f:
+                stopwords = f.read().split("\n")
+
+        cdef str stopword
+        for stopword in stopwords:
+            self.stopwords.push_back(stopword.encode("utf-8"))
 
 
     def index_file(self, str filename, str text_col):
@@ -160,7 +174,8 @@ cdef class BM25:
                 self.min_df,
                 self.max_df,
                 self.k1,
-                self.b
+                self.b,
+                self.stopwords
                 )
 
     cdef void _init_with_file(self, str filename, str text_col):
@@ -176,7 +191,8 @@ cdef class BM25:
                 self.min_df,
                 self.max_df,
                 self.k1,
-                self.b
+                self.b,
+                self.stopwords
                 )
 
     cdef void _init_with_parquet(self, str filename, str text_col):
@@ -201,7 +217,8 @@ cdef class BM25:
                 self.min_df,
                 self.max_df,
                 self.k1,
-                self.b
+                self.b,
+                self.stopwords
                 )
         print(f"Reading parquet file took {perf_counter() - init:.2f} seconds")
 

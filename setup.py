@@ -49,5 +49,8 @@ extensions = [
 
 setup(
     name=MODULE_NAME,
+    version="0.1.0",
+    author="Jake Mehlman",
     ext_modules=cythonize(extensions),
+    include_package_data=True,
 )

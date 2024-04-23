@@ -170,7 +170,7 @@ def test_bm25_csv(csv_filename: str, search_col: str):
     sample = df[search_col].fillna('').astype(str).values
 
     init = perf_counter()
-    model = BM25(max_df=50_000)
+    model = BM25(max_df=50_000, stopwords='english')
     model.index_file(filename=csv_filename, text_col=search_col)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -195,7 +195,6 @@ def test_bm25_parquet(filename: str, search_col: str):
         result = model.get_topk_docs(query, k=10)
     time = perf_counter() - init
 
-    print(result)
     print(f"Queries per second: {10_000 / time:.2f}")
 
 def test_documents(csv_filename: str, search_col: str):

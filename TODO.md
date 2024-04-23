@@ -1,4 +1,7 @@
+- Add stop-word removal.
+- Publish to pypi.
+- Speed up indexing and reduce memory usage by capping max_df items.
 - Make parquet integration more seemless and fast.
 - Find heuristics to speed up queries for high df terms.
 - Consider allowing ngram tokenization.
-- Publish to pypi.
+- Make tests more robust.
