@@ -4,3 +4,4 @@
 - Find heuristics to speed up queries for high df terms.
 - Consider allowing ngram tokenization.
 - Make tests more robust.
+- Add run length encoding to term frequencies before vbyte compression. **Mostly ones there.
