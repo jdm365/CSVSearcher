@@ -1,6 +1,0 @@
-recursive-include bm25 *.txt *.h
-exclude TODO.md
-exclude compile_commands.json
-exclude bm25/Makefile
-recursive-exclude bm25/cpp_testing *
-prune bm25/cpp_testing

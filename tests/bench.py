@@ -241,7 +241,8 @@ if __name__ == '__main__':
     ## JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
 
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SuffixArray/searchapp_demo', 'companies_700M.csv')
 
     PARQUET_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.parquet')
 
@@ -251,7 +252,7 @@ if __name__ == '__main__':
     ## test_anserini(CSV_FILENAME)
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_col='text')
-    test_bm25_json(JSON_FILENAME, search_col='text')
+    ## test_bm25_json(JSON_FILENAME, search_col='text')
     test_bm25_csv(CSV_FILENAME, search_col='name')
-    test_bm25_parquet(PARQUET_FILENAME, search_col='name')
-    test_documents(CSV_FILENAME, search_col='name')
+    ## test_bm25_parquet(PARQUET_FILENAME, search_col='name')
+    ## test_documents(CSV_FILENAME, search_col='name')
