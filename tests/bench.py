@@ -108,17 +108,21 @@ def test_anserini(csv_filename: str):
     records = df.to_dict(orient='records')
 
     init = perf_counter()
-    writer = LuceneIndexer('tmp_data_dir', append=True, threads=1)
+    ## writer = LuceneIndexer('tmp_data_dir', append=True, threads=1)
+    writer = LuceneIndexer('tmp_data_dir', append=True)
     writer.add_batch_dict(records)
     writer.close()
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
     searcher = LuceneSearcher('tmp_data_dir')
+    lens = []
     for company in tqdm(companies_sample, desc="Querying"):
-        hits = searcher.search(company, k=10)
-        ## print(hits)
+        hits = searcher.search(company, k=1000)
+        lens.append(len(hits))
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
+    print(f"Average number of hits: {np.mean(lens)}")
+    print(f"Median number of hits:  {np.median(lens)}")
 
     os.system('rm -rf tmp_data_dir')
 
@@ -170,14 +174,20 @@ def test_bm25_csv(csv_filename: str, search_col: str):
     sample = df[search_col].fillna('').astype(str).values
 
     init = perf_counter()
-    model = BM25(max_df=50_000, stopwords='english')
+    ## model = BM25(max_df=20_000, stopwords='english')
+    model = BM25(stopwords='english')
     model.index_file(filename=csv_filename, text_col=search_col)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
+    lens = []
     init = perf_counter()
     for query in tqdm(sample, desc="Querying"):
-        model.get_topk_docs(query, k=10)
+        results = model.get_topk_docs(query, k=1000)
+        lens.append(len(results))
     time = perf_counter() - init
+
+    print(f"Average number of hits: {np.mean(lens)}")
+    print(f"Median number of hits:  {np.median(lens)}")
 
     print(f"Queries per second: {10_000 / time:.2f}")
 
@@ -241,8 +251,8 @@ if __name__ == '__main__':
     ## JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
 
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SuffixArray/searchapp_demo', 'companies_700M.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SuffixArray/searchapp_demo', 'companies_700M.csv')
 
     PARQUET_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.parquet')
 
@@ -252,7 +262,7 @@ if __name__ == '__main__':
     ## test_anserini(CSV_FILENAME)
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_col='text')
-    ## test_bm25_json(JSON_FILENAME, search_col='text')
     test_bm25_csv(CSV_FILENAME, search_col='name')
+    ## test_bm25_json(JSON_FILENAME, search_col='text')
     ## test_bm25_parquet(PARQUET_FILENAME, search_col='name')
     ## test_documents(CSV_FILENAME, search_col='name')

@@ -29,9 +29,26 @@ enum SupportedFileTypes {
 	IN_MEMORY
 };
 
+typedef struct {
+	std::vector<uint8_t> doc_ids;
+	std::vector<uint8_t> term_freqs;
+
+} InvertedIndexElement;
+
+typedef struct {
+	std::vector<uint64_t> prev_doc_ids;
+	std::vector<InvertedIndexElement> inverted_index_compressed;
+} InvertedIndex;
+
+inline std::vector<uint64_t> get_II_row(
+		InvertedIndex* II, 
+		uint64_t term_idx
+		);
+
 void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& filename);
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename);
 void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& filename);
+void serialize_inverted_index(const InvertedIndex& II, const std::string& filename);
 void serialize_vector_of_vectors_u32(
 		const std::vector<std::vector<uint32_t>>& vec, 
 		const std::string& filename
@@ -65,6 +82,7 @@ void serialize_vector_of_vectors_u8(
 void deserialize_vector_u8(std::vector<uint8_t>& vec, const std::string& filename);
 void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename);
 void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filename);
+void deserialize_inverted_index(InvertedIndex& II, const std::string& filename);
 void deserialize_vector_of_vectors_u32(
 		std::vector<std::vector<uint32_t>>& vec, 
 		const std::string& filename
@@ -94,63 +112,9 @@ void deserialize_vector_of_vector_u8(
 		const std::string& filename
 		);
 
-// First element of inverted index compressed structure is doc_freq.
-// Then elements are doc_ids followed by term_freqs.
-typedef struct {
-	std::vector<std::vector<uint64_t>> accumulator;
-
-	std::vector<std::vector<uint8_t>> inverted_index_compressed;
-
-} InvertedIndex;
-
-typedef struct {
-	std::vector<uint8_t> doc_ids;
-	std::vector<uint8_t> term_freqs;
-
-} InvertedIndexElement;
-
-typedef struct {
-	std::vector<uint64_t> prev_doc_ids;
-	std::vector<InvertedIndexElement> inverted_index_compressed;
-} InvertedIndex_v2;
-
-struct SmallSet_u64 {
-	alignas(16) uint64_t data[64];
-	uint8_t  size;
-
-	bool try_emplace(uint64_t key) {
-		if (size == 64) {
-			return false;
-		}
-
-		for (uint8_t i = 0; i < size; ++i) {
-			if (data[i] == key) {
-				return false;
-			}
-		}
-
-		data[size++] = key;
-		return true;
-	};
-
-	void clear() {
-		size = 0;
-	};
-};
-
-inline std::vector<uint64_t> get_II_row(
-		InvertedIndex* II, 
-		uint64_t term_idx
-		);
-inline std::vector<uint64_t> get_II_row_v2(
-		InvertedIndex_v2* II, 
-		uint64_t term_idx
-		);
-
 class _BM25 {
 	public:
 		InvertedIndex II;
-		InvertedIndex_v2 II_v2;
 		robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
 		std::vector<uint64_t> doc_sizes;
 		std::vector<uint64_t> line_offsets;
@@ -219,14 +183,7 @@ class _BM25 {
 		void save_to_disk(const std::string& db_dir);
 		void load_from_disk(const std::string& db_dir);
 
-		void get_compressed_inverted_index();
 		void process_doc(
-				const char* doc,
-				const char terminator,
-				uint64_t doc_id,
-				uint64_t& unique_terms_found
-				);
-		void process_doc_v2(
 				const char* doc,
 				const char terminator,
 				uint64_t doc_id,
@@ -235,7 +192,6 @@ class _BM25 {
 
 		void read_json();
 		void read_csv();
-		void read_csv_v2();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num);
 
