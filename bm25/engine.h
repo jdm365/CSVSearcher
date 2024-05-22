@@ -103,6 +103,17 @@ typedef struct {
 
 } InvertedIndex;
 
+typedef struct {
+	std::vector<uint8_t> doc_ids;
+	std::vector<uint8_t> term_freqs;
+
+} InvertedIndexElement;
+
+typedef struct {
+	std::vector<uint64_t> prev_doc_ids;
+	std::vector<InvertedIndexElement> inverted_index_compressed;
+} InvertedIndex_v2;
+
 struct SmallSet_u64 {
 	alignas(16) uint64_t data[64];
 	uint8_t  size;
@@ -131,10 +142,15 @@ inline std::vector<uint64_t> get_II_row(
 		InvertedIndex* II, 
 		uint64_t term_idx
 		);
+inline std::vector<uint64_t> get_II_row_v2(
+		InvertedIndex_v2* II, 
+		uint64_t term_idx
+		);
 
 class _BM25 {
 	public:
 		InvertedIndex II;
+		InvertedIndex_v2 II_v2;
 		robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
 		std::vector<uint64_t> doc_sizes;
 		std::vector<uint64_t> line_offsets;
@@ -210,9 +226,16 @@ class _BM25 {
 				uint64_t doc_id,
 				uint64_t& unique_terms_found
 				);
+		void process_doc_v2(
+				const char* doc,
+				const char terminator,
+				uint64_t doc_id,
+				uint64_t& unique_terms_found
+				);
 
 		void read_json();
 		void read_csv();
+		void read_csv_v2();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num);
 

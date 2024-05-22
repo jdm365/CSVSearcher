@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include <vector>
 
@@ -206,4 +207,23 @@ void decompress_uint64(
 		} while (byte & 128);
 		data.push_back(value);
 	}
+}
+
+bool compress_uint64_differential_single(
+    std::vector<uint8_t>& data,
+    uint64_t new_uncompressed_id,
+	uint64_t prev_id
+	) {
+    uint64_t diff = new_uncompressed_id - prev_id;
+	bool is_same  = (diff == 0);
+
+    while (diff >= 128) {
+        data.push_back((diff & 127) | 128);
+        diff >>= 7;
+    }
+
+    // Push back the remaining diff value
+    data.push_back(diff);
+
+    return is_same;
 }

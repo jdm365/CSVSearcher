@@ -181,6 +181,142 @@ void _BM25::process_doc(
 	doc_sizes.push_back(doc_size);
 }
 
+void _BM25::process_doc_v2(
+		const char* doc,
+		const char terminator,
+		uint64_t doc_id,
+		uint64_t& unique_terms_found
+		) {
+	uint64_t char_idx = 0;
+
+	std::string term = "";
+	// term.reserve(22);
+
+	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+
+	// Split by commas not inside double quotes
+	uint64_t doc_size = 0;
+	while (doc[char_idx] != terminator) {
+		if (char_idx > 1048576) {
+			std::cout << "Search field not found on line: " << doc_id << std::endl;
+			std::cout << "Doc: " << doc << std::endl;
+			std::cout << std::flush;
+			std::exit(1);
+		}
+		if (doc[char_idx] == '\\') {
+			++char_idx;
+			term += toupper(doc[char_idx]);
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ' && term == "") {
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ') {
+			if (stop_words.find(term) != stop_words.end()) {
+				term.clear();
+				++char_idx;
+				++doc_size;
+				continue;
+			}
+
+			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+			if (add) {
+				// New term
+				// II.accumulator.push_back(entry);
+				// convert uint64_t bytes to uint8_t bytes
+				
+				InvertedIndexElement entry;
+
+				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
+				entry.term_freqs.push_back(1);
+
+				II_v2.inverted_index_compressed.push_back(entry);
+				II_v2.prev_doc_ids.push_back(doc_id);
+
+				terms_seen.insert(it->second);
+
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert(it->second);
+
+					bool same = compress_uint64_differential_single(
+							II_v2.inverted_index_compressed[it->second].doc_ids, 
+							doc_id,
+							II_v2.prev_doc_ids[it->second]
+							);
+					II_v2.prev_doc_ids[it->second] = doc_id;
+
+					if (same) {
+						++II_v2.inverted_index_compressed[it->second].term_freqs.back();
+					}
+					else {
+						II_v2.inverted_index_compressed[it->second].term_freqs.push_back(1);
+					}
+				}
+			}
+
+			++doc_size;
+			term.clear();
+
+			++char_idx;
+			continue;
+		}
+
+		term += toupper(doc[char_idx]);
+		++char_idx;
+	}
+
+	if (term != "") {
+		if (stop_words.find(term) == stop_words.end()) {
+			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+
+			if (add) {
+				// New term
+				// II.accumulator.push_back(entry);
+				// convert uint64_t bytes to uint8_t bytes
+				InvertedIndexElement entry;
+
+				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
+				entry.term_freqs.push_back(1);
+				II_v2.inverted_index_compressed.push_back(entry);
+				II_v2.prev_doc_ids.push_back(doc_id);
+
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					// II.accumulator[it->second].push_back(doc_id);
+
+					bool same = compress_uint64_differential_single(
+							II_v2.inverted_index_compressed[it->second].doc_ids, 
+							doc_id,
+							II_v2.prev_doc_ids[it->second]
+							);
+					II_v2.prev_doc_ids[it->second] = doc_id;
+
+
+					if (same) {
+						++II_v2.inverted_index_compressed[it->second].term_freqs.back();
+					}
+					else {
+						II_v2.inverted_index_compressed[it->second].term_freqs.push_back(1);
+					}
+				}
+			}
+		}
+		++doc_size;
+	}
+	doc_sizes.push_back(doc_size);
+}
+
 void update_progress(int line_num, int num_lines) {
 	const int bar_width = 121;
 
@@ -223,6 +359,33 @@ std::vector<uint64_t> get_II_row(
 	for (size_t i = 2; i < (results_vector.size() + 1) / 2; ++i) {
 		results_vector[i] += results_vector[i - 1];
 	}
+	return results_vector;
+}
+
+std::vector<uint64_t> get_II_row_v2(
+		InvertedIndex_v2* II, 
+		uint64_t term_idx
+		) {
+	std::vector<uint64_t> results_vector(
+			1, 
+			II->inverted_index_compressed[term_idx].term_freqs.size()
+			);
+
+	decompress_uint64(
+			II->inverted_index_compressed[term_idx].doc_ids,
+			results_vector
+			);
+
+	// Convert doc_ids back to absolute values
+	for (size_t i = 2; i < results_vector.size(); ++i) {
+		results_vector[i] += results_vector[i - 1];
+	}
+
+	// Get term frequencies
+	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
+		results_vector.push_back(II->inverted_index_compressed[term_idx].term_freqs[i]);
+	}
+
 	return results_vector;
 }
 
@@ -522,6 +685,133 @@ void _BM25::read_csv() {
 		uint64_t total_size = 0;
 		for (const auto& row : II.inverted_index_compressed) {
 			total_size += row.size();
+		}
+		total_size /= 1024 * 1024;
+		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
+	}
+}
+
+
+void _BM25::read_csv_v2() {
+	// Quickly count number of lines in file
+	uint64_t num_lines = 0;
+	char buf[1024 * 1024];
+	while (size_t bytes_read = fread(buf, 1, sizeof(buf), reference_file)) {
+		for (size_t i = 0; i < bytes_read; ++i) {
+			if (buf[i] == '\n') {
+				++num_lines;
+			}
+		}
+	}
+	// Reset file pointer to beginning
+	rewind(reference_file);
+
+	int search_column_index = -1;
+
+	// Read the file line by line
+	char*    line = NULL;
+	size_t   len = 0;
+	ssize_t  read;
+	uint64_t line_num = 0;
+	uint64_t byte_offset = 0;
+
+	// Get col names
+	read = getline(&line, &len, reference_file);
+	std::istringstream iss(line);
+	std::string value;
+	while (std::getline(iss, value, ',')) {
+		if (value.find("\n") != std::string::npos) {
+			value.erase(value.find("\n"));
+		}
+		columns.push_back(value);
+		if (value == search_col) {
+			search_column_index = columns.size() - 1;
+		}
+	}
+
+	if (search_column_index == -1) {
+		std::cerr << "Search column not found in header" << std::endl;
+		std::cerr << "Cols found:  ";
+		for (size_t i = 0; i < columns.size(); ++i) {
+			std::cerr << columns[i] << ",";
+		}
+		std::cerr << std::endl;
+		exit(1);
+	}
+	byte_offset += ftell(reference_file);
+
+	uint64_t unique_terms_found = 0;
+
+	// Small string optimization limit on most platforms
+	std::string doc = "";
+	doc.reserve(22);
+
+	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
+
+	const int UPDATE_INTERVAL = 10000;
+	while ((read = getline(&line, &len, reference_file)) != -1) {
+		if (line_num % UPDATE_INTERVAL == 0) {
+			update_progress(line_num, num_lines);
+		}
+		line_offsets.push_back(byte_offset);
+		byte_offset += read;
+
+		// Iterate of line chars until we get to relevant column.
+		int char_idx = 0;
+		int col_idx  = 0;
+		while (col_idx != search_column_index) {
+			if (line[char_idx] == '"') {
+				// Skip to next quote.
+				++char_idx;
+				while (line[char_idx] == '"') {
+					++char_idx;
+				}
+			}
+
+			if (line[char_idx] == ',') {
+				++col_idx;
+			}
+			++char_idx;
+		}
+
+		// Split by commas not inside double quotes
+		char end_delim = ',';
+		if (search_column_index == (int)columns.size() - 1) {
+			end_delim = '\n';
+		}
+		if (line[char_idx] == '"') {
+			end_delim = '"';
+			++char_idx;
+		}
+
+		process_doc_v2(&line[char_idx], end_delim, line_num, unique_terms_found);
+		++line_num;
+	}
+	update_progress(line_num + 1, num_lines);
+
+	std::cout << "Compressing index" << std::endl;
+
+	if (DEBUG) {
+		std::cout << "Vocab size: " << unique_terms_found << std::endl;
+	}
+
+	II_v2.prev_doc_ids.clear();
+	II_v2.prev_doc_ids.shrink_to_fit();
+
+	num_docs = doc_sizes.size();
+
+	// Calc avg_doc_size
+	float sum = 0;
+	for (const auto& size : doc_sizes) {
+		sum += size;
+	}
+	avg_doc_size = sum / num_docs;
+
+	if (DEBUG) {
+		uint64_t total_size = 0;
+		for (const auto& row : II_v2.inverted_index_compressed) {
+			total_size += row.doc_ids.size();
+			total_size += row.term_freqs.size();
 		}
 		total_size /= 1024 * 1024;
 		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
@@ -1347,7 +1637,8 @@ _BM25::_BM25(
 	
 	// Read file to get documents, line offsets, and columns
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
-		read_csv();
+		// read_csv();
+		read_csv_v2();
 		file_type = CSV;
 	}
 	else if (filename.substr(filename.size() - 4, 4) == "json") {
@@ -1507,7 +1798,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		for (const uint64_t& term_idx : term_idxs) {
 			uint64_t df;
 			vbyte_decode_uint64(
-					II.inverted_index_compressed[term_idx].data(),
+					II_v2.inverted_index_compressed[term_idx].doc_ids.data(),
 					&df
 					);
 			if (df > local_max_df) {
@@ -1515,7 +1806,8 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 			}
 			float idf = log((num_docs - df + 0.5) / (df + 0.5));
 
-			std::vector<uint64_t> results_vector = get_II_row(&II, term_idx);
+			// std::vector<uint64_t> results_vector = get_II_row(&II, term_idx);
+			std::vector<uint64_t> results_vector = get_II_row_v2(&II_v2, term_idx);
 			uint64_t num_matches = (results_vector.size() - 1) / 2;
 
 			if (num_matches == 0) {
@@ -1523,6 +1815,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 			}
 
 			for (size_t i = 0; i < num_matches; ++i) {
+
 				uint64_t doc_id  = results_vector[i + 1];
 				float tf 		 = (float)results_vector[i + num_matches + 1];
 				float bm25_score = _compute_bm25(doc_id, tf, idf);
@@ -1548,7 +1841,6 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		std::cout << "QUERY: " << query << std::endl;
 		std::cout << "Number of docs: " << doc_scores.size() << "    ";
 		std::cout << elapsed_ms.count() << "ms" << std::endl;
-		std::cout << max_df << std::endl;
 	}
 	
 	if (doc_scores.size() == 0) {
