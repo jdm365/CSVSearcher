@@ -24,6 +24,50 @@
 #include "vbyte_encoding.h"
 
 
+inline RLEElement_u8 init_rle_element_u8(uint8_t value) {
+	RLEElement_u8 rle;
+	rle.num_repeats = 1;
+	rle.value = value;
+	return rle;
+}
+
+inline uint64_t get_rle_element_u8_size(const RLEElement_u8& rle_element) {
+	return (uint64_t)rle_element.num_repeats;
+}
+
+bool check_rle_u8_row_size(const std::vector<RLEElement_u8>& rle_row, uint64_t max_size) {
+	uint64_t size = 0;
+	for (const auto& rle_element : rle_row) {
+		size += get_rle_element_u8_size(rle_element);
+		if (size >= max_size) {
+			return true;
+		}
+	}
+	return false;
+}
+
+inline uint64_t get_rle_u8_row_size(const std::vector<RLEElement_u8>& rle_row) {
+	uint64_t size = 0;
+	for (const auto& rle_element : rle_row) {
+		size += get_rle_element_u8_size(rle_element);
+	}
+	return size;
+}
+
+void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value) {
+	if (rle_row.empty()) {
+		rle_row.push_back(init_rle_element_u8(value));
+	}
+	else {
+		if (rle_row.back().value == value) {
+			++rle_row.back().num_repeats;
+		}
+		else {
+			rle_row.push_back(init_rle_element_u8(value));
+		}
+	}
+}
+
 void _BM25::process_doc(
 		const char* doc,
 		const char terminator,
@@ -39,6 +83,7 @@ void _BM25::process_doc(
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
+	uint8_t tf = 1;
 	while (doc[char_idx] != terminator) {
 		if (char_idx > 1048576) {
 			std::cout << "Search field not found on line: " << doc_id << std::endl;
@@ -75,7 +120,7 @@ void _BM25::process_doc(
 				InvertedIndexElement entry;
 
 				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
-				entry.term_freqs.push_back(1);
+				entry.term_freqs.push_back(init_rle_element_u8(tf));
 
 				II.inverted_index_compressed.push_back(entry);
 				II.prev_doc_ids.push_back(doc_id);
@@ -85,11 +130,12 @@ void _BM25::process_doc(
 				++unique_terms_found;
 			}
 			else {
-				if (II.inverted_index_compressed[it->second].term_freqs.size() >= max_df) {
+				if (check_rle_u8_row_size(II.inverted_index_compressed[it->second].term_freqs, max_df)) {
 					if (II.inverted_index_compressed[it->second].doc_ids.size() >= 0) {
 						II.inverted_index_compressed[it->second].doc_ids.clear();
 						II.inverted_index_compressed[it->second].doc_ids.shrink_to_fit();
 					}
+
 					// Skip term
 					term.clear();
 					++char_idx;
@@ -109,10 +155,13 @@ void _BM25::process_doc(
 					II.prev_doc_ids[it->second] = doc_id;
 
 					if (same) {
-						++II.inverted_index_compressed[it->second].term_freqs.back();
+						// ++II.inverted_index_compressed[it->second].term_freqs.back();
+						++tf;
 					}
 					else {
-						II.inverted_index_compressed[it->second].term_freqs.push_back(1);
+						add_rle_element_u8(II.inverted_index_compressed[it->second].term_freqs, tf);
+						// II.inverted_index_compressed[it->second].term_freqs.push_back(1);
+						tf = 1;
 					}
 				}
 			}
@@ -139,7 +188,9 @@ void _BM25::process_doc(
 				InvertedIndexElement entry;
 
 				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
-				entry.term_freqs.push_back(1);
+				// entry.term_freqs.push_back(1);
+				entry.term_freqs.push_back(init_rle_element_u8(tf));
+				tf = 1;
 				II.inverted_index_compressed.push_back(entry);
 				II.prev_doc_ids.push_back(doc_id);
 
@@ -159,10 +210,13 @@ void _BM25::process_doc(
 
 
 					if (same) {
-						++II.inverted_index_compressed[it->second].term_freqs.back();
+						// ++II.inverted_index_compressed[it->second].term_freqs.back();
+						++tf;
 					}
 					else {
-						II.inverted_index_compressed[it->second].term_freqs.push_back(1);
+						// II.inverted_index_compressed[it->second].term_freqs.push_back(1);
+						add_rle_element_u8(II.inverted_index_compressed[it->second].term_freqs, tf);
+						tf = 1;
 					}
 				}
 			}
@@ -191,7 +245,7 @@ void update_progress(int line_num, int num_lines) {
     // Build the progress string
 	// Print percentage instead
 	std::string info = std::to_string((int)(percentage * 100)) + "% " +
-                           std::to_string(line_num) + " / " + std::to_string(num_lines) + " docs read";
+                       std::to_string(line_num) + " / " + std::to_string(num_lines) + " docs read";
 	std::string output =  "\r Indexing Documents " + bar + " " + info;
 	output += std::string(std::max(0, bar_width - static_cast<int>(output.length())), ' ');
     
@@ -207,7 +261,7 @@ std::vector<uint64_t> get_II_row(
 		) {
 	std::vector<uint64_t> results_vector(
 			1, 
-			II->inverted_index_compressed[term_idx].term_freqs.size()
+			get_rle_u8_row_size(II->inverted_index_compressed[term_idx].term_freqs)
 			);
 
 	decompress_uint64(
@@ -221,9 +275,17 @@ std::vector<uint64_t> get_II_row(
 	}
 
 	// Get term frequencies
+	/*
 	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
 		results_vector.push_back(II->inverted_index_compressed[term_idx].term_freqs[i]);
 	}
+	*/
+	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
+		for (size_t j = 0; j < get_rle_element_u8_size(II->inverted_index_compressed[term_idx].term_freqs[i]); ++j) {
+			results_vector.push_back(II->inverted_index_compressed[term_idx].term_freqs[i].value);
+		}
+	}
+		
 
 	return results_vector;
 }
@@ -382,7 +444,7 @@ void _BM25::read_json() {
 		uint64_t total_size = 0;
 		for (const auto& row : II.inverted_index_compressed) {
 			total_size += row.doc_ids.size();
-			total_size += row.term_freqs.size();
+			total_size += 3 * row.term_freqs.size();
 		}
 		total_size /= 1024 * 1024;
 		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
@@ -512,7 +574,7 @@ void _BM25::read_csv() {
 		uint64_t total_size = 0;
 		for (const auto& row : II.inverted_index_compressed) {
 			total_size += row.doc_ids.size();
-			total_size += row.term_freqs.size();
+			total_size += 3 * row.term_freqs.size();
 		}
 		total_size /= 1024 * 1024;
 		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
@@ -1434,7 +1496,7 @@ _BM25::_BM25(
 	}
 
 	for (auto& row : II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0 || row.term_freqs.size() < (uint64_t)min_df) {
+		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
 			row.doc_ids.clear();
 			row.doc_ids.clear();
 			row.term_freqs.clear();
@@ -1508,7 +1570,7 @@ _BM25::_BM25(
 	II.prev_doc_ids.shrink_to_fit();
 
 	for (auto& row : II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0 || row.term_freqs.size() < (uint64_t)min_df) {
+		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
 			row.doc_ids.clear();
 			row.doc_ids.clear();
 			row.term_freqs.clear();
@@ -1527,7 +1589,7 @@ _BM25::_BM25(
 		uint64_t total_size = 0;
 		for (const auto& row : II.inverted_index_compressed) {
 			total_size += row.doc_ids.size();
-			total_size += row.term_freqs.size();
+			total_size += 3 * row.term_freqs.size();
 		}
 		total_size /= 1024 * 1024;
 		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
@@ -1632,6 +1694,7 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		std::cout << "QUERY: " << query << std::endl;
 		std::cout << "Number of docs: " << doc_scores.size() << "    ";
 		std::cout << elapsed_ms.count() << "ms" << std::endl;
+		fflush(stdout);
 	}
 	
 	if (doc_scores.size() == 0) {
@@ -1657,12 +1720,6 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		result[idx] = top_k_docs.top();
 		top_k_docs.pop();
 		--idx;
-	}
-	if (DEBUG) {
-		auto end = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
-		std::cout << "Time to get top k: " << elapsed_ms.count() << "ms" << std::endl;
-		std::cout << std::endl << std::endl;
 	}
 
 	return result;

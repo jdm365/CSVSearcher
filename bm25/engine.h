@@ -30,8 +30,20 @@ enum SupportedFileTypes {
 };
 
 typedef struct {
+	uint16_t num_repeats;
+	uint8_t  value;
+} RLEElement_u8;
+
+RLEElement_u8 init_rle_element_u8(uint8_t value);
+uint64_t get_rle_element_u8_size(const RLEElement_u8& rle_element);
+bool check_rle_u8_row_size(const std::vector<RLEElement_u8>& rle_row, uint64_t max_size);
+void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value);
+
+
+typedef struct {
 	std::vector<uint8_t> doc_ids;
-	std::vector<uint8_t> term_freqs;
+	// std::vector<uint8_t> term_freqs;
+	std::vector<RLEElement_u8> term_freqs;
 
 } InvertedIndexElement;
 
