@@ -1434,7 +1434,9 @@ _BM25::_BM25(
 	}
 
 	for (auto& row : II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0) {
+		if (row.doc_ids.size() == 0 || row.term_freqs.size() < (uint64_t)min_df) {
+			row.doc_ids.clear();
+			row.doc_ids.clear();
 			row.term_freqs.clear();
 			row.term_freqs.shrink_to_fit();
 		}
@@ -1505,6 +1507,15 @@ _BM25::_BM25(
 	II.prev_doc_ids.clear();
 	II.prev_doc_ids.shrink_to_fit();
 
+	for (auto& row : II.inverted_index_compressed) {
+		if (row.doc_ids.size() == 0 || row.term_freqs.size() < (uint64_t)min_df) {
+			row.doc_ids.clear();
+			row.doc_ids.clear();
+			row.term_freqs.clear();
+			row.term_freqs.shrink_to_fit();
+		}
+	}
+
 	// Calc avg_doc_size
 	float sum = 0;
 	for (const auto& size : doc_sizes) {
@@ -1550,7 +1561,8 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		if (unique_term_mapping.find(substr) == unique_term_mapping.end()) {
 			continue;
 		}
-		if (II.inverted_index_compressed[unique_term_mapping[substr]].doc_ids.size() == 0) {
+		// if (II.inverted_index_compressed[unique_term_mapping[substr]].doc_ids.size() == 0) {
+		if (II.inverted_index_compressed[unique_term_mapping[substr]].doc_ids.size() < (uint64_t)min_df) {
 			substr.clear();
 			continue;
 		}

@@ -7,7 +7,7 @@
 #include "vbyte_encoding.h"
 
 
-#define DEBUG 0
+#define DEBUG 1
 
 #define SEED 42
 
