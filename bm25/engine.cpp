@@ -581,6 +581,178 @@ void _BM25::read_csv() {
 	}
 }
 
+void _BM25::read_csv_memmap() {
+	int fd = open(filename.c_str(), O_RDONLY);
+	if (fd == -1) {
+		std::cerr << "Error opening file for reading." << std::endl;
+		std::exit(1);
+	}
+
+	struct stat sb;
+	if (fstat(fd, &sb) == -1) {
+		std::cerr << "Error getting file size." << std::endl;
+		close(fd);
+		std::exit(1);
+	}
+
+	size_t file_size = sb.st_size;
+
+	char* file_data = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (file_data == MAP_FAILED) {
+		std::cerr << "Error mapping file to memory." << std::endl;
+		close(fd);
+		std::exit(1);
+	}
+
+	close(fd);
+
+	// Quickly count number of lines in file
+	uint64_t num_lines = 0;
+	for (size_t i = 0; i < file_size; ++i) {
+		if (file_data[i] == '\\') {
+			i += 2;
+		}
+		if (file_data[i] == '"') {
+			// Skip to next quote.
+			while (file_data[i] != '"') ++i;
+			++i;
+		}
+		if (file_data[i] == '\n') {
+			++num_lines;
+		}
+	}
+
+	num_docs = num_lines;
+	if (max_df < 2.0f) {
+		this->max_df = (int)num_docs * max_df;
+	}
+	printf("MAX DF: %d\n", (int)this->max_df);
+
+	int search_column_index = -1;
+
+	// Read the file line by line
+	char*    line = NULL;
+	uint64_t line_num = 0;
+	uint64_t byte_offset = 0;
+
+	// Get col names
+	line = file_data;
+	std::istringstream iss(line);
+	std::string value;
+	while (*line != '\n' && *line != '\0') {
+		if (*line == ',') {
+            columns.push_back(value);
+            if (value == search_col) {
+                search_column_index = columns.size() - 1;
+            }
+            value.clear();
+        } else {
+            value.push_back(*line);
+        }
+        ++line;
+    }
+
+    if (!value.empty()) {
+        columns.push_back(value);
+        if (value == search_col) {
+            search_column_index = columns.size() - 1;
+        }
+    }
+
+	if (search_column_index == -1) {
+		std::cerr << "Search column not found in header" << std::endl;
+		std::cerr << "Cols found:  ";
+		for (size_t i = 0; i < columns.size(); ++i) {
+			std::cerr << columns[i] << ",";
+		}
+		std::cerr << std::endl;
+		exit(1);
+	}
+
+	++line;
+	byte_offset = line - file_data;
+
+	uint64_t unique_terms_found = 0;
+
+	// Small string optimization limit on most platforms
+	std::string doc = "";
+	doc.reserve(22);
+
+	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
+
+	const int UPDATE_INTERVAL = 10000;
+	// while ((read = getline(&line, &len, reference_file)) != -1) {
+	while (byte_offset < file_size) {
+		line = file_data + byte_offset;
+
+		if (line_num % UPDATE_INTERVAL == 0) {
+			update_progress(line_num, num_lines);
+		}
+		line_offsets.push_back(byte_offset);
+
+		// Iterate of line chars until we get to relevant column.
+		int char_idx = 0;
+		int col_idx  = 0;
+		while (col_idx != search_column_index) {
+			if (line[char_idx] == '"') {
+				// Skip to next quote.
+				++char_idx;
+				while (line[char_idx] == '"') {
+					++char_idx;
+				}
+			}
+
+			if (line[char_idx] == ',') {
+				++col_idx;
+			}
+			++char_idx;
+		}
+
+		// Split by commas not inside double quotes
+		char end_delim = ',';
+		if (search_column_index == (int)columns.size() - 1) {
+			end_delim = '\n';
+		}
+		if (line[char_idx] == '"') {
+			end_delim = '"';
+			++char_idx;
+		}
+
+		process_doc(&line[char_idx], end_delim, line_num, unique_terms_found);
+		++line_num;
+		byte_offset += strlen(line) + 1;
+	}
+	update_progress(line_num + 1, num_lines);
+
+	munmap(file_data, file_size);
+
+	if (DEBUG) {
+		std::cout << "Vocab size: " << unique_terms_found << std::endl;
+	}
+
+	II.prev_doc_ids.clear();
+	II.prev_doc_ids.shrink_to_fit();
+
+	num_docs = doc_sizes.size();
+
+	// Calc avg_doc_size
+	float sum = 0;
+	for (const auto& size : doc_sizes) {
+		sum += size;
+	}
+	avg_doc_size = sum / num_docs;
+
+	if (DEBUG) {
+		uint64_t total_size = 0;
+		for (const auto& row : II.inverted_index_compressed) {
+			total_size += row.doc_ids.size();
+			total_size += 3 * row.term_freqs.size();
+		}
+		total_size /= 1024 * 1024;
+		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
+	}
+}
+
 
 std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num) {
 	// seek from FILE* reference_file which is already open
@@ -761,16 +933,15 @@ void serialize_vector_of_vectors_u8(
 }
 
 void serialize_inverted_index(
-		const InvertedIndex& II, 
-		const std::string& filename
-		) {
-	std::ofstream out_file(filename, std::ios::binary);
+    const InvertedIndex& II, 
+    const std::string& filename
+) {
+    std::ofstream out_file(filename, std::ios::binary);
     if (!out_file) {
         std::cerr << "Error opening file for writing.\n";
         return;
     }
 
-    // Write the size of the outer vector first
     size_t outer_size = II.inverted_index_compressed.size();
     out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
 
@@ -778,23 +949,21 @@ void serialize_inverted_index(
         size_t inner_size_doc_ids = II.inverted_index_compressed[idx].doc_ids.size();
         out_file.write(reinterpret_cast<const char*>(&inner_size_doc_ids), sizeof(inner_size_doc_ids));
         
-        // Write the elements of the inner vector
         if (!II.inverted_index_compressed[idx].doc_ids.empty()) {
             out_file.write(
-					reinterpret_cast<const char*>(II.inverted_index_compressed[idx].doc_ids.data()),
-					II.inverted_index_compressed[idx].doc_ids.size() * sizeof(uint8_t)
-					);
-		}
+                reinterpret_cast<const char*>(II.inverted_index_compressed[idx].doc_ids.data()),
+                II.inverted_index_compressed[idx].doc_ids.size() * sizeof(uint8_t)
+            );
+        }
 
-		size_t inner_size_term_freqs = II.inverted_index_compressed[idx].term_freqs.size();
-		out_file.write(reinterpret_cast<const char*>(&inner_size_term_freqs), sizeof(inner_size_term_freqs));
-		
-		// Write the elements of the inner vector
-		if (!II.inverted_index_compressed[idx].term_freqs.empty()) {
-			out_file.write(
-					reinterpret_cast<const char*>(II.inverted_index_compressed[idx].term_freqs.data()),
-					II.inverted_index_compressed[idx].term_freqs.size() * sizeof(uint8_t)
-					);
+        size_t inner_size_term_freqs = II.inverted_index_compressed[idx].term_freqs.size();
+        out_file.write(reinterpret_cast<const char*>(&inner_size_term_freqs), sizeof(inner_size_term_freqs));
+
+        if (!II.inverted_index_compressed[idx].term_freqs.empty()) {
+            out_file.write(
+                reinterpret_cast<const char*>(II.inverted_index_compressed[idx].term_freqs.data()),
+                II.inverted_index_compressed[idx].term_freqs.size() * sizeof(RLEElement_u8)
+            );
         }
     }
 
@@ -802,49 +971,44 @@ void serialize_inverted_index(
 }
 
 void deserialize_inverted_index(
-		InvertedIndex& II, 
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
+    InvertedIndex& II, 
+    const std::string& filename
+) {
+    std::ifstream in_file(filename, std::ios::binary);
     if (!in_file) {
         std::cerr << "Error opening file for reading.\n";
         return;
     }
 
-	// Read the size of the outer vector
-	size_t outer_size;
-	in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
-	II.inverted_index_compressed.resize(outer_size);
+    size_t outer_size;
+    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
+    II.inverted_index_compressed.resize(outer_size);
 
-	for (uint64_t idx = 0; idx < outer_size; ++idx) {
-		// Read the size of the doc_ids vector
-		size_t inner_size_doc_ids;
-		in_file.read(reinterpret_cast<char*>(&inner_size_doc_ids), sizeof(inner_size_doc_ids));
-		II.inverted_index_compressed[idx].doc_ids.resize(inner_size_doc_ids);
+    for (uint64_t idx = 0; idx < outer_size; ++idx) {
+        size_t inner_size_doc_ids;
+        in_file.read(reinterpret_cast<char*>(&inner_size_doc_ids), sizeof(inner_size_doc_ids));
+        II.inverted_index_compressed[idx].doc_ids.resize(inner_size_doc_ids);
 
-		// Read the elements of the doc_ids vector
-		if (inner_size_doc_ids > 0) {
-			in_file.read(
-					reinterpret_cast<char*>(II.inverted_index_compressed[idx].doc_ids.data()),
-					inner_size_doc_ids * sizeof(uint8_t)
-					);
-		}
+        if (inner_size_doc_ids > 0) {
+            in_file.read(
+                reinterpret_cast<char*>(II.inverted_index_compressed[idx].doc_ids.data()),
+                inner_size_doc_ids * sizeof(uint8_t)
+            );
+        }
 
-		// Read the size of the term_freqs vector
-		size_t inner_size_term_freqs;
-		in_file.read(reinterpret_cast<char*>(&inner_size_term_freqs), sizeof(inner_size_term_freqs));
-		II.inverted_index_compressed[idx].term_freqs.resize(inner_size_term_freqs);
+        size_t inner_size_term_freqs;
+        in_file.read(reinterpret_cast<char*>(&inner_size_term_freqs), sizeof(inner_size_term_freqs));
+        II.inverted_index_compressed[idx].term_freqs.resize(inner_size_term_freqs);
 
-		// Read the elements of the term_freqs vector
-		if (inner_size_term_freqs > 0) {
-			in_file.read(
-					reinterpret_cast<char*>(II.inverted_index_compressed[idx].term_freqs.data()),
-					inner_size_term_freqs * sizeof(uint8_t)
-					);
-		}
-	}
+        if (inner_size_term_freqs > 0) {
+            in_file.read(
+                reinterpret_cast<char*>(II.inverted_index_compressed[idx].term_freqs.data()),
+                inner_size_term_freqs * sizeof(RLEElement_u8)
+            );
+        }
+    }
 
-	in_file.close();
+    in_file.close();
 }
 
 void serialize_vector_of_vectors_u32(
@@ -1484,6 +1648,7 @@ _BM25::_BM25(
 	// Read file to get documents, line offsets, and columns
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
 		read_csv();
+		// read_csv_memmap();
 		file_type = CSV;
 	}
 	else if (filename.substr(filename.size() - 4, 4) == "json") {

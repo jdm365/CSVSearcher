@@ -1,4 +1,5 @@
 - Add run length encoding to term frequencies before vbyte compression. **Mostly ones there.
+- Try out multithreaded indexing and merging.
 - Publish to pypi.
 - Consider allowing ngram tokenization.
 - Make tests more robust.

@@ -1,16 +1,17 @@
-from distutils.core import setup
-import setuptools
+from setuptools import setup
 from Cython.Build import cythonize
-from distutils.extension import Extension
+from setuptools.extension import Extension
 import os
 
-MODULE_NAME = "bm25"
+## MODULE_NAME = "bm25"
+MODULE_NAME = "rapid_bm25"
 
 ## Optionally choose compiler ##
-
+'''
 COMPILER = "clang++"
 ## COMPILER = "g++"
 os.environ["CXX"] = COMPILER
+'''
 
 COMPILER = os.environ["CXX"]
 

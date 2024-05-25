@@ -7,7 +7,7 @@
 #include "vbyte_encoding.h"
 
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define SEED 42
 
@@ -42,9 +42,7 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value);
 
 typedef struct {
 	std::vector<uint8_t> doc_ids;
-	// std::vector<uint8_t> term_freqs;
 	std::vector<RLEElement_u8> term_freqs;
-
 } InvertedIndexElement;
 
 typedef struct {
@@ -204,6 +202,7 @@ class _BM25 {
 
 		void read_json();
 		void read_csv();
+		void read_csv_memmap();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num);
 

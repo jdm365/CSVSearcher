@@ -1,4 +1,4 @@
-from bm25 import BM25
+from rapid_bm25 import BM25
 import pandas as pd
 import numpy as np
 import os
@@ -178,6 +178,10 @@ def test_bm25_csv(csv_filename: str, search_col: str):
     model = BM25(stopwords='english')
     model.index_file(filename=csv_filename, text_col=search_col)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
+
+    ## Save and load
+    model.save(db_dir='bm25_model')
+    model.load(db_dir='bm25_model')
 
     lens = []
     init = perf_counter()
