@@ -12,7 +12,7 @@ pip install .
 
 ### From File
 ```python
-from bm25 import BM25
+from rapid_bm25 import BM25
 
 ## Current supported file types are csv and json.
 filename = 'data.csv'
@@ -68,7 +68,7 @@ model.load(db_dir=DB_DIR)
 
 ### From Documents
 ```python
-from bm25 import BM25
+from rapid_bm25 import BM25
 
 ## Documents being an arraylike of strings to search.
 import pandas as pd
