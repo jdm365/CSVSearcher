@@ -122,20 +122,33 @@ void deserialize_vector_of_vector_u8(
 		const std::string& filename
 		);
 
+typedef struct {
+	InvertedIndex II;
+	robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
+	std::vector<uint64_t> doc_sizes;
+	std::vector<uint64_t> line_offsets;
+
+	uint64_t num_docs;
+	float    avg_doc_size;
+} BM25Partition;
+
+
 class _BM25 {
 	public:
-		InvertedIndex II;
-		robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
-		std::vector<uint64_t> doc_sizes;
-		std::vector<uint64_t> line_offsets;
+		// InvertedIndex II;
+		// robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
+		// std::vector<uint64_t> doc_sizes;
+		// std::vector<uint64_t> line_offsets;
+		std::vector<BM25Partition> index_partitions;
 		robin_hood::unordered_flat_set<std::string> stop_words;
 
 		uint64_t num_docs;
 		int      min_df;
-		float    avg_doc_size;
+		// float    avg_doc_size;
 		float    max_df;
 		float    k1;
 		float    b;
+		uint16_t num_partitions;
 
 		SupportedFileTypes file_type;
 
@@ -154,6 +167,7 @@ class _BM25 {
 				float b,
 				const std::vector<std::string>& _stop_words = {}
 				);
+
 		_BM25(std::string db_dir) {
 			load_from_disk(db_dir);
 
@@ -181,6 +195,7 @@ class _BM25 {
 				float max_df,
 				float k1,
 				float b,
+				uint16_t num_partitions,
 				const std::vector<std::string>& _stop_words = {}
 				);
 
@@ -198,6 +213,13 @@ class _BM25 {
 				const char terminator,
 				uint64_t doc_id,
 				uint64_t& unique_terms_found
+				);
+		void process_doc_partition(
+				const char* doc,
+				const char terminator,
+				uint64_t doc_id,
+				uint64_t& unique_terms_found,
+				uint16_t partition_id
 				);
 
 		void read_json();

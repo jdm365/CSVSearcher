@@ -18,10 +18,13 @@
 #include <ctime>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <omp.h>
+#include <thread>
 
 #include "engine.h"
 #include "robin_hood.h"
 #include "vbyte_encoding.h"
+
 
 
 inline RLEElement_u8 init_rle_element_u8(uint8_t value) {
@@ -68,6 +71,7 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value) {
 	}
 }
 
+/*
 void _BM25::process_doc(
 		const char* doc,
 		const char terminator,
@@ -224,6 +228,163 @@ void _BM25::process_doc(
 		++doc_size;
 	}
 	doc_sizes.push_back(doc_size);
+}
+*/
+
+
+void _BM25::process_doc_partition(
+		const char* doc,
+		const char terminator,
+		uint64_t doc_id,
+		uint64_t& unique_terms_found,
+		uint16_t partition_id
+		) {
+	BM25Partition& IP = index_partitions[partition_id];
+
+	uint64_t char_idx = 0;
+
+	std::string term = "";
+	// term.reserve(22);
+
+	robin_hood::unordered_flat_set<uint64_t> terms_seen;
+
+	// Split by commas not inside double quotes
+	uint64_t doc_size = 0;
+	uint8_t tf = 1;
+	while (doc[char_idx] != terminator) {
+		if (char_idx > 1048576) {
+			std::cout << "Search field not found on line: " << doc_id << std::endl;
+			std::cout << "Doc: " << doc << std::endl;
+			std::cout << std::flush;
+			std::exit(1);
+		}
+		if (doc[char_idx] == '\\') {
+			++char_idx;
+			term += toupper(doc[char_idx]);
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ' && term == "") {
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ') {
+			if (stop_words.find(term) != stop_words.end()) {
+				term.clear();
+				++char_idx;
+				++doc_size;
+				continue;
+			}
+
+			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
+			if (add) {
+				// New term
+				// II.accumulator.push_back(entry);
+				// convert uint64_t bytes to uint8_t bytes
+				
+				InvertedIndexElement entry;
+
+				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
+				entry.term_freqs.push_back(init_rle_element_u8(tf));
+
+				IP.II.inverted_index_compressed.push_back(entry);
+				IP.II.prev_doc_ids.push_back(doc_id);
+
+				terms_seen.insert(it->second);
+
+				++unique_terms_found;
+			}
+			else {
+				if (check_rle_u8_row_size(IP.II.inverted_index_compressed[it->second].term_freqs, max_df)) {
+					if (IP.II.inverted_index_compressed[it->second].doc_ids.size() >= 0) {
+						IP.II.inverted_index_compressed[it->second].doc_ids.clear();
+						IP.II.inverted_index_compressed[it->second].doc_ids.shrink_to_fit();
+					}
+
+					// Skip term
+					term.clear();
+					++char_idx;
+					++doc_size;
+					continue;
+				}
+
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert(it->second);
+
+					bool same = compress_uint64_differential_single(
+							IP.II.inverted_index_compressed[it->second].doc_ids, 
+							doc_id,
+							IP.II.prev_doc_ids[it->second]
+							);
+					IP.II.prev_doc_ids[it->second] = doc_id;
+
+					if (same) {
+						++tf;
+					}
+					else {
+						add_rle_element_u8(IP.II.inverted_index_compressed[it->second].term_freqs, tf);
+						tf = 1;
+					}
+				}
+			}
+
+			++doc_size;
+			term.clear();
+
+			++char_idx;
+			continue;
+		}
+
+		term += toupper(doc[char_idx]);
+		++char_idx;
+	}
+
+	if (term != "") {
+		if (stop_words.find(term) == stop_words.end()) {
+			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
+
+			if (add) {
+				// New term
+				// II.accumulator.push_back(entry);
+				// convert uint64_t bytes to uint8_t bytes
+				InvertedIndexElement entry;
+
+				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
+				entry.term_freqs.push_back(init_rle_element_u8(tf));
+				tf = 1;
+				IP.II.inverted_index_compressed.push_back(entry);
+				IP.II.prev_doc_ids.push_back(doc_id);
+
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+
+					bool same = compress_uint64_differential_single(
+							IP.II.inverted_index_compressed[it->second].doc_ids, 
+							doc_id,
+							IP.II.prev_doc_ids[it->second]
+							);
+					IP.II.prev_doc_ids[it->second] = doc_id;
+
+
+					if (same) {
+						++tf;
+					}
+					else {
+						add_rle_element_u8(IP.II.inverted_index_compressed[it->second].term_freqs, tf);
+						tf = 1;
+					}
+				}
+			}
+		}
+		++doc_size;
+	}
+	IP.doc_sizes.push_back(doc_size);
 }
 
 
@@ -1683,11 +1844,13 @@ _BM25::_BM25(
 		float max_df,
 		float k1,
 		float b,
+		uint16_t num_partitions,
 		const std::vector<std::string>& _stop_words
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
-			b(b) {
+			b(b),
+			num_partitions(num_partitions) {
 	
 	for (const std::string& stop_word : _stop_words) {
 		stop_words.insert(stop_word);
@@ -1707,12 +1870,22 @@ _BM25::_BM25(
 	std::string doc = "";
 	doc.reserve(22);
 
+	index_partitions.resize(num_partitions);
+
+	std::vector<uint64_t> partition_boundaries(num_partitions + 1);
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		partition_boundaries[i] = (uint64_t)i * (num_docs / num_partitions);
+	}
+	partition_boundaries[num_partitions] = num_docs;
+
 	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
 	const int UPDATE_INTERVAL = 10000;
+
+
+	/*
 	uint64_t doc_id = 0;
 	for (const std::string& line : documents) {
 		if (doc_id % UPDATE_INTERVAL == 0) {
-			// Clear existing line and print progress
 			update_progress(doc_id, num_docs);
 		}
 		process_doc(line.c_str(), '\0', doc_id, unique_terms_found);
@@ -1720,6 +1893,23 @@ _BM25::_BM25(
 		++doc_id;
 	}
 	update_progress(doc_id, num_docs);
+	*/
+	// Do on all partition w/ thread lib
+	std::vector<std::thread> threads;
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		threads.push_back(std::thread(
+			[&documents, &partition_boundaries, i, this] {
+				uint64_t doc_id = partition_boundaries[i];
+				uint64_t end = partition_boundaries[i + 1];
+				std::string doc = "";
+				doc.reserve(22);
+				for (; doc_id < end; ++doc_id) {
+					// process_doc(documents[doc_id].c_str(), '\0', doc_id, unique_terms_found);
+					process_doc_partition(documents[doc_id].c_str(), '\0', doc_id, i);
+				}
+			}
+		));
+	}
 
 	avg_doc_size = 0.0f;
 	for (const uint64_t& size : doc_sizes) {

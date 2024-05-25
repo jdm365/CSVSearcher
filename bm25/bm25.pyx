@@ -49,12 +49,12 @@ cdef extern from "engine.h":
                 float b,
                 const vector[string]& stopwords
                 ) nogil
-        vector[pair[uint64_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df)
+        vector[pair[uint64_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df) nogil
         vector[vector[pair[string, string]]] get_topk_internal(
                 string& term, 
                 uint32_t k, 
                 uint32_t init_max_df
-                )
+                ) nogil 
         void save_to_disk(string db_dir)
         void load_from_disk(string db_dir)
 
@@ -98,6 +98,7 @@ cdef class BM25:
         self.text_col = text_col
 
         self._init_with_file(filename, text_col)
+
 
     def index_documents(self, list documents):
         self._init_with_documents(documents)
