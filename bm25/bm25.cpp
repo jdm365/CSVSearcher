@@ -5015,7 +5015,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
  *         self.k1     = k1
  *         self.b      = b             # <<<<<<<<<<<<<<
  *         self.num_partitions = os.cpu_count()
- *         ## self.num_partitions = 1
+ *         ## self.num_partitions = 2
  */
   __pyx_v_self->b = __pyx_v_b;
 
@@ -5023,7 +5023,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
  *         self.k1     = k1
  *         self.b      = b
  *         self.num_partitions = os.cpu_count()             # <<<<<<<<<<<<<<
- *         ## self.num_partitions = 1
+ *         ## self.num_partitions = 2
  * 
  */
   __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_os); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 96, __pyx_L1_error)
@@ -5058,7 +5058,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
   __pyx_v_self->num_partitions = __pyx_t_5;
 
   /* "bm25/bm25.pyx":99
- *         ## self.num_partitions = 1
+ *         ## self.num_partitions = 2
  * 
  *         if stopwords == 'english':             # <<<<<<<<<<<<<<
  *             self.stopwords = ENGLISH_STOPWORDS
@@ -5077,7 +5077,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
     __pyx_v_self->stopwords = __pyx_v_10rapid_bm25_ENGLISH_STOPWORDS;
 
     /* "bm25/bm25.pyx":99
- *         ## self.num_partitions = 1
+ *         ## self.num_partitions = 2
  * 
  *         if stopwords == 'english':             # <<<<<<<<<<<<<<
  *             self.stopwords = ENGLISH_STOPWORDS

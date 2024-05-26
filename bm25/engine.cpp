@@ -29,6 +29,9 @@
 #include "vbyte_encoding.h"
 #include "serialize.h"
 
+bool output_is_terminal() {
+	return isatty(fileno(stdout));
+}
 
 void set_raw_mode() {
     termios term;
@@ -130,7 +133,7 @@ void _BM25::determine_partition_boundaries_csv(std::vector<uint64_t>& partition_
 			size_t bytes_read = fread(buf, 1, sizeof(buf), f);
 			for (size_t i = 0; i < bytes_read; ++i) {
 				if (buf[i] == '\n') {
-					partition_boundaries.push_back(byte_offset++);
+					partition_boundaries.push_back(++byte_offset);
 					goto end_of_loop;
 				}
 				++byte_offset;
@@ -845,9 +848,7 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 		std::exit(1);
 	}
 
-	int search_column_index = -1;
-
-	// Read the file line by line
+		// Read the file line by line
 	char*    line = NULL;
 	size_t   len = 0;
 	ssize_t  read;
@@ -860,6 +861,11 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 	std::string doc = "";
 	doc.reserve(22);
 
+	char end_delim = ',';
+	if (search_col_idx == (int)columns.size() - 1) {
+		end_delim = '\n';
+	}
+
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, f)) != -1) {
 
@@ -867,7 +873,9 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 			break;
 		}
 
-		if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, num_lines, partition_id);
+		if (!DEBUG) {
+			if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, num_lines, partition_id);
+		}
 
 		IP.line_offsets.push_back(byte_offset);
 		byte_offset += read;
@@ -891,25 +899,29 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 		}
 
 		// Split by commas not inside double quotes
-		char end_delim = ',';
-		if (search_column_index == (int)columns.size() - 1) {
-			end_delim = '\n';
-		}
 		if (line[char_idx] == '"') {
-			end_delim = '"';
 			++char_idx;
-		}
-
-		process_doc_partition(
+			process_doc_partition(
 				&line[char_idx], 
-				end_delim, 
+				'"', 
 				line_num, 
 				unique_terms_found, 
 				partition_id
 				);
+			++line_num;
+			continue;
+		}
+
+		process_doc_partition(
+			&line[char_idx], 
+			end_delim,
+			line_num, 
+			unique_terms_found, 
+			partition_id
+			);
 		++line_num;
 	}
-	update_progress(line_num + 1, num_lines, partition_id);
+	if (!DEBUG) update_progress(line_num + 1, num_lines, partition_id);
 
 	if (DEBUG) {
 		std::cout << "Vocab size: " << unique_terms_found << std::endl;
@@ -1441,14 +1453,18 @@ _BM25::_BM25(
 	index_partitions.resize(num_partitions);
 	num_docs = 0;
 
-	int col;
-	get_cursor_position(init_cursor_row, col);
-	get_terminal_size(terminal_height, col);
+	bool is_terminal = isatty(fileno(stdout));
 
-	if (terminal_height - init_cursor_row < num_partitions + 1) {
-		// Perform neccessary scroll
-		std::cout << "\x1b[" << num_partitions + 1 << "S";
-		init_cursor_row -= num_partitions + 1;
+	int col;
+	if (is_terminal) {
+		get_cursor_position(init_cursor_row, col);
+		get_terminal_size(terminal_height, col);
+
+		if (terminal_height - init_cursor_row < num_partitions + 1) {
+			// Scroll and reposition cursor
+			std::cout << "\x1b[" << num_partitions + 1 << "S";
+			init_cursor_row -= num_partitions + 1;
+		}
 	}
 
 	// Read file to get documents, line offsets, and columns
@@ -1479,14 +1495,6 @@ _BM25::_BM25(
 				}
 			));
 		}
-		num_docs = index_partitions[0].num_docs;
-		for (uint16_t i = 1; i < num_partitions; ++i) {
-			num_docs += index_partitions[i].num_docs;
-		}
-		if (max_df < 2.0f) {
-			this->max_df = (int)num_docs * max_df;
-		}
-
 		file_type = JSON;
 	}
 	else {
@@ -1498,7 +1506,7 @@ _BM25::_BM25(
 		thread.join();
 	}
 
-	finalize_progress_bar();
+	if (!DEBUG) finalize_progress_bar();
 
 	if (DEBUG) {
 		auto read_end = std::chrono::high_resolution_clock::now();

@@ -94,7 +94,7 @@ cdef class BM25:
         self.k1     = k1
         self.b      = b
         self.num_partitions = os.cpu_count()
-        ## self.num_partitions = 1
+        ## self.num_partitions = 2
 
         if stopwords == 'english':
             self.stopwords = ENGLISH_STOPWORDS
