@@ -2,7 +2,7 @@
 
 cimport cython
 
-from libc.stdint cimport int32_t, uint32_t, uint64_t 
+from libc.stdint cimport uint16_t, int32_t, uint32_t, uint64_t 
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp.pair cimport pair
@@ -30,6 +30,11 @@ cdef vector[string] ENGLISH_STOPWORDS = {
 cdef int INT_MAX = 2147483647
 
 cdef extern from "engine.h":
+    ctypedef struct BM25Result:
+        uint64_t doc_id 
+        float score
+        uint16_t partition_id
+
     cdef cppclass _BM25:
         _BM25(
                 string filename,
@@ -38,6 +43,7 @@ cdef extern from "engine.h":
                 float max_df,
                 float k1,
                 float b,
+                uint16_t num_partitions,
                 const vector[string]& stopwords
                 ) nogil
         _BM25(string db_dir)
@@ -47,9 +53,10 @@ cdef extern from "engine.h":
                 float max_df,
                 float k1,
                 float b,
+                uint16_t num_partitions,
                 const vector[string]& stopwords
                 ) nogil
-        vector[pair[uint64_t, float]] query(string& term, uint32_t top_k, uint32_t init_max_df) nogil
+        vector[BM25Result] query(string& term, uint32_t top_k, uint32_t init_max_df) nogil
         vector[vector[pair[string, string]]] get_topk_internal(
                 string& term, 
                 uint32_t k, 
@@ -71,6 +78,7 @@ cdef class BM25:
     cdef bool   is_parquet
     cdef object arrow_table
     cdef vector[string] stopwords
+    cdef uint16_t num_partitions
 
 
     def __init__(
@@ -85,6 +93,8 @@ cdef class BM25:
         self.max_df = max_df
         self.k1     = k1
         self.b      = b
+        self.num_partitions = os.cpu_count()
+        ## self.num_partitions = 1
 
         if stopwords == 'english':
             self.stopwords = ENGLISH_STOPWORDS
@@ -187,6 +197,7 @@ cdef class BM25:
                 self.max_df,
                 self.k1,
                 self.b,
+                self.num_partitions,
                 self.stopwords
                 )
 
@@ -204,6 +215,7 @@ cdef class BM25:
                 self.max_df,
                 self.k1,
                 self.b,
+                self.num_partitions,
                 self.stopwords
                 )
 
@@ -230,6 +242,7 @@ cdef class BM25:
                 self.max_df,
                 self.k1,
                 self.b,
+                self.num_partitions,
                 self.stopwords
                 )
         print(f"Reading parquet file took {perf_counter() - init:.2f} seconds")
@@ -239,14 +252,14 @@ cdef class BM25:
 
         scores  = []
         indices = []
-        for idx, score in results:
-            scores.append(score)
-            indices.append(idx)
+        for result in results:
+            scores.append(result.score)
+            indices.append(result.doc_id)
 
         return scores, indices
 
     cdef list _get_topk_docs_parquet(self, str query, int k = 10, int init_max_df = INT_MAX):
-        cdef vector[pair[uint64_t, float]] results = self.bm25.query(
+        cdef vector[BM25Result] results = self.bm25.query(
                 query.upper().encode("utf-8"), 
                 k, 
                 init_max_df
@@ -256,9 +269,9 @@ cdef class BM25:
 
         cdef list scores = []
         cdef list indices = []
-        for idx, score in results:
-            scores.append(score)
-            indices.append(idx)
+        for result in results:
+            scores.append(result.score)
+            indices.append(result.doc_id)
 
         rows = self.arrow_table.take(indices).to_pylist()
 

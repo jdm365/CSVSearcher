@@ -40,7 +40,7 @@ if COMPILER == "clang++":
 extensions = [
     Extension(
         MODULE_NAME,
-        sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp"],
+        sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp", "bm25/serialize.cpp"],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=["bm25"],
