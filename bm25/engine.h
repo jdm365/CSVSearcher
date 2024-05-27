@@ -170,12 +170,6 @@ class _BM25 {
 		void save_to_disk(const std::string& db_dir);
 		void load_from_disk(const std::string& db_dir);
 
-		void process_doc(
-				const char* doc,
-				const char terminator,
-				uint64_t doc_id,
-				uint64_t& unique_terms_found
-				);
 		void process_doc_partition(
 				const char* doc,
 				const char terminator,
@@ -189,7 +183,6 @@ class _BM25 {
 
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
-		// void read_csv_memmap();
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num, uint16_t partition_id);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num, uint16_t partition_id);
 
