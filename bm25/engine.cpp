@@ -478,7 +478,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	// Quickly count number of lines in file
 	uint64_t num_lines = 0;
 	uint64_t total_bytes_read = 0;
-	char buf[1024 * 1024];
+	char buf[1024 * 64];
 	fseek(f, start_byte, SEEK_SET);
 	while (size_t bytes_read = fread(buf, 1, sizeof(buf), f)) {
 		for (size_t i = 0; i < bytes_read; ++i) {
@@ -658,7 +658,7 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 	// Quickly count number of lines in file
 	uint64_t num_lines = 0;
 	uint64_t total_bytes_read = 0;
-	char buf[1024 * 1024];
+	char buf[1024 * 64];
 
 	if (fseek(f, start_byte, SEEK_SET) != 0) {
 		std::cerr << "Error seeking file." << std::endl;

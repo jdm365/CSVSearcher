@@ -36,6 +36,10 @@ if COMPILER == "clang++":
     COMPILER_FLAGS += [
             "-stdlib=libc++"
     ]
+elif COMPILER == "g++":
+    COMPILER_FLAGS += [
+            "-I/usr/local/include"
+    ]
 
 extensions = [
     Extension(

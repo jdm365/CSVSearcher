@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <mutex>
 
 #include "robin_hood.h"
 
