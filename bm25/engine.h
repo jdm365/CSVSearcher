@@ -26,6 +26,12 @@ struct _compare_64 {
 };
 
 typedef struct {
+	uint64_t df;
+	std::vector<uint64_t> doc_ids;
+	std::vector<float> term_freqs;
+} IIRow;
+
+typedef struct {
 	uint64_t doc_id;
 	float    score;
 	uint16_t partition_id;
@@ -64,11 +70,11 @@ typedef struct {
 	std::vector<InvertedIndexElement> inverted_index_compressed;
 } InvertedIndex;
 
-inline std::vector<uint64_t> get_II_row(
+inline IIRow get_II_row(
 		InvertedIndex* II, 
-		uint64_t term_idx
+		uint64_t term_idx,
+		uint32_t k
 		);
-
 
 typedef struct {
 	InvertedIndex II;
@@ -168,6 +174,8 @@ class _BM25 {
 		}
 		void proccess_csv_header();
 
+		void save_index_partition(std::string db_dir, uint16_t partition_id);
+		void load_index_partition(std::string db_dir, uint16_t partition_id);
 		void save_to_disk(const std::string& db_dir);
 		void load_from_disk(const std::string& db_dir);
 

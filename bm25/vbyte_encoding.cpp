@@ -130,6 +130,7 @@ void decompress_uint64(
 	*decompressed_size = data_index;
 }
 
+
 void compress_uint64_differential(
 	uint64_t* data,
 	uint8_t*  compressed_buffer, 
@@ -206,6 +207,28 @@ void decompress_uint64(
 			shift += 7;
 		} while (byte & 128);
 		data.push_back(value);
+	}
+}
+
+void decompress_uint64_partial(
+	std::vector<uint8_t>&  compressed_buffer,
+	std::vector<uint64_t>& data,
+	uint32_t k
+	) {
+	uint64_t compressed_index = 0;
+
+	while (compressed_index < compressed_buffer.size()) {
+		uint64_t value = 0;
+		uint64_t shift = 0;
+		uint8_t byte;
+		do {
+			byte = compressed_buffer[compressed_index++];
+			value |= (byte & 127) << shift;
+			shift += 7;
+		} while (byte & 128);
+		data.push_back(value);
+
+		if (data.size() == k) return;
 	}
 }
 

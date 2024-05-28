@@ -27,11 +27,14 @@ def test_okapi_bm25(csv_filename: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
 
-def test_retriv(csv_filename: str):
+def test_retriv(csv_filename: str, search_col: str):
     from retriv import SparseRetriever
 
     df = pd.read_csv(csv_filename)
-    names = df['name']
+    names = df[search_col]
+
+    ## rename index id
+    df['id'] = df.index.astype(str)
 
     rand_idxs = np.random.choice(len(names), 10_000, replace=False)
     companies_sample = names.iloc[rand_idxs]
@@ -42,13 +45,14 @@ def test_retriv(csv_filename: str):
         path=csv_filename,
         show_progress=True,
         callback=lambda doc: {
-            "id": doc["domain"],
-            "text": doc["name"]
+            "id": doc['id'],
+            "text": doc[search_col]
         }
     )
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     for company in tqdm(companies_sample, desc="Querying"):
+        company = str(company)
         model.search(
             query=company, 
             return_docs=True,
@@ -180,13 +184,18 @@ def test_bm25_csv(csv_filename: str, search_col: str):
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     ## Save and load
+    init = perf_counter()
     model.save(db_dir='bm25_model')
+    print(f"Time to save: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
     model.load(db_dir='bm25_model')
+    print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     lens = []
     init = perf_counter()
     for query in tqdm(sample, desc="Querying"):
-        results = model.get_topk_docs(query, k=1000)
+        results = model.get_topk_docs(query, k=10)
         lens.append(len(results))
     time = perf_counter() - init
 
@@ -255,18 +264,21 @@ if __name__ == '__main__':
     ## JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
 
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SuffixArray/searchapp_demo', 'companies_700M.csv')
 
     PARQUET_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.parquet')
 
+
     ## test_okapi_bm25(FILENAME)
-    ## test_retriv(CSV_FILENAME)
+    ## test_retriv(CSV_FILENAME, search_col='title')
     ## test_duckdb(FILENAME)
     ## test_anserini(CSV_FILENAME)
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_col='text')
-    test_bm25_csv(CSV_FILENAME, search_col='name')
+    ## test_bm25_csv(CSV_FILENAME, search_col='name')
+    test_bm25_csv(CSV_FILENAME, search_col='title')
     ## test_bm25_json(JSON_FILENAME, search_col='text')
     ## test_bm25_parquet(PARQUET_FILENAME, search_col='name')
     ## test_documents(CSV_FILENAME, search_col='name')
