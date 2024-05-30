@@ -4,4 +4,4 @@ install:
 	python -m pip install .
 
 clean:
-	rm -r build dist *.egg-info .cache
+	rm -r build dist *.egg-info .cache bm25_model

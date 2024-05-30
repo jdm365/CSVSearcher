@@ -134,15 +134,6 @@ cdef class BM25:
         with open(os.path.join(self.db_dir, "filename.txt"), "w") as f:
             f.write(self.filename)
 
-        if self.filename != "in_memory":
-            last_modified = os.path.getmtime(self.filename)
-        else:
-            last_modified = "in_memory"
-
-        ## Write to a file
-        with open(os.path.join(self.db_dir, "last_modified_file.txt"), "w") as f:
-            f.write(str(last_modified))
-
 
     def load(self, db_dir):
         self.db_dir = db_dir
@@ -151,34 +142,8 @@ cdef class BM25:
         if not os.path.exists(self.db_dir):
             raise RuntimeError("Database directory does not exist")
 
-        ## Check if db_dir has been modified since last save
-        with open(os.path.join(self.db_dir, "last_modified.txt"), "r") as f:
-            last_modified = f.read()
-
-        new_time = str(os.path.getmtime(self.db_dir))
-        new_time = new_time.split('.')[0]
-        last_modified = last_modified.split('.')[0]
-
-        if new_time != last_modified:
-            raise RuntimeError("Database directory has been modified since last save")
-
         with open(os.path.join(self.db_dir, "filename.txt"), "r") as f:
-            last_filename = f.read()
-
-        if self.filename != last_filename:
-            raise RuntimeError("Filename is different from the one used to save the model")
-
-        ## Check if source_file has been modified since last save
-        with open(os.path.join(self.db_dir, "last_modified_file.txt"), "r") as f:
-            last_modified = f.read()
-
-        if last_modified != "in_memory":
-            new_time = str(os.path.getmtime(self.filename))
-            new_time = new_time.split('.')[0]
-            last_modified = last_modified.split('.')[0]
-
-            if new_time != last_modified:
-                raise RuntimeError("Source file has been modified since last save")
+            self.filename = f.read()
 
         self.bm25 = new _BM25(self.db_dir.encode("utf-8"))
         return True
