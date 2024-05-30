@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -18,11 +19,183 @@
 #include <ctime>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <omp.h>
+#include <thread>
+#include <mutex>
+#include <termios.h>
 
 #include "engine.h"
 #include "robin_hood.h"
 #include "vbyte_encoding.h"
+#include "serialize.h"
 
+bool output_is_terminal() {
+	return isatty(fileno(stdout));
+}
+
+void set_raw_mode() {
+    termios term;
+    tcgetattr(STDIN_FILENO, &term);
+    term.c_lflag &= ~(ICANON | ECHO); // Disable echo and canonical mode
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
+}
+
+// Function to reset the terminal to normal mode
+void reset_terminal_mode() {
+    termios term;
+    tcgetattr(STDIN_FILENO, &term);
+    term.c_lflag |= (ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
+}
+
+// Function to query the cursor position
+void get_cursor_position(int& rows, int& cols) {
+    set_raw_mode();
+
+    // Send the ANSI code to report cursor position
+    std::cout << "\x1b[6n" << std::flush;
+
+    // Expecting response in the format: ESC[row;colR
+    char ch;
+    int rows_temp = 0, cols_temp = 0;
+    int read_state = 0;
+
+    while (std::cin.get(ch)) {
+        if (ch == '\x1b') {
+            read_state = 1;
+        } else if (ch == '[' && read_state == 1) {
+            read_state = 2;
+        } else if (ch == 'R') {
+            break;
+        } else if (read_state == 2 && ch != ';') {
+            rows_temp = rows_temp * 10 + (ch - '0');
+        } else if (ch == ';') {
+            read_state = 3;
+        } else if (read_state == 3) {
+            cols_temp = cols_temp * 10 + (ch - '0');
+        }
+    }
+
+    reset_terminal_mode();
+
+    rows = rows_temp;
+    cols = cols_temp;
+}
+
+void get_terminal_size(int& rows, int& cols) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
+        perror("ioctl");
+        exit(EXIT_FAILURE);
+    }
+    rows = ws.ws_row;
+    cols = ws.ws_col;
+}
+
+
+void _BM25::determine_partition_boundaries_csv(std::vector<uint64_t>& partition_boundaries) {
+	// First find number of bytes in file.
+	// Get avg chunk size in bytes.
+	// Seek in jumps of byte chunks, then scan forward to newline and append to partition_boundaries.
+	// If we reach end of file, break.
+
+	FILE* f = reference_file_handles[0];
+
+	struct stat sb;
+	if (fstat(fileno(f), &sb) == -1) {
+		std::cerr << "Error getting file size." << std::endl;
+		std::exit(1);
+	}
+
+	size_t file_size = sb.st_size;
+	size_t chunk_size = file_size / num_partitions;
+
+	if (max_df < 2.0f) {
+		// Guess for now
+		this->max_df = (int)file_size * max_df / 100;
+	}
+
+	partition_boundaries.push_back(header_bytes);
+
+	size_t byte_offset = header_bytes;
+	while (true) {
+		byte_offset += chunk_size;
+
+		if (byte_offset >= file_size) {
+			partition_boundaries.push_back(file_size);
+			break;
+		}
+
+		fseek(f, byte_offset, SEEK_SET);
+
+		char buf[1024];
+		while (true) {
+			size_t bytes_read = fread(buf, 1, sizeof(buf), f);
+			for (size_t i = 0; i < bytes_read; ++i) {
+				if (buf[i] == '\n') {
+					partition_boundaries.push_back(++byte_offset);
+					goto end_of_loop;
+				}
+				++byte_offset;
+			}
+		}
+
+		end_of_loop:
+			continue;
+	}
+
+	if (partition_boundaries.size() != num_partitions + 1) {
+		printf("Partition boundaries: %lu\n", partition_boundaries.size());
+		printf("Num partitions: %d\n", num_partitions);
+		std::cerr << "Error determining partition boundaries." << std::endl;
+		std::exit(1);
+	}
+
+	// Reset file pointer to beginning
+	fseek(f, header_bytes, SEEK_SET);
+}
+
+void _BM25::determine_partition_boundaries_json(std::vector<uint64_t>& partition_boundaries) {
+	// Same as csv for now. Assuming newline delimited json.
+	determine_partition_boundaries_csv(partition_boundaries);
+}
+
+void _BM25::proccess_csv_header() {
+	// Iterate over first line to get column names.
+	// If column name matches search_col, set search_column_index.
+
+	FILE* f = reference_file_handles[0];
+	char* line = NULL;
+	size_t len = 0;
+
+	fseek(f, 0, SEEK_SET);
+
+	// Get col names
+	ssize_t read = getline(&line, &len, f);
+	std::istringstream iss(line);
+	std::string value;
+	while (std::getline(iss, value, ',')) {
+		if (value.find("\n") != std::string::npos) {
+			value.erase(value.find("\n"));
+		}
+		columns.push_back(value);
+		if (value == search_col) {
+			search_col_idx = columns.size() - 1;
+		}
+	}
+
+	if (search_col_idx == -1) {
+		std::cerr << "Search column not found in header" << std::endl;
+		std::cerr << "Cols found:  ";
+		for (size_t i = 0; i < columns.size(); ++i) {
+			std::cerr << columns[i] << ",";
+		}
+		std::cerr << std::endl;
+		exit(1);
+	}
+
+	header_bytes = read;
+}
 
 inline RLEElement_u8 init_rle_element_u8(uint8_t value) {
 	RLEElement_u8 rle;
@@ -68,12 +241,16 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value) {
 	}
 }
 
-void _BM25::process_doc(
+
+void _BM25::process_doc_partition(
 		const char* doc,
 		const char terminator,
 		uint64_t doc_id,
-		uint64_t& unique_terms_found
+		uint64_t& unique_terms_found,
+		uint16_t partition_id
 		) {
+	BM25Partition& IP = index_partitions[partition_id];
+
 	uint64_t char_idx = 0;
 
 	std::string term = "";
@@ -111,7 +288,7 @@ void _BM25::process_doc(
 				continue;
 			}
 
-			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
 			if (add) {
 				// New term
 				// II.accumulator.push_back(entry);
@@ -122,18 +299,18 @@ void _BM25::process_doc(
 				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
 				entry.term_freqs.push_back(init_rle_element_u8(tf));
 
-				II.inverted_index_compressed.push_back(entry);
-				II.prev_doc_ids.push_back(doc_id);
+				IP.II.inverted_index_compressed.push_back(entry);
+				IP.II.prev_doc_ids.push_back(doc_id);
 
 				terms_seen.insert(it->second);
 
 				++unique_terms_found;
 			}
 			else {
-				if (check_rle_u8_row_size(II.inverted_index_compressed[it->second].term_freqs, max_df)) {
-					if (II.inverted_index_compressed[it->second].doc_ids.size() >= 0) {
-						II.inverted_index_compressed[it->second].doc_ids.clear();
-						II.inverted_index_compressed[it->second].doc_ids.shrink_to_fit();
+				if (check_rle_u8_row_size(IP.II.inverted_index_compressed[it->second].term_freqs, max_df)) {
+					if (IP.II.inverted_index_compressed[it->second].doc_ids.size() >= 0) {
+						IP.II.inverted_index_compressed[it->second].doc_ids.clear();
+						IP.II.inverted_index_compressed[it->second].doc_ids.shrink_to_fit();
 					}
 
 					// Skip term
@@ -148,19 +325,17 @@ void _BM25::process_doc(
 					terms_seen.insert(it->second);
 
 					bool same = compress_uint64_differential_single(
-							II.inverted_index_compressed[it->second].doc_ids, 
+							IP.II.inverted_index_compressed[it->second].doc_ids, 
 							doc_id,
-							II.prev_doc_ids[it->second]
+							IP.II.prev_doc_ids[it->second]
 							);
-					II.prev_doc_ids[it->second] = doc_id;
+					IP.II.prev_doc_ids[it->second] = doc_id;
 
 					if (same) {
-						// ++II.inverted_index_compressed[it->second].term_freqs.back();
 						++tf;
 					}
 					else {
-						add_rle_element_u8(II.inverted_index_compressed[it->second].term_freqs, tf);
-						// II.inverted_index_compressed[it->second].term_freqs.push_back(1);
+						add_rle_element_u8(IP.II.inverted_index_compressed[it->second].term_freqs, tf);
 						tf = 1;
 					}
 				}
@@ -179,7 +354,7 @@ void _BM25::process_doc(
 
 	if (term != "") {
 		if (stop_words.find(term) == stop_words.end()) {
-			auto [it, add] = unique_term_mapping.try_emplace(term, unique_terms_found);
+			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
 
 			if (add) {
 				// New term
@@ -188,34 +363,30 @@ void _BM25::process_doc(
 				InvertedIndexElement entry;
 
 				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
-				// entry.term_freqs.push_back(1);
 				entry.term_freqs.push_back(init_rle_element_u8(tf));
 				tf = 1;
-				II.inverted_index_compressed.push_back(entry);
-				II.prev_doc_ids.push_back(doc_id);
+				IP.II.inverted_index_compressed.push_back(entry);
+				IP.II.prev_doc_ids.push_back(doc_id);
 
 				++unique_terms_found;
 			}
 			else {
 				// Term already exists
 				if (terms_seen.find(it->second) == terms_seen.end()) {
-					// II.accumulator[it->second].push_back(doc_id);
 
 					bool same = compress_uint64_differential_single(
-							II.inverted_index_compressed[it->second].doc_ids, 
+							IP.II.inverted_index_compressed[it->second].doc_ids, 
 							doc_id,
-							II.prev_doc_ids[it->second]
+							IP.II.prev_doc_ids[it->second]
 							);
-					II.prev_doc_ids[it->second] = doc_id;
+					IP.II.prev_doc_ids[it->second] = doc_id;
 
 
 					if (same) {
-						// ++II.inverted_index_compressed[it->second].term_freqs.back();
 						++tf;
 					}
 					else {
-						// II.inverted_index_compressed[it->second].term_freqs.push_back(1);
-						add_rle_element_u8(II.inverted_index_compressed[it->second].term_freqs, tf);
+						add_rle_element_u8(IP.II.inverted_index_compressed[it->second].term_freqs, tf);
 						tf = 1;
 					}
 				}
@@ -223,108 +394,138 @@ void _BM25::process_doc(
 		}
 		++doc_size;
 	}
-	doc_sizes.push_back(doc_size);
+
+	IP.doc_sizes.push_back((uint16_t)doc_size);
 }
 
 
-void update_progress(int line_num, int num_lines) {
-	const int bar_width = 121;
+void _BM25::update_progress(int line_num, int num_lines, uint16_t partition_id) {
+    const int bar_width = 121;
 
-	float percentage = (float)line_num / num_lines;
-	int   pos = bar_width * percentage;
+    float percentage = static_cast<float>(line_num) / num_lines;
+    int pos = bar_width * percentage;
 
-	// Create the progress bar
-	std::string bar;
-	if (pos == bar_width) {
-		bar = "[" + std::string(bar_width - 1, '=') + ">" + "]";
-	}
-	else {
-		bar = "[" + std::string(pos, '=') + ">" + std::string(bar_width - pos - 1, ' ') + "]";
-	}
+    std::string bar;
+    if (pos == bar_width) {
+        bar = "[" + std::string(bar_width - 1, '=') + ">" + "]";
+    } else {
+        bar = "[" + std::string(pos, '=') + ">" + std::string(bar_width - pos - 1, ' ') + "]";
+    }
 
-    // Build the progress string
-	// Print percentage instead
-	std::string info = std::to_string((int)(percentage * 100)) + "% " +
+    std::string info = std::to_string(static_cast<int>(percentage * 100)) + "% " +
                        std::to_string(line_num) + " / " + std::to_string(num_lines) + " docs read";
-	std::string output =  "\r Indexing Documents " + bar + " " + info;
-	output += std::string(std::max(0, bar_width - static_cast<int>(output.length())), ' ');
-    
-    // Output the progress in one go
-    std::cout << output << std::flush;
-	if (pos == bar_width) std::cout << std::endl;
+    std::string output = "Partition " + std::to_string(partition_id + 1) + ": " + bar + " " + info;
+
+    {
+        std::lock_guard<std::mutex> lock(progress_mutex);
+
+        progress_bars.resize(std::max(progress_bars.size(), static_cast<size_t>(partition_id + 1)));
+        progress_bars[partition_id] = output;
+
+        std::cout << "\033[s";  // Save the cursor position
+
+		// Move the cursor to the appropriate position for this partition
+        std::cout << "\033[" << (partition_id + 1 + init_cursor_row) << ";1H";
+
+        std::cout << output << std::endl;
+
+        std::cout << "\033[u";  // Restore the cursor to the original position after updating
+        std::cout << std::flush;
+    }
+}
+
+void _BM25::finalize_progress_bar() {
+    std::cout << "\033[" << (num_partitions + 1 + init_cursor_row) << ";1H";
+	fflush(stdout);
 }
 
 
-std::vector<uint64_t> get_II_row(
+IIRow get_II_row(
 		InvertedIndex* II, 
-		uint64_t term_idx
+		uint64_t term_idx,
+		uint32_t k
 		) {
-	std::vector<uint64_t> results_vector(
-			1, 
-			get_rle_u8_row_size(II->inverted_index_compressed[term_idx].term_freqs)
-			);
+	IIRow row;
+
+	row.df = get_rle_u8_row_size(II->inverted_index_compressed[term_idx].term_freqs);
 
 	decompress_uint64(
 			II->inverted_index_compressed[term_idx].doc_ids,
-			results_vector
+			row.doc_ids
 			);
+	/*
+	decompress_uint64_partial(
+			II->inverted_index_compressed[term_idx].doc_ids,
+			row.doc_ids,
+			k
+			);
+			*/
 
 	// Convert doc_ids back to absolute values
-	for (size_t i = 2; i < results_vector.size(); ++i) {
-		results_vector[i] += results_vector[i - 1];
+	for (size_t i = 1; i < row.doc_ids.size(); ++i) {
+		row.doc_ids[i] += row.doc_ids[i - 1];
 	}
 
 	// Get term frequencies
-	/*
-	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
-		results_vector.push_back(II->inverted_index_compressed[term_idx].term_freqs[i]);
-	}
-	*/
 	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
 		for (size_t j = 0; j < get_rle_element_u8_size(II->inverted_index_compressed[term_idx].term_freqs[i]); ++j) {
-			results_vector.push_back(II->inverted_index_compressed[term_idx].term_freqs[i].value);
+			row.term_freqs.push_back(
+					(float)II->inverted_index_compressed[term_idx].term_freqs[i].value
+					);
+
+			if (row.term_freqs.size() >= row.doc_ids.size()) {
+				return row;
+			}
 		}
 	}
 		
-
-	return results_vector;
+	return row;
 }
 
 
-void _BM25::read_json() {
+void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
+	FILE* f = reference_file_handles[partition_id];
+	BM25Partition& IP = index_partitions[partition_id];
+
 	// Quickly count number of lines in file
 	uint64_t num_lines = 0;
-	char buf[1024 * 1024];
-	while (size_t bytes_read = fread(buf, 1, sizeof(buf), reference_file)) {
+	uint64_t total_bytes_read = 0;
+	char buf[1024 * 64];
+	fseek(f, start_byte, SEEK_SET);
+	while (size_t bytes_read = fread(buf, 1, sizeof(buf), f)) {
 		for (size_t i = 0; i < bytes_read; ++i) {
 			if (buf[i] == '\n') {
 				++num_lines;
 			}
+			if (total_bytes_read++ >= end_byte) {
+				break;
+			}
 		}
 	}
-	num_docs = num_lines;
-	if (max_df < 2.0f) {
-		this->max_df = (int)num_docs * max_df;
-	}
-	printf("MAX DF: %d\n", (int)this->max_df);
+	IP.num_docs = num_lines;
 
 	// Reset file pointer to beginning
-	rewind(reference_file);
+	fseek(f, start_byte, SEEK_SET);
 
 	// Read the file line by line
 	char*    line = NULL;
 	size_t   len = 0;
 	ssize_t  read;
 	uint64_t line_num = 0;
-	uint64_t byte_offset = 0;
+	uint64_t byte_offset = start_byte;
 
 	uint64_t unique_terms_found = 0;
 
 	const int UPDATE_INTERVAL = 10000;
-	while ((read = getline(&line, &len, reference_file)) != -1) {
+	while ((read = getline(&line, &len, f)) != -1) {
+
+		if (byte_offset >= end_byte) {
+			break;
+		}
+
 		if (!DEBUG) {
 			if (line_num % UPDATE_INTERVAL == 0) {
-				update_progress(line_num, num_lines);
+				update_progress(line_num, num_lines, partition_id);
 			}
 		}
 		if (strlen(line) == 0) {
@@ -332,7 +533,7 @@ void _BM25::read_json() {
 			std::exit(1);
 		}
 
-		line_offsets.push_back(byte_offset);
+		IP.line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
 		// Iterate of line chars until we get to relevant column.
@@ -419,30 +620,41 @@ void _BM25::read_json() {
 				}
 		}
 
-		process_doc(&line[char_idx], '"', line_num, unique_terms_found);
+		process_doc_partition(&line[char_idx], '"', line_num, unique_terms_found, partition_id);
 		++line_num;
 	}
-	update_progress(line_num, num_lines);
+	update_progress(line_num, num_lines, partition_id);
 	free(line);
 
 	if (DEBUG) {
 		std::cout << "Vocab size: " << unique_terms_found << std::endl;
 	}
 
-	num_docs = num_lines;
-	// Calc avg_doc_size
-	float sum = 0;
-	for (const auto& size : doc_sizes) {
-		sum += size;
-	}
-	avg_doc_size = sum / num_docs;
+	IP.num_docs = num_lines;
 
-	II.prev_doc_ids.clear();
-	II.prev_doc_ids.shrink_to_fit();
+	// Calc avg_doc_size
+	double avg_doc_size = 0;
+	for (const auto& size : IP.doc_sizes) {
+		avg_doc_size += (double)size;
+	}
+	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
+
+	IP.II.prev_doc_ids.clear();
+	IP.II.prev_doc_ids.shrink_to_fit();
+
+	for (auto& row : IP.II.inverted_index_compressed) {
+		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+			row.doc_ids.clear();
+			row.doc_ids.clear();
+			row.term_freqs.clear();
+			row.term_freqs.shrink_to_fit();
+		}
+	}
+
 
 	if (DEBUG) {
 		uint64_t total_size = 0;
-		for (const auto& row : II.inverted_index_compressed) {
+		for (const auto& row : IP.II.inverted_index_compressed) {
 			total_size += row.doc_ids.size();
 			total_size += 3 * row.term_freqs.size();
 		}
@@ -451,59 +663,50 @@ void _BM25::read_json() {
 	}
 }
 
-void _BM25::read_csv() {
+void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
+	FILE* f = reference_file_handles[partition_id];
+	BM25Partition& IP = index_partitions[partition_id];
+
 	// Quickly count number of lines in file
 	uint64_t num_lines = 0;
-	char buf[1024 * 1024];
-	while (size_t bytes_read = fread(buf, 1, sizeof(buf), reference_file)) {
+	uint64_t total_bytes_read = 0;
+	char buf[1024 * 64];
+
+	if (fseek(f, start_byte, SEEK_SET) != 0) {
+		std::cerr << "Error seeking file." << std::endl;
+		std::exit(1);
+	}
+
+	while (total_bytes_read < (end_byte - start_byte)) {
+		size_t bytes_read = fread(buf, 1, sizeof(buf), f);
+		if (bytes_read == 0) {
+			break;
+		}
+
 		for (size_t i = 0; i < bytes_read; ++i) {
 			if (buf[i] == '\n') {
 				++num_lines;
 			}
+			if (++total_bytes_read >= (end_byte - start_byte)) {
+				break;
+			}
 		}
 	}
-	num_docs = num_lines;
-	if (max_df < 2.0f) {
-		this->max_df = (int)num_docs * max_df;
-	}
-	printf("MAX DF: %d\n", (int)this->max_df);
+
+	IP.num_docs = num_lines;
 
 	// Reset file pointer to beginning
-	rewind(reference_file);
+	if (fseek(f, start_byte, SEEK_SET) != 0) {
+		std::cerr << "Error seeking file." << std::endl;
+		std::exit(1);
+	}
 
-	int search_column_index = -1;
-
-	// Read the file line by line
+		// Read the file line by line
 	char*    line = NULL;
 	size_t   len = 0;
 	ssize_t  read;
 	uint64_t line_num = 0;
-	uint64_t byte_offset = 0;
-
-	// Get col names
-	read = getline(&line, &len, reference_file);
-	std::istringstream iss(line);
-	std::string value;
-	while (std::getline(iss, value, ',')) {
-		if (value.find("\n") != std::string::npos) {
-			value.erase(value.find("\n"));
-		}
-		columns.push_back(value);
-		if (value == search_col) {
-			search_column_index = columns.size() - 1;
-		}
-	}
-
-	if (search_column_index == -1) {
-		std::cerr << "Search column not found in header" << std::endl;
-		std::cerr << "Cols found:  ";
-		for (size_t i = 0; i < columns.size(); ++i) {
-			std::cerr << columns[i] << ",";
-		}
-		std::cerr << std::endl;
-		exit(1);
-	}
-	byte_offset += ftell(reference_file);
+	uint64_t byte_offset = start_byte;
 
 	uint64_t unique_terms_found = 0;
 
@@ -511,20 +714,29 @@ void _BM25::read_csv() {
 	std::string doc = "";
 	doc.reserve(22);
 
-	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
+	char end_delim = ',';
+	if (search_col_idx == (int)columns.size() - 1) {
+		end_delim = '\n';
+	}
 
 	const int UPDATE_INTERVAL = 10000;
-	while ((read = getline(&line, &len, reference_file)) != -1) {
-		if (line_num % UPDATE_INTERVAL == 0) {
-			update_progress(line_num, num_lines);
+	while ((read = getline(&line, &len, f)) != -1) {
+
+		if (byte_offset >= end_byte) {
+			break;
 		}
-		line_offsets.push_back(byte_offset);
+
+		if (!DEBUG) {
+			if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, num_lines, partition_id);
+		}
+
+		IP.line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
 		// Iterate of line chars until we get to relevant column.
 		int char_idx = 0;
 		int col_idx  = 0;
-		while (col_idx != search_column_index) {
+		while (col_idx != search_col_idx) {
 			if (line[char_idx] == '"') {
 				// Skip to next quote.
 				++char_idx;
@@ -540,39 +752,58 @@ void _BM25::read_csv() {
 		}
 
 		// Split by commas not inside double quotes
-		char end_delim = ',';
-		if (search_column_index == (int)columns.size() - 1) {
-			end_delim = '\n';
-		}
 		if (line[char_idx] == '"') {
-			end_delim = '"';
 			++char_idx;
+			process_doc_partition(
+				&line[char_idx], 
+				'"', 
+				line_num, 
+				unique_terms_found, 
+				partition_id
+				);
+			++line_num;
+			continue;
 		}
 
-		process_doc(&line[char_idx], end_delim, line_num, unique_terms_found);
+		process_doc_partition(
+			&line[char_idx], 
+			end_delim,
+			line_num, 
+			unique_terms_found, 
+			partition_id
+			);
 		++line_num;
 	}
-	update_progress(line_num + 1, num_lines);
+	if (!DEBUG) update_progress(line_num + 1, num_lines, partition_id);
 
 	if (DEBUG) {
 		std::cout << "Vocab size: " << unique_terms_found << std::endl;
 	}
 
-	II.prev_doc_ids.clear();
-	II.prev_doc_ids.shrink_to_fit();
+	IP.II.prev_doc_ids.clear();
+	IP.II.prev_doc_ids.shrink_to_fit();
 
-	num_docs = doc_sizes.size();
+	IP.num_docs = IP.doc_sizes.size();
 
 	// Calc avg_doc_size
-	float sum = 0;
-	for (const auto& size : doc_sizes) {
-		sum += size;
+	double avg_doc_size = 0;
+	for (const auto& size : IP.doc_sizes) {
+		avg_doc_size += (double)size;
 	}
-	avg_doc_size = sum / num_docs;
+	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
+
+	for (auto& row : IP.II.inverted_index_compressed) {
+		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+			row.doc_ids.clear();
+			row.doc_ids.clear();
+			row.term_freqs.clear();
+			row.term_freqs.shrink_to_fit();
+		}
+	}
 
 	if (DEBUG) {
 		uint64_t total_size = 0;
-		for (const auto& row : II.inverted_index_compressed) {
+		for (const auto& row : IP.II.inverted_index_compressed) {
 			total_size += row.doc_ids.size();
 			total_size += 3 * row.term_freqs.size();
 		}
@@ -581,185 +812,15 @@ void _BM25::read_csv() {
 	}
 }
 
-void _BM25::read_csv_memmap() {
-	int fd = open(filename.c_str(), O_RDONLY);
-	if (fd == -1) {
-		std::cerr << "Error opening file for reading." << std::endl;
-		std::exit(1);
-	}
+std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num, uint16_t partition_id) {
+	FILE* f = reference_file_handles[partition_id];
+	BM25Partition& IP = index_partitions[partition_id];
 
-	struct stat sb;
-	if (fstat(fd, &sb) == -1) {
-		std::cerr << "Error getting file size." << std::endl;
-		close(fd);
-		std::exit(1);
-	}
-
-	size_t file_size = sb.st_size;
-
-	char* file_data = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (file_data == MAP_FAILED) {
-		std::cerr << "Error mapping file to memory." << std::endl;
-		close(fd);
-		std::exit(1);
-	}
-
-	close(fd);
-
-	// Quickly count number of lines in file
-	uint64_t num_lines = 0;
-	for (size_t i = 0; i < file_size; ++i) {
-		if (file_data[i] == '\\') {
-			i += 2;
-		}
-		if (file_data[i] == '"') {
-			// Skip to next quote.
-			while (file_data[i] != '"') ++i;
-			++i;
-		}
-		if (file_data[i] == '\n') {
-			++num_lines;
-		}
-	}
-
-	num_docs = num_lines;
-	if (max_df < 2.0f) {
-		this->max_df = (int)num_docs * max_df;
-	}
-	printf("MAX DF: %d\n", (int)this->max_df);
-
-	int search_column_index = -1;
-
-	// Read the file line by line
-	char*    line = NULL;
-	uint64_t line_num = 0;
-	uint64_t byte_offset = 0;
-
-	// Get col names
-	line = file_data;
-	std::istringstream iss(line);
-	std::string value;
-	while (*line != '\n' && *line != '\0') {
-		if (*line == ',') {
-            columns.push_back(value);
-            if (value == search_col) {
-                search_column_index = columns.size() - 1;
-            }
-            value.clear();
-        } else {
-            value.push_back(*line);
-        }
-        ++line;
-    }
-
-    if (!value.empty()) {
-        columns.push_back(value);
-        if (value == search_col) {
-            search_column_index = columns.size() - 1;
-        }
-    }
-
-	if (search_column_index == -1) {
-		std::cerr << "Search column not found in header" << std::endl;
-		std::cerr << "Cols found:  ";
-		for (size_t i = 0; i < columns.size(); ++i) {
-			std::cerr << columns[i] << ",";
-		}
-		std::cerr << std::endl;
-		exit(1);
-	}
-
-	++line;
-	byte_offset = line - file_data;
-
-	uint64_t unique_terms_found = 0;
-
-	// Small string optimization limit on most platforms
-	std::string doc = "";
-	doc.reserve(22);
-
-	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
-
-	const int UPDATE_INTERVAL = 10000;
-	// while ((read = getline(&line, &len, reference_file)) != -1) {
-	while (byte_offset < file_size) {
-		line = file_data + byte_offset;
-
-		if (line_num % UPDATE_INTERVAL == 0) {
-			update_progress(line_num, num_lines);
-		}
-		line_offsets.push_back(byte_offset);
-
-		// Iterate of line chars until we get to relevant column.
-		int char_idx = 0;
-		int col_idx  = 0;
-		while (col_idx != search_column_index) {
-			if (line[char_idx] == '"') {
-				// Skip to next quote.
-				++char_idx;
-				while (line[char_idx] == '"') {
-					++char_idx;
-				}
-			}
-
-			if (line[char_idx] == ',') {
-				++col_idx;
-			}
-			++char_idx;
-		}
-
-		// Split by commas not inside double quotes
-		char end_delim = ',';
-		if (search_column_index == (int)columns.size() - 1) {
-			end_delim = '\n';
-		}
-		if (line[char_idx] == '"') {
-			end_delim = '"';
-			++char_idx;
-		}
-
-		process_doc(&line[char_idx], end_delim, line_num, unique_terms_found);
-		++line_num;
-		byte_offset += strlen(line) + 1;
-	}
-	update_progress(line_num + 1, num_lines);
-
-	munmap(file_data, file_size);
-
-	if (DEBUG) {
-		std::cout << "Vocab size: " << unique_terms_found << std::endl;
-	}
-
-	II.prev_doc_ids.clear();
-	II.prev_doc_ids.shrink_to_fit();
-
-	num_docs = doc_sizes.size();
-
-	// Calc avg_doc_size
-	float sum = 0;
-	for (const auto& size : doc_sizes) {
-		sum += size;
-	}
-	avg_doc_size = sum / num_docs;
-
-	if (DEBUG) {
-		uint64_t total_size = 0;
-		for (const auto& row : II.inverted_index_compressed) {
-			total_size += row.doc_ids.size();
-			total_size += 3 * row.term_freqs.size();
-		}
-		total_size /= 1024 * 1024;
-		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
-	}
-}
-
-
-std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num) {
 	// seek from FILE* reference_file which is already open
-	fseek(reference_file, line_offsets[line_num], SEEK_SET);
+	fseek(f, IP.line_offsets[line_num], SEEK_SET);
 	char* line = NULL;
 	size_t len = 0;
-	ssize_t read = getline(&line, &len, reference_file);
+	ssize_t read = getline(&line, &len, f);
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
@@ -767,7 +828,6 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 	bool in_quotes = false;
 	size_t col_idx = 0;
 
-	// for (size_t i = 0; i < line.size(); ++i) {
 	for (size_t i = 0; i < (size_t)read - 1; ++i) {
 		if (line[i] == '"') {
 			in_quotes = !in_quotes;
@@ -786,12 +846,15 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 }
 
 
-std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_num) {
+std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_num, uint16_t partition_id) {
+	FILE* f = reference_file_handles[partition_id];
+	BM25Partition& IP = index_partitions[partition_id];
+
 	// seek from FILE* reference_file which is already open
-	fseek(reference_file, line_offsets[line_num], SEEK_SET);
+	fseek(f, IP.line_offsets[line_num], SEEK_SET);
 	char* line = NULL;
 	size_t len = 0;
-	getline(&line, &len, reference_file);
+	getline(&line, &len, f);
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
@@ -845,620 +908,50 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 	return row;
 }
 
-void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& filename) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file when serializing u8 vector.\n";
-        return;
-    }
-
-    // Write the size of the vector first
-    size_t size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-
-    // Write the vector elements
-	for (const auto& val : vec) {
-    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint8_t));
-	}
-
-    out_file.close();
-}
-
-void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file when serializing u32 vector.\n";
-        return;
-    }
-
-    // Write the size of the vector first
-    size_t size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-
-    // Write the vector elements
-	for (const auto& val : vec) {
-    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint32_t));
-	}
-
-    out_file.close();
-}
-
-void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& filename) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file when serializing u64 vector.\n";
-        return;
-    }
-
-    // Write the size of the vector first
-    size_t size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-
-    // Write the vector elements
-	for (const auto& val : vec) {
-    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint64_t));
-	}
-
-    out_file.close();
-}
-
-void serialize_vector_of_vectors_u8(
-		const std::vector<std::vector<uint8_t>>& vec, 
-		const std::string& filename
+void _BM25::save_index_partition(
+		std::string db_dir,
+		uint16_t partition_id
 		) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
+	std::string UNIQUE_TERM_MAPPING_PATH = db_dir + "/unique_term_mapping.bin";
+	std::string INVERTED_INDEX_PATH 	 = db_dir + "/inverted_index.bin";
+	std::string DOC_SIZES_PATH 		     = db_dir + "/doc_sizes.bin";
+	std::string LINE_OFFSETS_PATH 		 = db_dir + "/line_offsets.bin";
 
-    // Write the size of the outer vector first
-    size_t outer_size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+	BM25Partition& IP = index_partitions[partition_id];
 
-    for (const auto& inner_vec : vec) {
-        size_t inner_size = inner_vec.size();
-        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
-        
-        // Write the elements of the inner vector
-        if (!inner_vec.empty()) {
-            out_file.write(
-					reinterpret_cast<const char*>(inner_vec.data()), 
-					inner_vec.size() * sizeof(uint8_t)
-					);
-        }
-    }
+	serialize_robin_hood_flat_map_string_u64(
+			IP.unique_term_mapping, 
+			UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id)
+			);
+	serialize_inverted_index(IP.II, INVERTED_INDEX_PATH + "_" + std::to_string(partition_id));
+	serialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
-    out_file.close();
+	std::vector<uint8_t> compressed_line_offsets;
+	compressed_line_offsets.reserve(IP.line_offsets.size() * 2);
+	compress_uint64(IP.line_offsets, compressed_line_offsets);
+
+	serialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id));
 }
 
-void serialize_inverted_index(
-    const InvertedIndex& II, 
-    const std::string& filename
-) {
-    std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
-
-    size_t outer_size = II.inverted_index_compressed.size();
-    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
-
-    for (uint64_t idx = 0; idx < outer_size; ++idx) {
-        size_t inner_size_doc_ids = II.inverted_index_compressed[idx].doc_ids.size();
-        out_file.write(reinterpret_cast<const char*>(&inner_size_doc_ids), sizeof(inner_size_doc_ids));
-        
-        if (!II.inverted_index_compressed[idx].doc_ids.empty()) {
-            out_file.write(
-                reinterpret_cast<const char*>(II.inverted_index_compressed[idx].doc_ids.data()),
-                II.inverted_index_compressed[idx].doc_ids.size() * sizeof(uint8_t)
-            );
-        }
-
-        size_t inner_size_term_freqs = II.inverted_index_compressed[idx].term_freqs.size();
-        out_file.write(reinterpret_cast<const char*>(&inner_size_term_freqs), sizeof(inner_size_term_freqs));
-
-        if (!II.inverted_index_compressed[idx].term_freqs.empty()) {
-            out_file.write(
-                reinterpret_cast<const char*>(II.inverted_index_compressed[idx].term_freqs.data()),
-                II.inverted_index_compressed[idx].term_freqs.size() * sizeof(RLEElement_u8)
-            );
-        }
-    }
-
-    out_file.close();
-}
-
-void deserialize_inverted_index(
-    InvertedIndex& II, 
-    const std::string& filename
-) {
-    std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-    size_t outer_size;
-    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
-    II.inverted_index_compressed.resize(outer_size);
-
-    for (uint64_t idx = 0; idx < outer_size; ++idx) {
-        size_t inner_size_doc_ids;
-        in_file.read(reinterpret_cast<char*>(&inner_size_doc_ids), sizeof(inner_size_doc_ids));
-        II.inverted_index_compressed[idx].doc_ids.resize(inner_size_doc_ids);
-
-        if (inner_size_doc_ids > 0) {
-            in_file.read(
-                reinterpret_cast<char*>(II.inverted_index_compressed[idx].doc_ids.data()),
-                inner_size_doc_ids * sizeof(uint8_t)
-            );
-        }
-
-        size_t inner_size_term_freqs;
-        in_file.read(reinterpret_cast<char*>(&inner_size_term_freqs), sizeof(inner_size_term_freqs));
-        II.inverted_index_compressed[idx].term_freqs.resize(inner_size_term_freqs);
-
-        if (inner_size_term_freqs > 0) {
-            in_file.read(
-                reinterpret_cast<char*>(II.inverted_index_compressed[idx].term_freqs.data()),
-                inner_size_term_freqs * sizeof(RLEElement_u8)
-            );
-        }
-    }
-
-    in_file.close();
-}
-
-void serialize_vector_of_vectors_u32(
-		const std::vector<std::vector<uint32_t>>& vec, 
-		const std::string& filename
+void _BM25::load_index_partition(
+		std::string db_dir,
+		uint16_t partition_id
 		) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
+	std::string UNIQUE_TERM_MAPPING_PATH = db_dir + "/unique_term_mapping.bin";
+	std::string INVERTED_INDEX_PATH 	 = db_dir + "/inverted_index.bin";
+	std::string DOC_SIZES_PATH 		     = db_dir + "/doc_sizes.bin";
+	std::string LINE_OFFSETS_PATH 		 = db_dir + "/line_offsets.bin";
 
-    // Write the size of the outer vector first
-    size_t outer_size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+	BM25Partition& IP = index_partitions[partition_id];
 
-    for (const auto& inner_vec : vec) {
-        size_t inner_size = inner_vec.size();
-        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
-        
-        // Write the elements of the inner vector
-        if (!inner_vec.empty()) {
-            out_file.write(reinterpret_cast<const char*>(inner_vec.data()), inner_vec.size() * sizeof(uint32_t));
-        }
-    }
+	deserialize_robin_hood_flat_map_string_u64(IP.unique_term_mapping, UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id));
+	deserialize_inverted_index(IP.II, INVERTED_INDEX_PATH + "_" + std::to_string(partition_id));
+	deserialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
-    out_file.close();
-}
+	std::vector<uint8_t> compressed_line_offsets;
+	deserialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id));
 
-void serialize_vector_of_vectors_u64(
-		const std::vector<std::vector<uint64_t>>& vec, 
-		const std::string& filename
-		) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
-
-    // Write the size of the outer vector first
-    size_t outer_size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
-
-    for (const auto& inner_vec : vec) {
-        size_t inner_size = inner_vec.size();
-        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
-        
-        // Write the elements of the inner vector
-        if (!inner_vec.empty()) {
-            out_file.write(reinterpret_cast<const char*>(inner_vec.data()), inner_vec.size() * sizeof(uint64_t));
-        }
-    }
-
-    out_file.close();
-}
-
-void serialize_robin_hood_flat_map_string_u32(
-		const robin_hood::unordered_flat_map<std::string, uint32_t>& map,
-		const std::string& filename
-		) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
-
-    // Write the size of the map first
-    size_t map_size = map.size();
-    out_file.write(reinterpret_cast<const char*>(&map_size), sizeof(map_size));
-
-    for (const auto& [key, value] : map) {
-        size_t key_size = key.size();
-        out_file.write(reinterpret_cast<const char*>(&key_size), sizeof(key_size));
-        out_file.write(key.data(), key_size);
-        out_file.write(reinterpret_cast<const char*>(&value), sizeof(value));
-    }
-
-    out_file.close();
-}
-
-void serialize_robin_hood_flat_map_string_u64(
-		const robin_hood::unordered_flat_map<std::string, uint64_t>& map,
-		const std::string& filename
-		) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
-
-    // Write the size of the map first
-    size_t map_size = map.size();
-    out_file.write(reinterpret_cast<const char*>(&map_size), sizeof(map_size));
-
-    for (const auto& [key, value] : map) {
-        size_t key_size = key.size();
-        out_file.write(reinterpret_cast<const char*>(&key_size), sizeof(key_size));
-        out_file.write(key.data(), key_size);
-        out_file.write(reinterpret_cast<const char*>(&value), sizeof(value));
-    }
-
-    out_file.close();
-}
-
-void serialize_vector_of_vectors_pair_u32_u16(
-		const std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
-		const std::string& filename
-		) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
-
-    // Write the size of the outer vector
-    size_t outer_size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
-
-    // Iterate through the outer vector
-    for (const auto& inner_vec : vec) {
-        // Write the size of the inner vector
-        size_t inner_size = inner_vec.size();
-        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
-        
-        // Write the pairs
-        for (const auto& [first, second] : inner_vec) {
-            out_file.write(reinterpret_cast<const char*>(&first), sizeof(first));
-            out_file.write(reinterpret_cast<const char*>(&second), sizeof(second));
-        }
-    }
-
-    out_file.close();
-}
-
-void serialize_vector_of_vectors_pair_u64_u16(
-		const std::vector<std::vector<std::pair<uint64_t, uint16_t>>>& vec, 
-		const std::string& filename
-		) {
-	std::ofstream out_file(filename, std::ios::binary);
-    if (!out_file) {
-        std::cerr << "Error opening file for writing.\n";
-        return;
-    }
-
-    // Write the size of the outer vector
-    size_t outer_size = vec.size();
-    out_file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
-
-    // Iterate through the outer vector
-    for (const auto& inner_vec : vec) {
-        // Write the size of the inner vector
-        size_t inner_size = inner_vec.size();
-        out_file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
-        
-        // Write the pairs
-        for (const auto& [first, second] : inner_vec) {
-            out_file.write(reinterpret_cast<const char*>(&first), sizeof(first));
-            out_file.write(reinterpret_cast<const char*>(&second), sizeof(second));
-        }
-    }
-
-    out_file.close();
-}
-
-void deserialize_vector_u8(std::vector<uint8_t>& vec, const std::string& filename) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-    // Read the size of the vector
-    size_t size;
-    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
-
-    // Resize the vector and read its elements
-    vec.resize(size);
-    if (size > 0) {
-        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint8_t));
-    }
-
-    in_file.close();
-}
-
-void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-    // Read the size of the vector
-    size_t size;
-    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
-
-    // Resize the vector and read its elements
-    vec.resize(size);
-    if (size > 0) {
-        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint32_t));
-    }
-
-    in_file.close();
-}
-
-void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filename) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-    // Read the size of the vector
-    size_t size;
-    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
-
-    // Resize the vector and read its elements
-    vec.resize(size);
-    if (size > 0) {
-        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint64_t));
-    }
-
-    in_file.close();
-}
-
-void deserialize_vector_of_vectors_u8(
-		std::vector<std::vector<uint8_t>>& vec, 
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-	if (vec.size() > 0) {
-		vec.clear();
-	}
-
-	// Read the size of the outer vector
-    size_t outer_size;
-    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
-    vec.resize(outer_size);
-
-    // Iterate through the outer vector
-    for (auto& inner_vec : vec) {
-        // Read the size of the inner vector
-        size_t inner_size;
-        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
-        inner_vec.resize(inner_size);
-
-        // Read the elements of the inner vector
-        if (inner_size > 0) {
-            in_file.read(reinterpret_cast<char*>(inner_vec.data()), inner_size * sizeof(uint8_t));
-        }
-    }
-
-    in_file.close();
-}
-
-void deserialize_vector_of_vectors_u32(
-		std::vector<std::vector<uint32_t>>& vec, 
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-	if (vec.size() > 0) {
-		vec.clear();
-	}
-
-	// Read the size of the outer vector
-    size_t outer_size;
-    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
-    vec.resize(outer_size);
-
-    // Iterate through the outer vector
-    for (auto& inner_vec : vec) {
-        // Read the size of the inner vector
-        size_t inner_size;
-        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
-        inner_vec.resize(inner_size);
-
-        // Read the elements of the inner vector
-        if (inner_size > 0) {
-            in_file.read(reinterpret_cast<char*>(inner_vec.data()), inner_size * sizeof(uint32_t));
-        }
-    }
-
-    in_file.close();
-}
-
-
-void deserialize_vector_of_vectors_u64(
-		std::vector<std::vector<uint64_t>>& vec, 
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-	if (vec.size() > 0) {
-		vec.clear();
-	}
-
-	// Read the size of the outer vector
-    size_t outer_size;
-    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
-    vec.resize(outer_size);
-
-    // Iterate through the outer vector
-    for (auto& inner_vec : vec) {
-        // Read the size of the inner vector
-        size_t inner_size;
-        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
-        inner_vec.resize(inner_size);
-
-        // Read the elements of the inner vector
-        if (inner_size > 0) {
-            in_file.read(reinterpret_cast<char*>(inner_vec.data()), inner_size * sizeof(uint64_t));
-        }
-    }
-
-    in_file.close();
-}
-
-void deserialize_robin_hood_flat_map_string_u32(
-		robin_hood::unordered_flat_map<std::string, uint32_t>& map,
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-	// Read the size of the map
-    size_t map_size;
-    in_file.read(reinterpret_cast<char*>(&map_size), sizeof(map_size));
-
-    // Read each key-value pair and insert it into the map
-    for (size_t i = 0; i < map_size; ++i) {
-        size_t keySize;
-        in_file.read(reinterpret_cast<char*>(&keySize), sizeof(keySize));
-        
-        std::string key(keySize, '\0');
-        in_file.read(&key[0], keySize);
-
-        uint32_t value;
-        in_file.read(reinterpret_cast<char*>(&value), sizeof(value));
-
-        map[key] = value;
-    }
-
-    in_file.close();
-}
-
-void deserialize_robin_hood_flat_map_string_u64(
-		robin_hood::unordered_flat_map<std::string, uint64_t>& map,
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-	// Read the size of the map
-    size_t map_size;
-    in_file.read(reinterpret_cast<char*>(&map_size), sizeof(map_size));
-
-    // Read each key-value pair and insert it into the map
-    for (size_t i = 0; i < map_size; ++i) {
-        size_t keySize;
-        in_file.read(reinterpret_cast<char*>(&keySize), sizeof(keySize));
-        
-        std::string key(keySize, '\0');
-        in_file.read(&key[0], keySize);
-
-        uint64_t value;
-        in_file.read(reinterpret_cast<char*>(&value), sizeof(value));
-
-        map[key] = value;
-    }
-
-    in_file.close();
-}
-
-void deserialize_vector_of_vectors_pair_u32_u16(
-		std::vector<std::vector<std::pair<uint32_t, uint16_t>>>& vec, 
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-    // Read the size of the outer vector
-    size_t outer_size;
-    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
-    vec.resize(outer_size);
-
-    for (auto& inner_vec : vec) {
-        size_t inner_size;
-        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
-        inner_vec.resize(inner_size);
-
-        // Read the pairs
-        for (auto& [first, second] : inner_vec) {
-            in_file.read(reinterpret_cast<char*>(&first), sizeof(first));
-            in_file.read(reinterpret_cast<char*>(&second), sizeof(second));
-        }
-    }
-
-    in_file.close();
-}
-
-void deserialize_vector_of_vectors_pair_u64_u16(
-		std::vector<std::vector<std::pair<uint64_t, uint16_t>>>& vec, 
-		const std::string& filename
-		) {
-	std::ifstream in_file(filename, std::ios::binary);
-    if (!in_file) {
-        std::cerr << "Error opening file for reading.\n";
-        return;
-    }
-
-    // Read the size of the outer vector
-    size_t outer_size;
-    in_file.read(reinterpret_cast<char*>(&outer_size), sizeof(outer_size));
-    vec.resize(outer_size);
-
-    for (auto& inner_vec : vec) {
-        size_t inner_size;
-        in_file.read(reinterpret_cast<char*>(&inner_size), sizeof(inner_size));
-        inner_vec.resize(inner_size);
-
-        // Read the pairs
-        for (auto& [first, second] : inner_vec) {
-            in_file.read(reinterpret_cast<char*>(&first), sizeof(first));
-            in_file.read(reinterpret_cast<char*>(&second), sizeof(second));
-        }
-    }
-
-    in_file.close();
+	decompress_uint64(compressed_line_offsets, IP.line_offsets);
 }
 
 void _BM25::save_to_disk(const std::string& db_dir) {
@@ -1480,22 +973,15 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 	}
 
 	// Join paths
-	std::string UNIQUE_TERM_MAPPING_PATH = db_dir + "/unique_term_mapping.bin";
-	std::string INVERTED_INDEX_PATH 	 = db_dir + "/inverted_index.bin";
-	std::string DOC_SIZES_PATH 		     = db_dir + "/doc_sizes.bin";
-	std::string LINE_OFFSETS_PATH 		 = db_dir + "/line_offsets.bin";
-	std::string METADATA_PATH 			 = db_dir + "/metadata.bin";
+	std::string METADATA_PATH = db_dir + "/metadata.bin";
 
-	serialize_robin_hood_flat_map_string_u64(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
-	serialize_inverted_index(II, INVERTED_INDEX_PATH);
-	std::vector<uint8_t> compressed_doc_sizes;
-	std::vector<uint8_t> compressed_line_offsets;
-	compressed_doc_sizes.reserve(doc_sizes.size() * 2);
-	compressed_line_offsets.reserve(line_offsets.size() * 2);
-	compress_uint64(doc_sizes, compressed_doc_sizes);
-	compress_uint64(line_offsets, compressed_line_offsets);
-	serialize_vector_u8(compressed_doc_sizes, DOC_SIZES_PATH);
-	serialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH);
+	std::vector<std::thread> threads;
+	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
+		threads.push_back(std::thread(&_BM25::save_index_partition, this, db_dir, partition_id));
+	}
+	for (auto& thread : threads) {
+		thread.join();
+	}
 
 	// Serialize smaller members.
 	std::ofstream out_file(METADATA_PATH, std::ios::binary);
@@ -1507,10 +993,16 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 	// Write basic types directly
 	out_file.write(reinterpret_cast<const char*>(&num_docs), sizeof(num_docs));
 	out_file.write(reinterpret_cast<const char*>(&min_df), sizeof(min_df));
-	out_file.write(reinterpret_cast<const char*>(&avg_doc_size), sizeof(avg_doc_size));
 	out_file.write(reinterpret_cast<const char*>(&max_df), sizeof(max_df));
 	out_file.write(reinterpret_cast<const char*>(&k1), sizeof(k1));
 	out_file.write(reinterpret_cast<const char*>(&b), sizeof(b));
+	out_file.write(reinterpret_cast<const char*>(&num_partitions), sizeof(num_partitions));
+
+	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
+		BM25Partition& IP = index_partitions[partition_id];
+
+		out_file.write(reinterpret_cast<const char*>(&IP.avg_doc_size), sizeof(IP.avg_doc_size));
+	}
 
 	// Write enum as int
 	int file_type_int = static_cast<int>(file_type);
@@ -1555,15 +1047,6 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 	std::string LINE_OFFSETS_PATH 		 = db_dir + "/line_offsets.bin";
 	std::string METADATA_PATH 			 = db_dir + "/metadata.bin";
 
-	deserialize_robin_hood_flat_map_string_u64(unique_term_mapping, UNIQUE_TERM_MAPPING_PATH);
-	deserialize_inverted_index(II, INVERTED_INDEX_PATH);
-	std::vector<uint8_t> compressed_doc_sizes;
-	std::vector<uint8_t> compressed_line_offsets;
-	deserialize_vector_u8(compressed_doc_sizes, DOC_SIZES_PATH);
-	deserialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH);
-	decompress_uint64(compressed_doc_sizes, doc_sizes);
-	decompress_uint64(compressed_line_offsets, line_offsets);
-
 	// Load smaller members.
 	std::ifstream in_file(METADATA_PATH, std::ios::binary);
     if (!in_file) {
@@ -1574,10 +1057,30 @@ void _BM25::load_from_disk(const std::string& db_dir) {
     // Read basic types directly
     in_file.read(reinterpret_cast<char*>(&num_docs), sizeof(num_docs));
     in_file.read(reinterpret_cast<char*>(&min_df), sizeof(min_df));
-    in_file.read(reinterpret_cast<char*>(&avg_doc_size), sizeof(avg_doc_size));
     in_file.read(reinterpret_cast<char*>(&max_df), sizeof(max_df));
     in_file.read(reinterpret_cast<char*>(&k1), sizeof(k1));
     in_file.read(reinterpret_cast<char*>(&b), sizeof(b));
+	in_file.read(reinterpret_cast<char*>(&num_partitions), sizeof(num_partitions));
+
+	index_partitions.clear();
+	index_partitions.resize(num_partitions);
+
+	std::vector<std::thread> threads;
+
+	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
+		threads.push_back(std::thread(&_BM25::load_index_partition, this, db_dir, partition_id));
+	}
+
+	for (auto& thread : threads) {
+		thread.join();
+	}
+
+	// Load rest of metadata.
+	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
+		BM25Partition& IP = index_partitions[partition_id];
+
+		in_file.read(reinterpret_cast<char*>(&IP.avg_doc_size), sizeof(IP.avg_doc_size));
+	}
 
     // Read enum as int
     int file_type_int;
@@ -1625,34 +1128,82 @@ _BM25::_BM25(
 		float max_df,
 		float k1,
 		float b,
+		uint16_t num_partitions,
 		const std::vector<std::string>& _stop_words
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
 			b(b),
+			num_partitions(num_partitions),
 			search_col(search_col), 
 			filename(filename) {
+
+	progress_bars.resize(num_partitions);
 
 	for (const std::string& stop_word : _stop_words) {
 		stop_words.insert(stop_word);
 	}
 
-	reference_file = fopen(filename.c_str(), "r");
-	if (reference_file == NULL) {
-		std::cerr << "Unable to open file: " << filename << std::endl;
-		exit(1);
+	// Open file handles
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		FILE* f = fopen(filename.c_str(), "r");
+		if (f == NULL) {
+			std::cerr << "Unable to open file: " << filename << std::endl;
+			exit(1);
+		}
+		reference_file_handles.push_back(f);
 	}
 
 	auto overall_start = std::chrono::high_resolution_clock::now();
-	
+
+	std::vector<uint64_t> partition_boundaries;
+	std::vector<std::thread> threads;
+
+	index_partitions.resize(num_partitions);
+	num_docs = 0;
+
+	bool is_terminal = isatty(fileno(stdout));
+
+	int col;
+	if (is_terminal) {
+		get_cursor_position(init_cursor_row, col);
+		get_terminal_size(terminal_height, col);
+
+		if (terminal_height - init_cursor_row < num_partitions + 1) {
+			// Scroll and reposition cursor
+			std::cout << "\x1b[" << num_partitions + 1 << "S";
+			init_cursor_row -= num_partitions + 1;
+		}
+	}
+
 	// Read file to get documents, line offsets, and columns
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
-		read_csv();
-		// read_csv_memmap();
+
+		proccess_csv_header();
+		determine_partition_boundaries_csv(partition_boundaries);
+
+		// Launch num_partitions threads to read csv file
+		for (uint16_t i = 0; i < num_partitions; ++i) {
+			threads.push_back(std::thread(
+				[this, &partition_boundaries, i] {
+					read_csv(partition_boundaries[i], partition_boundaries[i + 1], i);
+				}
+			));
+		}
+
 		file_type = CSV;
 	}
 	else if (filename.substr(filename.size() - 4, 4) == "json") {
-		read_json();
+		determine_partition_boundaries_json(partition_boundaries);
+
+		// Launch num_partitions threads to read json file
+		for (uint16_t i = 0; i < num_partitions; ++i) {
+			threads.push_back(std::thread(
+				[this, &partition_boundaries, i] {
+					read_json(partition_boundaries[i], partition_boundaries[i + 1], i);
+				}
+			));
+		}
 		file_type = JSON;
 	}
 	else {
@@ -1660,14 +1211,11 @@ _BM25::_BM25(
 		std::exit(1);
 	}
 
-	for (auto& row : II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
-			row.doc_ids.clear();
-			row.doc_ids.clear();
-			row.term_freqs.clear();
-			row.term_freqs.shrink_to_fit();
-		}
+	for (auto& thread : threads) {
+		thread.join();
 	}
+
+	if (!DEBUG) finalize_progress_bar();
 
 	if (DEBUG) {
 		auto read_end = std::chrono::high_resolution_clock::now();
@@ -1683,11 +1231,13 @@ _BM25::_BM25(
 		float max_df,
 		float k1,
 		float b,
+		uint16_t num_partitions,
 		const std::vector<std::string>& _stop_words
 		) : min_df(min_df), 
 			max_df(max_df), 
 			k1(k1), 
-			b(b) {
+			b(b),
+			num_partitions(num_partitions) {
 	
 	for (const std::string& stop_word : _stop_words) {
 		stop_words.insert(stop_word);
@@ -1707,54 +1257,66 @@ _BM25::_BM25(
 	std::string doc = "";
 	doc.reserve(22);
 
-	// robin_hood::unordered_flat_set<uint64_t> terms_seen;
-	const int UPDATE_INTERVAL = 10000;
-	uint64_t doc_id = 0;
-	for (const std::string& line : documents) {
-		if (doc_id % UPDATE_INTERVAL == 0) {
-			// Clear existing line and print progress
-			update_progress(doc_id, num_docs);
-		}
-		process_doc(line.c_str(), '\0', doc_id, unique_terms_found);
+	index_partitions.resize(num_partitions);
 
-		++doc_id;
+	std::vector<uint64_t> partition_boundaries(num_partitions + 1);
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		partition_boundaries[i] = (uint64_t)i * (num_docs / num_partitions);
 	}
-	update_progress(doc_id, num_docs);
+	partition_boundaries[num_partitions] = num_docs;
 
-	avg_doc_size = 0.0f;
-	for (const uint64_t& size : doc_sizes) {
-		avg_doc_size += size;
+	// const int UPDATE_INTERVAL = 10000;
+
+	// Do on all partition w/ thread lib
+	std::vector<std::thread> threads;
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		threads.push_back(std::thread(
+			[&documents, &partition_boundaries, i, this] {
+				uint64_t doc_id = partition_boundaries[i];
+				uint64_t end = partition_boundaries[i + 1];
+				uint64_t unique_terms_found = 0;
+				std::string doc = "";
+				doc.reserve(22);
+				for (; doc_id < end; ++doc_id) {
+					process_doc_partition(documents[doc_id].c_str(), '\0', doc_id, unique_terms_found, i);
+				}
+			}
+		));
 	}
-	avg_doc_size /= num_docs;
 
 	if (DEBUG) {
 		std::cout << "Vocab size: " << unique_terms_found << std::endl;
 	}
 
-	II.prev_doc_ids.clear();
-	II.prev_doc_ids.shrink_to_fit();
+	for (auto& thread : threads) {
+		thread.join();
+	}
 
-	for (auto& row : II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
-			row.doc_ids.clear();
-			row.doc_ids.clear();
-			row.term_freqs.clear();
-			row.term_freqs.shrink_to_fit();
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		BM25Partition& IP = index_partitions[i];
+
+		IP.II.prev_doc_ids.clear();
+		IP.II.prev_doc_ids.shrink_to_fit();
+
+		for (auto& row : IP.II.inverted_index_compressed) {
+			if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+				row.doc_ids.clear();
+				row.doc_ids.clear();
+				row.term_freqs.clear();
+				row.term_freqs.shrink_to_fit();
+			}
 		}
 	}
 
-	// Calc avg_doc_size
-	float sum = 0;
-	for (const auto& size : doc_sizes) {
-		sum += size;
-	}
-	avg_doc_size = sum / num_docs;
-
 	if (DEBUG) {
 		uint64_t total_size = 0;
-		for (const auto& row : II.inverted_index_compressed) {
-			total_size += row.doc_ids.size();
-			total_size += 3 * row.term_freqs.size();
+
+		for (uint16_t i = 0; i < num_partitions; ++i) {
+			BM25Partition& IP = index_partitions[i];
+			for (const auto& row : IP.II.inverted_index_compressed) {
+				total_size += row.doc_ids.size();
+				total_size += 3 * row.term_freqs.size();
+			}
 		}
 		total_size /= 1024 * 1024;
 		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
@@ -1764,20 +1326,25 @@ _BM25::_BM25(
 inline float _BM25::_compute_bm25(
 		uint64_t doc_id,
 		float tf,
-		float idf
+		float idf,
+		uint16_t partition_id
 		) {
-	float doc_size = doc_sizes[doc_id];
+	BM25Partition& IP = index_partitions[partition_id];
 
-	return idf * tf / (tf + k1 * (1 - b + b * doc_size / avg_doc_size));
+	float doc_size = IP.doc_sizes[doc_id];
+
+	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.avg_doc_size));
 }
 
-std::vector<std::pair<uint64_t, float>> _BM25::query(
+std::vector<BM25Result> _BM25::_query_partition(
 		std::string& query, 
 		uint32_t k,
-		uint32_t init_max_df 
+		uint32_t query_max_df,
+		uint16_t partition_id
 		) {
 	auto start = std::chrono::high_resolution_clock::now();
 	std::vector<uint64_t> term_idxs;
+	BM25Partition& IP = index_partitions[partition_id];
 
 	std::string substr = "";
 	for (const char& c : query) {
@@ -1785,74 +1352,130 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 			substr += toupper(c); 
 			continue;
 		}
-		if (unique_term_mapping.find(substr) == unique_term_mapping.end()) {
+		if (IP.unique_term_mapping.find(substr) == IP.unique_term_mapping.end()) {
 			continue;
 		}
-		// if (II.inverted_index_compressed[unique_term_mapping[substr]].doc_ids.size() == 0) {
-		if (II.inverted_index_compressed[unique_term_mapping[substr]].doc_ids.size() < (uint64_t)min_df) {
+
+		if (IP.II.inverted_index_compressed[IP.unique_term_mapping[substr]].doc_ids.size() < (uint64_t)min_df) {
 			substr.clear();
 			continue;
 		}
-		term_idxs.push_back(unique_term_mapping[substr]);
+
+		term_idxs.push_back(IP.unique_term_mapping[substr]);
 		substr.clear();
 	}
 
-	if (unique_term_mapping.find(substr) != unique_term_mapping.end()) {
-		if (II.inverted_index_compressed[unique_term_mapping[substr]].doc_ids.size() > 0) {
-			term_idxs.push_back(unique_term_mapping[substr]);
+	if (IP.unique_term_mapping.find(substr) != IP.unique_term_mapping.end()) {
+		if (IP.II.inverted_index_compressed[IP.unique_term_mapping[substr]].doc_ids.size() > 0) {
+			term_idxs.push_back(IP.unique_term_mapping[substr]);
 		}
 	}
 
 	if (term_idxs.size() == 0) {
-		return std::vector<std::pair<uint64_t, float>>();
+		return std::vector<BM25Result>();
 	}
 
 	// Gather docs that contain at least one term from the query
 	// Uses dynamic max_df for performance
-	uint64_t local_max_df = std::min((uint64_t)init_max_df, (uint64_t)max_df);
 	robin_hood::unordered_map<uint64_t, float> doc_scores;
 
-	while (doc_scores.size() == 0) {
-		for (const uint64_t& term_idx : term_idxs) {
-			uint64_t df;
-			vbyte_decode_uint64(
-					II.inverted_index_compressed[term_idx].doc_ids.data(),
-					&df
-					);
+	double total_get_row_time = 0;
+	for (const uint64_t& term_idx : term_idxs) {
+		uint64_t df;
+		vbyte_decode_uint64(
+				IP.II.inverted_index_compressed[term_idx].doc_ids.data(),
+				&df
+				);
 
-			if (df > local_max_df) {
-				continue;
-			}
-			float idf = log((num_docs - df + 0.5) / (df + 0.5));
+		if (df > query_max_df) continue;
 
-			std::vector<uint64_t> results_vector = get_II_row(&II, term_idx);
-			uint64_t num_matches = (results_vector.size() - 1) / 2;
+		float idf = log((num_docs - df + 0.5) / (df + 0.5));
 
-			if (num_matches == 0) {
-				continue;
-			}
+		auto get_row_start = std::chrono::high_resolution_clock::now();
+		IIRow row = get_II_row(&IP.II, term_idx, k);
+		auto get_row_end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> get_row_elapsed_ms = get_row_end - get_row_start;
+		total_get_row_time += get_row_elapsed_ms.count();
+		uint64_t num_matches = row.doc_ids.size();
 
-			for (size_t i = 0; i < num_matches; ++i) {
-
-				uint64_t doc_id  = results_vector[i + 1];
-				float tf 		 = (float)results_vector[i + num_matches + 1];
-				float bm25_score = _compute_bm25(doc_id, tf, idf);
-
-				if (doc_scores.find(doc_id) == doc_scores.end()) {
-					doc_scores[doc_id] = bm25_score;
-				}
-				else {
-					doc_scores[doc_id] += bm25_score;
-				}
-			}
-
+		if (num_matches == 0) {
+			continue;
 		}
-		local_max_df *= 10;
 
-		if (local_max_df > num_docs || local_max_df > max_df) {
-			break;
+		// Partial sort row.doc_ids by row.term_freqs to get top k
+		std::vector<uint64_t> indices(num_matches);
+		for (uint64_t i = 0; i < num_matches; ++i) {
+			indices[i] = i;
+		}
+		std::partial_sort(
+			indices.begin(),
+			indices.begin() + std::min(num_matches, (uint64_t)k),
+			indices.end(),
+			[&row](uint64_t i, uint64_t j) {
+				return row.term_freqs[i] > row.term_freqs[j];
+			}
+		);
+
+		uint32_t cntr = 0;
+		for (const uint64_t& i : indices) {
+			if (cntr >= k) {
+				break;
+			}
+
+			uint64_t doc_id  = row.doc_ids[i];
+			float tf 		 = row.term_freqs[cntr];
+			float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id);
+
+			if (doc_scores.find(doc_id) == doc_scores.end()) {
+				doc_scores[doc_id] = bm25_score;
+			}
+			else {
+				doc_scores[doc_id] += bm25_score;
+			}
+			++cntr;
 		}
 	}
+
+	if (DEBUG) {
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+		std::cout << "Number of docs: " << doc_scores.size() << "   GATHER TIME: ";
+		std::cout << elapsed_ms.count() << "ms" << std::endl;
+
+		std::cout << "GET ROW TIME: " << total_get_row_time << "ms" << std::endl;
+		fflush(stdout);
+	}
+	
+	if (doc_scores.size() == 0) {
+		return std::vector<BM25Result>();
+	}
+
+	start = std::chrono::high_resolution_clock::now();
+	std::priority_queue<
+		BM25Result,
+		std::vector<BM25Result>,
+		_compare_bm25_result> top_k_docs;
+
+	for (const auto& pair : doc_scores) {
+		BM25Result result {
+			.doc_id = pair.first,
+			.score  = pair.second,
+			.partition_id = partition_id
+		};
+		top_k_docs.push(result);
+		if (top_k_docs.size() > k) {
+			top_k_docs.pop();
+		}
+	}
+
+	std::vector<BM25Result> result(top_k_docs.size());
+	int idx = top_k_docs.size() - 1;
+	while (!top_k_docs.empty()) {
+		result[idx] = top_k_docs.top();
+		top_k_docs.pop();
+		--idx;
+	}
+
 	if (DEBUG) {
 		auto end = std::chrono::high_resolution_clock::now();
 		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
@@ -1861,25 +1484,56 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		std::cout << elapsed_ms.count() << "ms" << std::endl;
 		fflush(stdout);
 	}
-	
-	if (doc_scores.size() == 0) {
-		return std::vector<std::pair<uint64_t, float>>();
+
+	return result;
+}
+
+std::vector<BM25Result> _BM25::query(
+		std::string& query, 
+		uint32_t k,
+		uint32_t query_max_df
+		) {
+	auto start = std::chrono::high_resolution_clock::now();
+
+	std::vector<std::thread> threads;
+	std::vector<std::vector<BM25Result>> results(num_partitions);
+
+	// _query_partition on each thread
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		threads.push_back(std::thread(
+			[this, &query, k, query_max_df, i, &results] {
+				results[i] = _query_partition(query, k, query_max_df, i);
+			}
+		));
 	}
 
-	start = std::chrono::high_resolution_clock::now();
-	std::priority_queue<
-		std::pair<uint64_t, float>, 
-		std::vector<std::pair<uint64_t, float>>, 
-		_compare_64> top_k_docs;
+	for (auto& thread : threads) {
+		thread.join();
+	}
 
-	for (const auto& pair : doc_scores) {
-		top_k_docs.push(std::make_pair(pair.first, pair.second));
-		if (top_k_docs.size() > k) {
-			top_k_docs.pop();
+	if (results.size() == 0) {
+		return std::vector<BM25Result>();
+	}
+
+	uint64_t total_matching_docs = 0;
+
+	// Join results. Keep global max heap of size k
+	std::priority_queue<
+		BM25Result,
+		std::vector<BM25Result>,
+		_compare_bm25_result> top_k_docs;
+
+	for (const auto& partition_results : results) {
+		total_matching_docs += partition_results.size();
+		for (const auto& pair : partition_results) {
+			top_k_docs.push(pair);
+			if (top_k_docs.size() > k) {
+				top_k_docs.pop();
+			}
 		}
 	}
-
-	std::vector<std::pair<uint64_t, float>> result(top_k_docs.size());
+	
+	std::vector<BM25Result> result(top_k_docs.size());
 	int idx = top_k_docs.size() - 1;
 	while (!top_k_docs.empty()) {
 		result[idx] = top_k_docs.top();
@@ -1887,27 +1541,35 @@ std::vector<std::pair<uint64_t, float>> _BM25::query(
 		--idx;
 	}
 
+	if (DEBUG) {
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+		std::cout << "QUERY: " << query << std::endl;
+		std::cout << "Total matching docs: " << total_matching_docs << "    ";
+		std::cout << elapsed_ms.count() << "ms" << std::endl;
+		fflush(stdout);
+	}
+
 	return result;
 }
-
 
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& _query,
 		uint32_t top_k,
-		uint32_t init_max_df
+		uint32_t query_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	std::vector<std::pair<uint64_t, float>> top_k_docs = query(_query, top_k, init_max_df);
+	std::vector<BM25Result> top_k_docs = query(_query, top_k, query_max_df);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;
 	for (size_t i = 0; i < top_k_docs.size(); ++i) {
 		switch (file_type) {
 			case CSV:
-				row = get_csv_line(top_k_docs[i].first);
+				row = get_csv_line(top_k_docs[i].doc_id, top_k_docs[i].partition_id);
 				break;
 			case JSON:
-				row = get_json_line(top_k_docs[i].first);
+				row = get_json_line(top_k_docs[i].doc_id, top_k_docs[i].partition_id);
 				break;
 			case IN_MEMORY:
 				std::cout << "Error: In-memory data not supported for this function." << std::endl;
@@ -1918,7 +1580,7 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 				std::exit(1);
 				break;
 		}
-		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].second)));
+		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].score)));
 		result.push_back(row);
 	}
 	return result;

@@ -1,5 +1,5 @@
-- Add run length encoding to term frequencies before vbyte compression. **Mostly ones there.
-- Try out multithreaded indexing and merging.
+- Try to only have to decode top-k doc_ids from inverted index. Will likely need to resort and rethink things.
+- Implement index merging.
 - Publish to pypi.
 - Consider allowing ngram tokenization.
 - Make tests more robust.

@@ -1,22 +1,25 @@
 from rapid_bm25 import BM25
 import pandas as pd
+import polars as pl
 import numpy as np
 import os
 from tqdm import tqdm
 from time import perf_counter
 
 
-def test_okapi_bm25(csv_filename: str):
+def test_okapi_bm25(csv_filename: str, search_col: str):
     from rank_bm25 import BM25Okapi
 
-    df = pd.read_csv(csv_filename)
-    names = df['name']
+    df = pl.read_csv(csv_filename)
+    names = df.select(search_col)
 
-    rand_idxs = np.random.choice(len(names), 10_000, replace=False)
-    companies_sample = names.iloc[rand_idxs]
+    companies_sample = names.select(search_col).sample(10_000).to_pandas()[search_col]
 
     init = perf_counter()
-    tokenized_names = [name.split() for name in tqdm(names, desc="Tokenizing")]
+    ## tokenized_names = [name.split() for name in tqdm(names, desc="Tokenizing")]
+    tokenized_names = names.with_columns(
+        pl.col(search_col).fill_null('').str.split(' ').alias('tokens')
+    ).select("tokens").to_series(0).to_list()
     bm25 = BM25Okapi(tokenized_names)
     print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
 
@@ -27,11 +30,14 @@ def test_okapi_bm25(csv_filename: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
 
-def test_retriv(csv_filename: str):
+def test_retriv(csv_filename: str, search_col: str):
     from retriv import SparseRetriever
 
     df = pd.read_csv(csv_filename)
-    names = df['name']
+    names = df[search_col]
+
+    ## rename index id
+    df['id'] = df.index.astype(str)
 
     rand_idxs = np.random.choice(len(names), 10_000, replace=False)
     companies_sample = names.iloc[rand_idxs]
@@ -42,17 +48,18 @@ def test_retriv(csv_filename: str):
         path=csv_filename,
         show_progress=True,
         callback=lambda doc: {
-            "id": doc["domain"],
-            "text": doc["name"]
+            "id": doc['id'],
+            "text": doc[search_col]
         }
     )
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     for company in tqdm(companies_sample, desc="Querying"):
+        company = str(company)
         model.search(
             query=company, 
             return_docs=True,
-            cutoff=10
+            cutoff=100
             )
 
 
@@ -90,26 +97,25 @@ def test_duckdb(csv_filename: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
 
-def test_anserini(csv_filename: str):
+def test_anserini(csv_filename: str, search_col: str):
     from pyserini.search import LuceneSearcher
     from pyserini.index.lucene import LuceneIndexer
 
     ## convert to json
-    df = pd.read_csv(csv_filename).fillna('')
-    companies_sample = df['name'].sample(10_000)
-    ## companies_sample = df['text'].sample(10_000)
+    df = pl.read_csv(csv_filename)
+    df = df.fill_null('')
+    companies_sample = df.select(search_col).sample(10_000)
 
-    df.rename(columns={'name': 'contents', 'domain': 'id'}, inplace=True)
-    ## df.rename(columns={'text': 'contents'}, inplace=True)
-    df['id'] = df.index.astype(str)
+    df = df.with_columns(pl.lit(np.arange(len(df))).cast(str).alias('id'))
+
+    df = df.with_columns(pl.col(search_col).alias('contents'))
     os.system('rm -rf tmp_data_dir')
     os.system('mkdir tmp_data_dir')
 
-    records = df.to_dict(orient='records')
+    records = df.to_dicts()
 
     init = perf_counter()
-    ## writer = LuceneIndexer('tmp_data_dir', append=True, threads=1)
-    writer = LuceneIndexer('tmp_data_dir', append=True)
+    writer = LuceneIndexer('tmp_data_dir', append=True, threads=1)
     writer.add_batch_dict(records)
     writer.close()
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
@@ -118,8 +124,9 @@ def test_anserini(csv_filename: str):
     searcher = LuceneSearcher('tmp_data_dir')
     lens = []
     for company in tqdm(companies_sample, desc="Querying"):
-        hits = searcher.search(company, k=1000)
+        hits = searcher.search(company, k=10)
         lens.append(len(hits))
+
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
     print(f"Average number of hits: {np.mean(lens)}")
     print(f"Median number of hits:  {np.median(lens)}")
@@ -174,19 +181,24 @@ def test_bm25_csv(csv_filename: str, search_col: str):
     sample = df[search_col].fillna('').astype(str).values
 
     init = perf_counter()
-    ## model = BM25(max_df=20_000, stopwords='english')
-    model = BM25(stopwords='english')
+    model = BM25(max_df=25_000, stopwords='english')
+    ## model = BM25(stopwords='english')
     model.index_file(filename=csv_filename, text_col=search_col)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     ## Save and load
+    init = perf_counter()
     model.save(db_dir='bm25_model')
+    print(f"Time to save: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
     model.load(db_dir='bm25_model')
+    print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     lens = []
     init = perf_counter()
     for query in tqdm(sample, desc="Querying"):
-        results = model.get_topk_docs(query, k=1000)
+        results = model.get_topk_docs(query, k=100)
         lens.append(len(results))
     time = perf_counter() - init
 
@@ -255,18 +267,21 @@ if __name__ == '__main__':
     ## JSON_FILENAME = os.path.join(CURRENT_DIR, '../../search-benchmark-game', 'corpus.json')
 
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'corpus.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, '../../SuffixArray/searchapp_demo', 'companies_700M.csv')
 
     PARQUET_FILENAME = os.path.join(CURRENT_DIR, '../../SearchApp/data', 'companies_sorted.parquet')
 
-    ## test_okapi_bm25(FILENAME)
-    ## test_retriv(CSV_FILENAME)
+
+    ## test_okapi_bm25(CSV_FILENAME, search_col='title')
+    ## test_retriv(CSV_FILENAME, search_col='title')
     ## test_duckdb(FILENAME)
-    ## test_anserini(CSV_FILENAME)
+    ## test_anserini(CSV_FILENAME, search_col='title')
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_col='text')
-    test_bm25_csv(CSV_FILENAME, search_col='name')
+    ## test_bm25_csv(CSV_FILENAME, search_col='name')
+    test_bm25_csv(CSV_FILENAME, search_col='title')
     ## test_bm25_json(JSON_FILENAME, search_col='text')
     ## test_bm25_parquet(PARQUET_FILENAME, search_col='name')
     ## test_documents(CSV_FILENAME, search_col='name')
