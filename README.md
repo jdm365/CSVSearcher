@@ -109,20 +109,3 @@ DB_DIR = 'bm25_db'
 model.save(db_dir=DB_DIR)
 model.load(db_dir=DB_DIR)
 ```
-
-In earlier stages at the moment and likely still buggy and potentially incorrect. 
-Currently all text is converted to utf-8 and upper cased and only whitespace
-tokenization is supported.
-
-An inverted index structure and dynamic init_max_df are used for faster lookup much
-like Lucene and other full-text search engines. It also removes some of the constant
-factors from the Okapi-BM25 scoring which do not affect ordering of the results.
-This code uses the Robin Hood library from c/c++ for hashing
-which boosts performance further.
-
-As best I can tell this search is on-par or slightly faster than other python library
-equivalents (which use inverted indexees) and can index documents (especially shorter docs)
-much faster than other libraries I've tested like rank_bm25, retriv, and anserini, though
-this needs to be proved further.
-
-As of now the only dependency is the c++ stdlib.
