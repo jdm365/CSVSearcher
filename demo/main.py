@@ -97,11 +97,13 @@ if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
     DATA_DIR = os.path.join(CURRENT_DIR, '../tests')
     FILENAME = 'mb.csv'
+    SEARCH_COL = 'title'
+
     FILEPATH = os.path.join(DATA_DIR, FILENAME)
 
     search_app = SearchApp(
-            filename=os.path.join(DATA_DIR, FILENAME),
-            search_col='title'
+            filename=FILEPATH,
+            search_col=SEARCH_COL
             )
 
     os.system("open index.html")
