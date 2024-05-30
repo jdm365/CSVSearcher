@@ -44,11 +44,11 @@ class SearchApp:
         self.filename = filename
         self.bm25 = BM25(
                 min_df=1,
-                max_df=0.25,
-                num_partitions=24
+                ## max_df=0.5,
                 )
         self.save_dir = filename.split('/')[-1].replace('.csv', '_db')
         try:
+            raise Exception("Not loading BM25 index")
             self.bm25.load(db_dir=self.save_dir)
         except Exception as e:
             print(f"Error loading BM25 index: {e}")
@@ -94,18 +94,16 @@ class SearchApp:
 
 
 if __name__ == '__main__':
-    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_DIR = os.path.join(CURRENT_DIR, '../tests')
-    FILENAME = 'mb.csv'
-    SEARCH_COL = 'title'
+    CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
 
-    FILEPATH = os.path.join(DATA_DIR, FILENAME)
+    FILEPATH = "/Users/jakemehlman/ers_serverless/opensearch/all_nodes_opensearch.csv"
+    SEARCH_COL = 'er_name'
 
     search_app = SearchApp(
             filename=FILEPATH,
             search_col=SEARCH_COL
             )
 
-    os.system("open index.html")
+    os.system(f"open {CURRENT_DIR}/index.html")
 
     app.run()

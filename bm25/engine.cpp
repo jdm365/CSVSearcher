@@ -308,6 +308,7 @@ void _BM25::process_doc_partition(
 				++unique_terms_found;
 			}
 			else {
+				/*
 				if (check_rle_u8_row_size(IP.II.inverted_index_compressed[it->second].term_freqs, max_df)) {
 					if (IP.II.inverted_index_compressed[it->second].doc_ids.size() >= 0) {
 						IP.II.inverted_index_compressed[it->second].doc_ids.clear();
@@ -320,6 +321,7 @@ void _BM25::process_doc_partition(
 					++doc_size;
 					continue;
 				}
+				*/
 
 				// Term already exists
 				if (terms_seen.find(it->second) == terms_seen.end()) {
@@ -454,13 +456,6 @@ IIRow get_II_row(
 			II->inverted_index_compressed[term_idx].doc_ids,
 			row.doc_ids
 			);
-	/*
-	decompress_uint64_partial(
-			II->inverted_index_compressed[term_idx].doc_ids,
-			row.doc_ids,
-			k
-			);
-			*/
 
 	// Convert doc_ids back to absolute values
 	for (size_t i = 1; i < row.doc_ids.size(); ++i) {
@@ -1216,7 +1211,27 @@ _BM25::_BM25(
 		thread.join();
 	}
 
+	num_docs = 0;
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		num_docs += index_partitions[i].num_docs;
+	}
+
 	if (!DEBUG) finalize_progress_bar();
+
+	uint64_t total_size = 0;
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		BM25Partition& IP = index_partitions[i];
+
+		uint64_t part_size = 0;
+		for (const auto& row : IP.II.inverted_index_compressed) {
+			part_size += row.doc_ids.size();
+			part_size += 3 * row.term_freqs.size();
+		}
+		total_size += part_size;
+		printf("Partition %u: %luMB\n", i, part_size / (1024 * 1024));
+	}
+	total_size /= 1024 * 1024;
+	std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
 
 	if (DEBUG) {
 		auto read_end = std::chrono::high_resolution_clock::now();
@@ -1363,6 +1378,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 		}
 
 		term_idxs.push_back(IP.unique_term_mapping[substr]);
+		printf("Term: %s ID: %lu\n", substr.c_str(), IP.unique_term_mapping[substr]);
 		substr.clear();
 	}
 
@@ -1370,6 +1386,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 		if (IP.II.inverted_index_compressed[IP.unique_term_mapping[substr]].doc_ids.size() > 0) {
 			term_idxs.push_back(IP.unique_term_mapping[substr]);
 		}
+		printf("Term: %s ID: %lu\n", substr.c_str(), IP.unique_term_mapping[substr]);
 	}
 
 	if (term_idxs.size() == 0) {
@@ -1382,35 +1399,32 @@ std::vector<BM25Result> _BM25::_query_partition(
 
 	double total_get_row_time = 0;
 	for (const uint64_t& term_idx : term_idxs) {
-		uint64_t df;
-		vbyte_decode_uint64(
-				IP.II.inverted_index_compressed[term_idx].doc_ids.data(),
-				&df
-				);
+		uint64_t df = get_rle_u8_row_size(IP.II.inverted_index_compressed[term_idx].term_freqs);
+
+		if (df == 0) {
+			continue;
+		}
 
 		if (df > query_max_df) continue;
+		printf("Term: %lu DF: %lu\n\n", term_idx, df);
 
 		float idf = log((num_docs - df + 0.5) / (df + 0.5));
+		printf("Num docs: %lu DF: %lu IDF: %f\n", num_docs, df, idf);
 
 		auto get_row_start = std::chrono::high_resolution_clock::now();
 		IIRow row = get_II_row(&IP.II, term_idx, k);
 		auto get_row_end = std::chrono::high_resolution_clock::now();
 		std::chrono::duration<double, std::milli> get_row_elapsed_ms = get_row_end - get_row_start;
 		total_get_row_time += get_row_elapsed_ms.count();
-		uint64_t num_matches = row.doc_ids.size();
-
-		if (num_matches == 0) {
-			continue;
-		}
 
 		// Partial sort row.doc_ids by row.term_freqs to get top k
-		std::vector<uint64_t> indices(num_matches);
-		for (uint64_t i = 0; i < num_matches; ++i) {
+		std::vector<uint64_t> indices(df);
+		for (uint64_t i = 0; i < df; ++i) {
 			indices[i] = i;
 		}
 		std::partial_sort(
 			indices.begin(),
-			indices.begin() + std::min(num_matches, (uint64_t)k),
+			indices.begin() + std::min(df, (uint64_t)k),
 			indices.end(),
 			[&row](uint64_t i, uint64_t j) {
 				return row.term_freqs[i] > row.term_freqs[j];
@@ -1419,9 +1433,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 
 		uint32_t cntr = 0;
 		for (const uint64_t& i : indices) {
-			if (cntr >= k) {
-				break;
-			}
+			// if (cntr >= k) break;
 
 			uint64_t doc_id  = row.doc_ids[i];
 			float tf 		 = row.term_freqs[cntr];

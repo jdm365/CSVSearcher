@@ -46,7 +46,7 @@ cdef extern from "engine.h":
                 uint16_t num_partitions,
                 const vector[string]& stopwords
                 ) nogil
-        _BM25(string db_dir)
+        _BM25(string db_dir) nogil
         _BM25(
                 vector[string]& documents,
                 int   min_df,
@@ -62,8 +62,8 @@ cdef extern from "engine.h":
                 uint32_t k, 
                 uint32_t query_max_df
                 ) nogil 
-        void save_to_disk(string db_dir)
-        void load_from_disk(string db_dir)
+        void save_to_disk(string db_dir) nogil
+        void load_from_disk(string db_dir) nogil
 
 
 cdef class BM25:
@@ -261,17 +261,19 @@ cdef class BM25:
 
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
+        cdef string _query = query.upper().encode("utf-8")
 
         if self.filename == "in_memory":
             raise RuntimeError("""
                 Cannot get topk docs when documents were provided instead of a filename
             """)
         else:
-            results = self.bm25.get_topk_internal(
-                    query.upper().encode("utf-8"), 
-                    k, 
-                    query_max_df
-                    )
+            with nogil:
+                results = self.bm25.get_topk_internal(
+                        _query,
+                        k, 
+                        query_max_df
+                        )
 
         for idx in range(len(results)):
             _dict = {}
