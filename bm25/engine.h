@@ -209,13 +209,11 @@ class _BM25 {
 				uint16_t partition_id
 				);
 
-		// std::vector<std::pair<uint64_t, float>> query(
 		std::vector<BM25Result> query(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df
 				);
-		// std::vector<std::pair<uint64_t, float>> _query_partition(
 		std::vector<BM25Result> _query_partition(
 				std::string& query,
 				uint32_t top_k,

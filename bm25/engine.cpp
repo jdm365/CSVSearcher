@@ -191,6 +191,7 @@ void _BM25::proccess_csv_header() {
 			std::cerr << columns[i] << ",";
 		}
 		std::cerr << std::endl;
+		std::cout << std::flush;
 		exit(1);
 	}
 
