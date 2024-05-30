@@ -79,7 +79,7 @@ inline IIRow get_II_row(
 typedef struct {
 	InvertedIndex II;
 	robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
-	std::vector<uint64_t> doc_sizes;
+	std::vector<uint16_t> doc_sizes;
 	std::vector<uint64_t> line_offsets;
 
 	uint64_t num_docs;
@@ -213,20 +213,20 @@ class _BM25 {
 		std::vector<BM25Result> query(
 				std::string& query,
 				uint32_t top_k,
-				uint32_t init_max_df
+				uint32_t query_max_df
 				);
 		// std::vector<std::pair<uint64_t, float>> _query_partition(
 		std::vector<BM25Result> _query_partition(
 				std::string& query,
 				uint32_t top_k,
-				uint32_t init_max_df,
+				uint32_t query_max_df,
 				uint16_t partition_id
 				);
 
 		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(
 				std::string& _query,
 				uint32_t top_k,
-				uint32_t init_max_df
+				uint32_t query_max_df
 				);
 
 		void update_progress(int line_num, int num_lines, uint16_t partition_id);

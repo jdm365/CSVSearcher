@@ -49,7 +49,7 @@ void reset_terminal_mode() {
 }
 
 // Function to query the cursor position
-void get_cursor_position(int &rows, int &cols) {
+void get_cursor_position(int& rows, int& cols) {
     set_raw_mode();
 
     // Send the ANSI code to report cursor position
@@ -82,7 +82,7 @@ void get_cursor_position(int &rows, int &cols) {
     cols = cols_temp;
 }
 
-void get_terminal_size(int &rows, int &cols) {
+void get_terminal_size(int& rows, int& cols) {
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
         perror("ioctl");
@@ -395,7 +395,7 @@ void _BM25::process_doc_partition(
 		++doc_size;
 	}
 
-	IP.doc_sizes.push_back(doc_size);
+	IP.doc_sizes.push_back((uint16_t)doc_size);
 }
 
 
@@ -792,7 +792,6 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 	}
 	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
 
-	/*
 	for (auto& row : IP.II.inverted_index_compressed) {
 		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
 			row.doc_ids.clear();
@@ -801,7 +800,6 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 			row.term_freqs.shrink_to_fit();
 		}
 	}
-	*/
 
 	if (DEBUG) {
 		uint64_t total_size = 0;
@@ -926,15 +924,12 @@ void _BM25::save_index_partition(
 			UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id)
 			);
 	serialize_inverted_index(IP.II, INVERTED_INDEX_PATH + "_" + std::to_string(partition_id));
+	serialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
-	std::vector<uint8_t> compressed_doc_sizes;
 	std::vector<uint8_t> compressed_line_offsets;
-	compressed_doc_sizes.reserve(IP.doc_sizes.size() * 2);
 	compressed_line_offsets.reserve(IP.line_offsets.size() * 2);
-	compress_uint64(IP.doc_sizes, compressed_doc_sizes);
 	compress_uint64(IP.line_offsets, compressed_line_offsets);
 
-	serialize_vector_u8(compressed_doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 	serialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id));
 }
 
@@ -951,13 +946,11 @@ void _BM25::load_index_partition(
 
 	deserialize_robin_hood_flat_map_string_u64(IP.unique_term_mapping, UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id));
 	deserialize_inverted_index(IP.II, INVERTED_INDEX_PATH + "_" + std::to_string(partition_id));
+	deserialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
-	std::vector<uint8_t> compressed_doc_sizes;
 	std::vector<uint8_t> compressed_line_offsets;
-	deserialize_vector_u8(compressed_doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 	deserialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id));
 
-	decompress_uint64(compressed_doc_sizes, IP.doc_sizes);
 	decompress_uint64(compressed_line_offsets, IP.line_offsets);
 }
 
@@ -1346,7 +1339,7 @@ inline float _BM25::_compute_bm25(
 std::vector<BM25Result> _BM25::_query_partition(
 		std::string& query, 
 		uint32_t k,
-		uint32_t init_max_df,
+		uint32_t query_max_df,
 		uint16_t partition_id
 		) {
 	auto start = std::chrono::high_resolution_clock::now();
@@ -1376,10 +1369,6 @@ std::vector<BM25Result> _BM25::_query_partition(
 		if (IP.II.inverted_index_compressed[IP.unique_term_mapping[substr]].doc_ids.size() > 0) {
 			term_idxs.push_back(IP.unique_term_mapping[substr]);
 		}
-		else {
-			printf("Term %s has too few docs\n", substr.c_str());
-		}
-
 	}
 
 	if (term_idxs.size() == 0) {
@@ -1388,7 +1377,6 @@ std::vector<BM25Result> _BM25::_query_partition(
 
 	// Gather docs that contain at least one term from the query
 	// Uses dynamic max_df for performance
-	uint64_t local_max_df = std::min((uint64_t)init_max_df, (uint64_t)max_df);
 	robin_hood::unordered_map<uint64_t, float> doc_scores;
 
 	double total_get_row_time = 0;
@@ -1399,7 +1387,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 				&df
 				);
 
-		// if (df > local_max_df) continue;
+		if (df > query_max_df) continue;
 
 		float idf = log((num_docs - df + 0.5) / (df + 0.5));
 
@@ -1503,7 +1491,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 std::vector<BM25Result> _BM25::query(
 		std::string& query, 
 		uint32_t k,
-		uint32_t init_max_df
+		uint32_t query_max_df
 		) {
 	auto start = std::chrono::high_resolution_clock::now();
 
@@ -1513,8 +1501,8 @@ std::vector<BM25Result> _BM25::query(
 	// _query_partition on each thread
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		threads.push_back(std::thread(
-			[this, &query, k, init_max_df, i, &results] {
-				results[i] = _query_partition(query, k, init_max_df, i);
+			[this, &query, k, query_max_df, i, &results] {
+				results[i] = _query_partition(query, k, query_max_df, i);
 			}
 		));
 	}
@@ -1568,10 +1556,10 @@ std::vector<BM25Result> _BM25::query(
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& _query,
 		uint32_t top_k,
-		uint32_t init_max_df
+		uint32_t query_max_df
 		) {
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	std::vector<BM25Result> top_k_docs = query(_query, top_k, init_max_df);
+	std::vector<BM25Result> top_k_docs = query(_query, top_k, query_max_df);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;

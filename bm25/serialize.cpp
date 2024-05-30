@@ -28,6 +28,25 @@ void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& fil
     out_file.close();
 }
 
+void serialize_vector_u16(const std::vector<uint16_t>& vec, const std::string& filename) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file when serializing u8 vector.\n";
+        return;
+    }
+
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint16_t));
+	}
+
+    out_file.close();
+}
+
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename) {
 	std::ofstream out_file(filename, std::ios::binary);
     if (!out_file) {
@@ -352,6 +371,26 @@ void deserialize_vector_u8(std::vector<uint8_t>& vec, const std::string& filenam
     vec.resize(size);
     if (size > 0) {
         in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint8_t));
+    }
+
+    in_file.close();
+}
+
+void deserialize_vector_u16(std::vector<uint16_t>& vec, const std::string& filename) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint16_t));
     }
 
     in_file.close();
