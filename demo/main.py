@@ -95,9 +95,9 @@ class SearchApp:
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
-
-    FILEPATH = "/Users/jakemehlman/ers_serverless/opensearch/all_nodes_opensearch.csv"
-    SEARCH_COL = 'er_name'
+    DATA_DIR = f"{CURRENT_DIR}/../tests"
+    FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
+    SEARCH_COL = 'title'
 
     search_app = SearchApp(
             filename=FILEPATH,
