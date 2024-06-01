@@ -250,3 +250,32 @@ bool compress_uint64_differential_single(
 
     return is_same;
 }
+
+void compress_uint64_differential(
+	std::vector<uint64_t>& data,
+	std::vector<uint8_t>&  compressed_buffer
+	) {
+	uint64_t* copy_data = (uint64_t*)malloc(data.size() * sizeof(data[0]));
+	memcpy(copy_data, data.data(), data.size() * sizeof(data[0]));
+
+	uint64_t compressed_size;
+	compress_uint64_differential(
+		copy_data,
+		compressed_buffer.data(),
+		data.size(),
+		&compressed_size
+		);
+}
+
+void decompress_uint64_differential(
+	std::vector<uint8_t>&  compressed_buffer,
+	std::vector<uint64_t>& data
+	) {
+	uint64_t decompressed_size;
+	decompress_uint64_differential(
+		compressed_buffer.data(),
+		data.data(),
+		compressed_buffer.size(),
+		&decompressed_size
+		);
+}

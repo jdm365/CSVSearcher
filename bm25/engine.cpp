@@ -93,7 +93,7 @@ void get_terminal_size(int& rows, int& cols) {
 }
 
 
-void _BM25::determine_partition_boundaries_csv(std::vector<uint64_t>& partition_boundaries) {
+void _BM25::determine_partition_boundaries_csv() {
 	// First find number of bytes in file.
 	// Get avg chunk size in bytes.
 	// Seek in jumps of byte chunks, then scan forward to newline and append to partition_boundaries.
@@ -155,9 +155,9 @@ void _BM25::determine_partition_boundaries_csv(std::vector<uint64_t>& partition_
 	fseek(f, header_bytes, SEEK_SET);
 }
 
-void _BM25::determine_partition_boundaries_json(std::vector<uint64_t>& partition_boundaries) {
+void _BM25::determine_partition_boundaries_json() {
 	// Same as csv for now. Assuming newline delimited json.
-	determine_partition_boundaries_csv(partition_boundaries);
+	determine_partition_boundaries_csv();
 }
 
 void _BM25::proccess_csv_header() {
@@ -247,7 +247,7 @@ void _BM25::process_doc_partition(
 		const char* doc,
 		const char terminator,
 		uint64_t doc_id,
-		uint64_t& unique_terms_found,
+		uint32_t& unique_terms_found,
 		uint16_t partition_id
 		) {
 	BM25Partition& IP = index_partitions[partition_id];
@@ -487,17 +487,28 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	uint64_t num_lines = 0;
 	uint64_t total_bytes_read = 0;
 	char buf[1024 * 64];
-	fseek(f, start_byte, SEEK_SET);
-	while (size_t bytes_read = fread(buf, 1, sizeof(buf), f)) {
+
+	if (fseek(f, start_byte, SEEK_SET) != 0) {
+		std::cerr << "Error seeking file." << std::endl;
+		std::exit(1);
+	}
+
+	while (total_bytes_read < (end_byte - start_byte)) {
+		size_t bytes_read = fread(buf, 1, sizeof(buf), f);
+		if (bytes_read == 0) {
+			break;
+		}
+
 		for (size_t i = 0; i < bytes_read; ++i) {
 			if (buf[i] == '\n') {
 				++num_lines;
 			}
-			if (total_bytes_read++ >= end_byte) {
+			if (++total_bytes_read >= (end_byte - start_byte)) {
 				break;
 			}
 		}
 	}
+
 	IP.num_docs = num_lines;
 
 	// Reset file pointer to beginning
@@ -510,7 +521,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	uint64_t line_num = 0;
 	uint64_t byte_offset = start_byte;
 
-	uint64_t unique_terms_found = 0;
+	uint32_t unique_terms_found = 0;
 
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, f)) != -1) {
@@ -538,9 +549,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 		int char_idx = 1;
 		while (true) {
 			start:
-				while (line[char_idx] == ' ') {
-					++char_idx;
-				}
+				while (line[char_idx] == ' ') ++char_idx;
 
 				// Found key. Match against search_col.
 				if (line[char_idx] == '"') {
@@ -567,6 +576,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 								}
 
 								if (line[char_idx] == '"') {
+									++char_idx;
 									// Scan to next quote
 									while (line[char_idx] != '"') {
 										if (line[char_idx] == '\\') {
@@ -585,15 +595,12 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 					}
 
 					// Found key. 
-					while (line[char_idx] != ':') {
-						++char_idx;
-					}
+					while (line[char_idx] != ':') ++char_idx;
 					++char_idx;
 
 					// Go to first char of value.
-					while (line[char_idx] == '"' || line[char_idx] == ' ') {
-						++char_idx;
-					}
+					while (line[char_idx] == '"' || line[char_idx] == ' ') ++char_idx;
+
 					break;
 				}
 				else if (line[char_idx] == '}') {
@@ -608,8 +615,8 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 				}
 				else {
 					std::cerr << "Invalid json." << std::endl;
-					std::cout << line << std::endl;
-					std::cout << line[char_idx] << std::endl;
+					std::cout << "Line: " << line << std::endl;
+					std::cout << &line[char_idx] << std::endl;
 					std::cout << char_idx << std::endl;
 					std::cout << std::flush;
 					std::exit(1);
@@ -619,7 +626,8 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 		process_doc_partition(&line[char_idx], '"', line_num, unique_terms_found, partition_id);
 		++line_num;
 	}
-	update_progress(line_num, num_lines, partition_id);
+	if (!DEBUG) update_progress(line_num, num_lines, partition_id);
+
 	free(line);
 
 	if (DEBUG) {
@@ -645,17 +653,6 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 			row.term_freqs.clear();
 			row.term_freqs.shrink_to_fit();
 		}
-	}
-
-
-	if (DEBUG) {
-		uint64_t total_size = 0;
-		for (const auto& row : IP.II.inverted_index_compressed) {
-			total_size += row.doc_ids.size();
-			total_size += 3 * row.term_freqs.size();
-		}
-		total_size /= 1024 * 1024;
-		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
 	}
 }
 
@@ -704,7 +701,7 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 	uint64_t line_num = 0;
 	uint64_t byte_offset = start_byte;
 
-	uint64_t unique_terms_found = 0;
+	uint32_t unique_terms_found = 0;
 
 	// Small string optimization limit on most platforms
 	std::string doc = "";
@@ -796,17 +793,64 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 			row.term_freqs.shrink_to_fit();
 		}
 	}
+}
 
-	if (DEBUG) {
-		uint64_t total_size = 0;
-		for (const auto& row : IP.II.inverted_index_compressed) {
-			total_size += row.doc_ids.size();
-			total_size += 3 * row.term_freqs.size();
+void _BM25::read_in_memory(
+		std::vector<std::string>& documents,
+		uint64_t start_idx, 
+		uint64_t end_idx, 
+		uint16_t partition_id
+		) {
+	BM25Partition& IP = index_partitions[partition_id];
+
+	IP.num_docs = end_idx - start_idx;
+
+	uint32_t unique_terms_found = 0;
+
+	uint32_t cntr = 0;
+	const int UPDATE_INTERVAL = 10000;
+
+	for (uint64_t line_num = start_idx; line_num < end_idx; ++line_num) {
+		std::string& doc = documents[line_num];
+
+		if (!DEBUG) {
+			if (cntr % UPDATE_INTERVAL == 0) {
+				update_progress(cntr, IP.num_docs, partition_id);
+			}
 		}
-		total_size /= 1024 * 1024;
-		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
+
+		process_doc_partition(
+			(doc + "\n").c_str(),
+			'\n',
+			cntr, 
+			unique_terms_found, 
+			partition_id
+			);
+
+		++cntr;
+	}
+	if (!DEBUG) update_progress(cntr + 1, IP.num_docs, partition_id);
+
+	IP.II.prev_doc_ids.clear();
+	IP.II.prev_doc_ids.shrink_to_fit();
+
+	// Calc avg_doc_size
+	double avg_doc_size = 0;
+	for (const auto& size : IP.doc_sizes) {
+		avg_doc_size += (double)size;
+	}
+	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
+
+	for (auto& row : IP.II.inverted_index_compressed) {
+		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+			row.doc_ids.clear();
+			row.doc_ids.clear();
+			row.term_freqs.clear();
+			row.term_freqs.shrink_to_fit();
+		}
 	}
 }
+
 
 std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num, uint16_t partition_id) {
 	FILE* f = reference_file_handles[partition_id];
@@ -915,7 +959,7 @@ void _BM25::save_index_partition(
 
 	BM25Partition& IP = index_partitions[partition_id];
 
-	serialize_robin_hood_flat_map_string_u64(
+	serialize_robin_hood_flat_map_string_u32(
 			IP.unique_term_mapping, 
 			UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id)
 			);
@@ -940,7 +984,7 @@ void _BM25::load_index_partition(
 
 	BM25Partition& IP = index_partitions[partition_id];
 
-	deserialize_robin_hood_flat_map_string_u64(IP.unique_term_mapping, UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id));
+	deserialize_robin_hood_flat_map_string_u32(IP.unique_term_mapping, UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id));
 	deserialize_inverted_index(IP.II, INVERTED_INDEX_PATH + "_" + std::to_string(partition_id));
 	deserialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
@@ -1134,7 +1178,6 @@ _BM25::_BM25(
 			search_col(search_col), 
 			filename(filename) {
 
-	progress_bars.resize(num_partitions);
 
 	for (const std::string& stop_word : _stop_words) {
 		stop_words.insert(stop_word);
@@ -1152,12 +1195,13 @@ _BM25::_BM25(
 
 	auto overall_start = std::chrono::high_resolution_clock::now();
 
-	std::vector<uint64_t> partition_boundaries;
 	std::vector<std::thread> threads;
 
+	partition_boundaries.resize(num_partitions + 1);
 	index_partitions.resize(num_partitions);
 	num_docs = 0;
 
+	progress_bars.resize(num_partitions);
 	bool is_terminal = isatty(fileno(stdout));
 
 	int col;
@@ -1176,12 +1220,12 @@ _BM25::_BM25(
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
 
 		proccess_csv_header();
-		determine_partition_boundaries_csv(partition_boundaries);
+		determine_partition_boundaries_csv();
 
 		// Launch num_partitions threads to read csv file
 		for (uint16_t i = 0; i < num_partitions; ++i) {
 			threads.push_back(std::thread(
-				[this, &partition_boundaries, i] {
+				[this, i] {
 					read_csv(partition_boundaries[i], partition_boundaries[i + 1], i);
 				}
 			));
@@ -1190,12 +1234,13 @@ _BM25::_BM25(
 		file_type = CSV;
 	}
 	else if (filename.substr(filename.size() - 4, 4) == "json") {
-		determine_partition_boundaries_json(partition_boundaries);
+		header_bytes = 0;
+		determine_partition_boundaries_json();
 
 		// Launch num_partitions threads to read json file
 		for (uint16_t i = 0; i < num_partitions; ++i) {
 			threads.push_back(std::thread(
-				[this, &partition_boundaries, i] {
+				[this, i] {
 					read_json(partition_boundaries[i], partition_boundaries[i + 1], i);
 				}
 			));
@@ -1219,19 +1264,35 @@ _BM25::_BM25(
 	if (!DEBUG) finalize_progress_bar();
 
 	uint64_t total_size = 0;
+	uint32_t unique_terms_found = 0;
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		BM25Partition& IP = index_partitions[i];
 
 		uint64_t part_size = 0;
 		for (const auto& row : IP.II.inverted_index_compressed) {
-			part_size += row.doc_ids.size();
-			part_size += 3 * row.term_freqs.size();
+			part_size += sizeof(uint8_t) * row.doc_ids.size();
+			part_size += sizeof(RLEElement_u8) * row.term_freqs.size();
 		}
 		total_size += part_size;
-		printf("Partition %u: %luMB\n", i, part_size / (1024 * 1024));
+
+		unique_terms_found += IP.unique_term_mapping.size();
 	}
 	total_size /= 1024 * 1024;
-	std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
+	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
+	uint64_t line_offsets_size = num_docs * 8 / 1048576;
+	uint64_t doc_sizes_size = num_docs * 2 / 1048576;
+	uint64_t inverted_index_size = total_size;
+	total_size = vocab_size + line_offsets_size + doc_sizes_size + inverted_index_size;
+
+	std::cout << "Total size of vocab mappings:  ~" << vocab_size << "MB" << std::endl;
+	std::cout << "Total size of line offsets:     " << line_offsets_size << "MB" << std::endl;
+	std::cout << "Total size of doc sizes:        " << doc_sizes_size << "MB" << std::endl;
+	std::cout << "Total size of inverted indexes: " << inverted_index_size << "MB" << std::endl;
+	std::cout << "--------------------------------------" << std::endl;
+	std::cout << "Approx total in-memory size:    " << total_size << "MB" << std::endl << std::endl;
+
+	std::cout << "Total number of documents:      " << num_docs << std::endl;
+	std::cout << "Total number of unique terms:   " << unique_terms_found << std::endl;
 
 	if (DEBUG) {
 		auto read_end = std::chrono::high_resolution_clock::now();
@@ -1268,45 +1329,79 @@ _BM25::_BM25(
 		this->max_df = (int)num_docs * max_df;
 	}
 
-	uint64_t unique_terms_found = 0;
-
-	std::string doc = "";
-	doc.reserve(22);
-
 	index_partitions.resize(num_partitions);
+	partition_boundaries.resize(num_partitions + 1);
 
-	std::vector<uint64_t> partition_boundaries(num_partitions + 1);
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		partition_boundaries[i] = (uint64_t)i * (num_docs / num_partitions);
 	}
 	partition_boundaries[num_partitions] = num_docs;
 
-	// const int UPDATE_INTERVAL = 10000;
+	progress_bars.resize(num_partitions);
+	bool is_terminal = isatty(fileno(stdout));
 
-	// Do on all partition w/ thread lib
+	int col;
+	if (is_terminal) {
+		get_cursor_position(init_cursor_row, col);
+		get_terminal_size(terminal_height, col);
+
+		if (terminal_height - init_cursor_row < num_partitions + 1) {
+			// Scroll and reposition cursor
+			std::cout << "\x1b[" << num_partitions + 1 << "S";
+			init_cursor_row -= num_partitions + 1;
+		}
+	}
+
 	std::vector<std::thread> threads;
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		threads.push_back(std::thread(
-			[&documents, &partition_boundaries, i, this] {
-				uint64_t doc_id = partition_boundaries[i];
-				uint64_t end = partition_boundaries[i + 1];
-				uint64_t unique_terms_found = 0;
-				std::string doc = "";
-				doc.reserve(22);
-				for (; doc_id < end; ++doc_id) {
-					process_doc_partition(documents[doc_id].c_str(), '\0', doc_id, unique_terms_found, i);
-				}
+			[this, &documents, i] {
+				read_in_memory(
+						documents, 
+						partition_boundaries[i], 
+						partition_boundaries[i + 1], 
+						i
+						);
 			}
 		));
-	}
-
-	if (DEBUG) {
-		std::cout << "Vocab size: " << unique_terms_found << std::endl;
 	}
 
 	for (auto& thread : threads) {
 		thread.join();
 	}
+
+	if (!DEBUG) finalize_progress_bar();
+
+	uint64_t total_size = 0;
+	uint32_t unique_terms_found = 0;
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		BM25Partition& IP = index_partitions[i];
+
+		uint64_t part_size = 0;
+		for (const auto& row : IP.II.inverted_index_compressed) {
+			part_size += sizeof(uint8_t) * row.doc_ids.size();
+			part_size += sizeof(RLEElement_u8) * row.term_freqs.size();
+		}
+		total_size += part_size;
+
+		unique_terms_found += IP.unique_term_mapping.size();
+	}
+	total_size /= 1024 * 1024;
+	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
+	uint64_t line_offsets_size = num_docs * 8 / 1048576;
+	uint64_t doc_sizes_size = num_docs * 2 / 1048576;
+	uint64_t inverted_index_size = total_size;
+	total_size = vocab_size + line_offsets_size + doc_sizes_size + inverted_index_size;
+
+	std::cout << "Total size of vocab mappings:  ~" << vocab_size << "MB" << std::endl;
+	std::cout << "Total size of line offsets:     " << line_offsets_size << "MB" << std::endl;
+	std::cout << "Total size of doc sizes:        " << doc_sizes_size << "MB" << std::endl;
+	std::cout << "Total size of inverted indexes: " << inverted_index_size << "MB" << std::endl;
+	std::cout << "--------------------------------------" << std::endl;
+	std::cout << "Approx total in-memory size:    " << total_size << "MB" << std::endl << std::endl;
+
+	std::cout << "Total number of documents:      " << num_docs << std::endl;
+	std::cout << "Total number of unique terms:   " << unique_terms_found << std::endl;
 
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		BM25Partition& IP = index_partitions[i];
@@ -1322,20 +1417,6 @@ _BM25::_BM25(
 				row.term_freqs.shrink_to_fit();
 			}
 		}
-	}
-
-	if (DEBUG) {
-		uint64_t total_size = 0;
-
-		for (uint16_t i = 0; i < num_partitions; ++i) {
-			BM25Partition& IP = index_partitions[i];
-			for (const auto& row : IP.II.inverted_index_compressed) {
-				total_size += row.doc_ids.size();
-				total_size += 3 * row.term_freqs.size();
-			}
-		}
-		total_size /= 1024 * 1024;
-		std::cout << "Total size of inverted index: " << total_size << "MB" << std::endl;
 	}
 }
 
@@ -1362,6 +1443,8 @@ std::vector<BM25Result> _BM25::_query_partition(
 	std::vector<uint64_t> term_idxs;
 	BM25Partition& IP = index_partitions[partition_id];
 
+	uint64_t doc_offset = (IN_MEMORY) ? partition_boundaries[partition_id] : 0;
+
 	std::string substr = "";
 	for (const char& c : query) {
 		if (c != ' ') {
@@ -1378,7 +1461,6 @@ std::vector<BM25Result> _BM25::_query_partition(
 		}
 
 		term_idxs.push_back(IP.unique_term_mapping[substr]);
-		printf("Term: %s ID: %lu\n", substr.c_str(), IP.unique_term_mapping[substr]);
 		substr.clear();
 	}
 
@@ -1386,7 +1468,6 @@ std::vector<BM25Result> _BM25::_query_partition(
 		if (IP.II.inverted_index_compressed[IP.unique_term_mapping[substr]].doc_ids.size() > 0) {
 			term_idxs.push_back(IP.unique_term_mapping[substr]);
 		}
-		printf("Term: %s ID: %lu\n", substr.c_str(), IP.unique_term_mapping[substr]);
 	}
 
 	if (term_idxs.size() == 0) {
@@ -1406,10 +1487,8 @@ std::vector<BM25Result> _BM25::_query_partition(
 		}
 
 		if (df > query_max_df) continue;
-		printf("Term: %lu DF: %lu\n\n", term_idx, df);
 
 		float idf = log((num_docs - df + 0.5) / (df + 0.5));
-		printf("Num docs: %lu DF: %lu IDF: %f\n", num_docs, df, idf);
 
 		auto get_row_start = std::chrono::high_resolution_clock::now();
 		IIRow row = get_II_row(&IP.II, term_idx, k);
@@ -1439,6 +1518,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 			float tf 		 = row.term_freqs[cntr];
 			float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id);
 
+			doc_id += doc_offset;
 			if (doc_scores.find(doc_id) == doc_scores.end()) {
 				doc_scores[doc_id] = bm25_score;
 			}

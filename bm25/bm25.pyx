@@ -216,11 +216,18 @@ cdef class BM25:
                 )
         print(f"Reading parquet file took {perf_counter() - init:.2f} seconds")
 
-    def get_topk_indices(self, str query, int query_max_df = INT_MAX, int k = 10):
-        results = self.bm25.query(query.upper().encode("utf-8"), k, query_max_df)
+    cpdef get_topk_indices(self, str query, int query_max_df = INT_MAX, int k = 10):
+        cdef vector[BM25Result] results = self.bm25.query(
+                query.upper().encode("utf-8"), 
+                k, 
+                query_max_df
+                )
 
-        scores  = []
-        indices = []
+        if results.size() == 0:
+            return [], []
+
+        cdef list scores  = []
+        cdef list indices = []
         for result in results:
             scores.append(result.score)
             indices.append(result.doc_id)
@@ -233,6 +240,7 @@ cdef class BM25:
                 k, 
                 query_max_df
                 )
+
         if results.size() == 0:
             return []
 

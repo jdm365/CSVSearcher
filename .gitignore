@@ -8,6 +8,8 @@ gen_compile_commands/
 /tmp_data_dir
 *.csv
 *.zip
+*.json
+*.parquet
 
 # C extensions
 *.so

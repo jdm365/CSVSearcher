@@ -85,6 +85,16 @@ void decompress_uint64(
 	std::vector<uint64_t>& data
 	);
 
+void compress_uint64_differential(
+	std::vector<uint64_t>& data,
+	std::vector<uint8_t>&  compressed_buffer
+	);
+
+void decompress_uint64_differential(
+	std::vector<uint8_t>&  compressed_buffer,
+	std::vector<uint64_t>& data
+	);
+
 void decompress_uint64_partial(
 	std::vector<uint8_t>&  compressed_buffer,
 	std::vector<uint64_t>& data,

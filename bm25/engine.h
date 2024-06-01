@@ -78,7 +78,7 @@ inline IIRow get_II_row(
 
 typedef struct {
 	InvertedIndex II;
-	robin_hood::unordered_flat_map<std::string, uint64_t> unique_term_mapping;
+	robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
 	std::vector<uint16_t> doc_sizes;
 	std::vector<uint64_t> line_offsets;
 
@@ -108,6 +108,8 @@ class _BM25 {
 		std::vector<std::string> columns;
 		int16_t search_col_idx;
 		uint16_t header_bytes;
+
+		std::vector<uint64_t> partition_boundaries;
 
 		std::vector<FILE*> reference_file_handles;
 
@@ -183,15 +185,21 @@ class _BM25 {
 				const char* doc,
 				const char terminator,
 				uint64_t doc_id,
-				uint64_t& unique_terms_found,
+				uint32_t& unique_terms_found,
 				uint16_t partition_id
 				);
 
-		void determine_partition_boundaries_csv(std::vector<uint64_t>& partition_boundaries);
-		void determine_partition_boundaries_json(std::vector<uint64_t>& partition_boundaries);
+		void determine_partition_boundaries_csv();
+		void determine_partition_boundaries_json();
 
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
+		void read_in_memory(
+				std::vector<std::string>& documents,
+				uint64_t start_idx, 
+				uint64_t end_idx, 
+				uint16_t partition_id
+				);
 		std::vector<std::pair<std::string, std::string>> get_csv_line(int line_num, uint16_t partition_id);
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num, uint16_t partition_id);
 
