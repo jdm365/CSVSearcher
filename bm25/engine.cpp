@@ -14,6 +14,7 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include <immintrin.h>
 
 #include <chrono>
 #include <ctime>
@@ -28,6 +29,7 @@
 #include "robin_hood.h"
 #include "vbyte_encoding.h"
 #include "serialize.h"
+
 
 bool output_is_terminal() {
 	return isatty(fileno(stdout));
@@ -1197,7 +1199,6 @@ _BM25::_BM25(
 
 	std::vector<std::thread> threads;
 
-	partition_boundaries.resize(num_partitions + 1);
 	index_partitions.resize(num_partitions);
 	num_docs = 0;
 
@@ -1443,7 +1444,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 	std::vector<uint64_t> term_idxs;
 	BM25Partition& IP = index_partitions[partition_id];
 
-	uint64_t doc_offset = (IN_MEMORY) ? partition_boundaries[partition_id] : 0;
+	uint64_t doc_offset = (file_type == IN_MEMORY) ? partition_boundaries[partition_id] : 0;
 
 	std::string substr = "";
 	for (const char& c : query) {
