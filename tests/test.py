@@ -1,5 +1,5 @@
 from rank_bm25 import BM25Okapi
-from bm25 import BM25
+from rapid_bm25 import BM25
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -34,7 +34,7 @@ def test_csv_constructor(csv_filename: str, search_col: str = 'name'):
         results_rank_bm25 = results_rank_bm25[scores[results_rank_bm25] > 0]
         scores_rank_bm25 = scores[results_rank_bm25]
 
-        scores, results_bm25 = bm25_model.get_topk_indices(company, k=1000000, init_max_df=100000)
+        scores, results_bm25 = bm25_model.get_topk_indices(company, k=1000000, query_max_df=100000)
 
         df_rank = pd.DataFrame({
             'rank_bm25': names.iloc[results_rank_bm25],
