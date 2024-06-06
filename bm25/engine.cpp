@@ -1412,9 +1412,6 @@ inline float _BM25::_compute_bm25(
 	BM25Partition& IP = index_partitions[partition_id];
 
 	float doc_size = IP.doc_sizes[doc_id];
-	if (tf != 1.0f) {
-		printf("TF: %f\n", tf);
-	}
 
 	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.avg_doc_size));
 }
