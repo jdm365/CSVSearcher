@@ -294,9 +294,6 @@ void _BM25::process_doc_partition(
 			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
 			if (add) {
 				// New term
-				// II.accumulator.push_back(entry);
-				// convert uint64_t bytes to uint8_t bytes
-				
 				InvertedIndexElement entry;
 
 				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
@@ -310,39 +307,24 @@ void _BM25::process_doc_partition(
 				++unique_terms_found;
 			}
 			else {
-				/*
-				if (check_rle_u8_row_size(IP.II.inverted_index_compressed[it->second].term_freqs, max_df)) {
-					if (IP.II.inverted_index_compressed[it->second].doc_ids.size() >= 0) {
-						IP.II.inverted_index_compressed[it->second].doc_ids.clear();
-						IP.II.inverted_index_compressed[it->second].doc_ids.shrink_to_fit();
-					}
-
-					// Skip term
-					term.clear();
-					++char_idx;
-					++doc_size;
-					continue;
-				}
-				*/
 
 				// Term already exists
 				if (terms_seen.find(it->second) == terms_seen.end()) {
 					terms_seen.insert(it->second);
 
-					bool same = compress_uint64_differential_single(
+					compress_uint64_differential_single(
 							IP.II.inverted_index_compressed[it->second].doc_ids, 
 							doc_id,
 							IP.II.prev_doc_ids[it->second]
 							);
 					IP.II.prev_doc_ids[it->second] = doc_id;
+					++tf;
 
-					if (same) {
-						++tf;
-					}
-					else {
-						add_rle_element_u8(IP.II.inverted_index_compressed[it->second].term_freqs, tf);
-						tf = 1;
-					}
+					// if (same) ++tf;
+				}
+				else {
+					add_rle_element_u8(IP.II.inverted_index_compressed[it->second].term_freqs, tf);
+					tf = 1;
 				}
 			}
 
@@ -1430,6 +1412,9 @@ inline float _BM25::_compute_bm25(
 	BM25Partition& IP = index_partitions[partition_id];
 
 	float doc_size = IP.doc_sizes[doc_id];
+	if (tf != 1.0f) {
+		printf("TF: %f\n", tf);
+	}
 
 	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.avg_doc_size));
 }
