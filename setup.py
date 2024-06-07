@@ -7,14 +7,6 @@ import os
 MODULE_NAME = "rapid_bm25"
 
 ## Optionally choose compiler ##
-'''
-COMPILER = "clang++"
-## COMPILER = "g++"
-os.environ["CXX"] = COMPILER
-'''
-
-COMPILER = os.environ["CXX"]
-
 COMPILER_FLAGS = [
     "-std=c++17",
     "-O3",
@@ -24,13 +16,12 @@ COMPILER_FLAGS = [
     "-ffast-math",
 ]
 
-OS = os.uname().sysname
+'''
+COMPILER = "clang++"
+## COMPILER = "g++"
+os.environ["CXX"] = COMPILER
 
-LINK_ARGS = [
-    "-lc++",
-    "-lc++abi",
-    "-L/usr/local/lib",
-]
+COMPILER = os.environ["CXX"]
 
 if COMPILER == "clang++":
     COMPILER_FLAGS += [
@@ -40,6 +31,17 @@ elif COMPILER == "g++":
     COMPILER_FLAGS += [
             "-I/usr/local/include"
     ]
+'''
+
+
+OS = os.uname().sysname
+
+LINK_ARGS = [
+    "-lc++",
+    "-lc++abi",
+    "-L/usr/local/lib",
+]
+
 
 extensions = [
     Extension(

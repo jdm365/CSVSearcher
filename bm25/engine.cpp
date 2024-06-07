@@ -14,7 +14,6 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
-#include <immintrin.h>
 
 #include <chrono>
 #include <ctime>
