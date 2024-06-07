@@ -12,8 +12,7 @@
             "-Wall",
             "-Wextra",
             "-march=native",
-            "-ffast-math",
-            "-stdlib=libc++"
+            "-ffast-math"
         ],
         "extra_link_args": [
             "-lc++",

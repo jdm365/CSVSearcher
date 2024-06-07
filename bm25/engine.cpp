@@ -569,14 +569,6 @@ IIRow get_II_row(
 	for (size_t i = 1; i < row.doc_ids.size(); ++i) {
 		row.doc_ids[i] += row.doc_ids[i - 1];
 	}
-	if (row.df != row.doc_ids.size()) {
-		printf(
-			"Doc ids size: %lu %lu\n", 
-			row.doc_ids.size(), 
-			row.df
-			);
-		fflush(stdout);
-	}
 
 	// Get term frequencies
 	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
@@ -584,12 +576,6 @@ IIRow get_II_row(
 			row.term_freqs.push_back(
 					(float)II->inverted_index_compressed[term_idx].term_freqs[i].value
 					);
-
-			/*
-			if (row.term_freqs.size() >= row.doc_ids.size()) {
-				return row;
-			}
-			*/
 		}
 	}
 		
@@ -1546,7 +1532,6 @@ inline float _BM25::_compute_bm25(
 	BM25Partition& IP = index_partitions[partition_id];
 
 	float doc_size = IP.doc_sizes[doc_id];
-
 	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.avg_doc_size));
 }
 
@@ -1605,7 +1590,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 
 		if (df > query_max_df) continue;
 
-		float idf = log((num_docs - df + 0.5) / (df + 0.5));
+		float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
 
 		auto get_row_start = std::chrono::high_resolution_clock::now();
 		IIRow row = get_II_row(&IP.II, term_idx, k);
