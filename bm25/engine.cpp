@@ -498,13 +498,15 @@ void _BM25::process_doc_partition(
 		// Things to be updated:
 		// 1. II doc_ids (compressed) for each term and term freq.
 		// 2. II term_freqs (compressed) for each term.
-
 		compress_uint64_differential_single(
 				IP.II.inverted_index_compressed[term_idx].doc_ids,
 				pair.doc_id,
 				IP.II.prev_doc_ids[term_idx]
 				);
-		add_rle_element_u8(IP.II.inverted_index_compressed[term_idx].term_freqs, pair.tf);
+		add_rle_element_u8(
+				IP.II.inverted_index_compressed[term_idx].term_freqs, 
+				pair.tf
+				);
 		IP.II.prev_doc_ids[term_idx] = doc_id;
 	}
 }
@@ -578,7 +580,7 @@ IIRow get_II_row(
 					);
 		}
 	}
-		
+
 	return row;
 }
 
@@ -1599,25 +1601,10 @@ std::vector<BM25Result> _BM25::_query_partition(
 		total_get_row_time += get_row_elapsed_ms.count();
 
 		// Partial sort row.doc_ids by row.term_freqs to get top k
-		std::vector<uint64_t> indices(df);
 		for (uint64_t i = 0; i < df; ++i) {
-			indices[i] = i;
-		}
-		std::partial_sort(
-			indices.begin(),
-			indices.begin() + std::min(df, (uint64_t)k),
-			indices.end(),
-			[&row](uint64_t i, uint64_t j) {
-				return row.term_freqs[i] > row.term_freqs[j];
-			}
-		);
-
-		uint32_t cntr = 0;
-		for (const uint64_t& i : indices) {
-			// if (cntr >= k) break;
 
 			uint64_t doc_id  = row.doc_ids[i];
-			float tf 		 = row.term_freqs[cntr];
+			float tf 		 = row.term_freqs[i];
 			float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id);
 
 			doc_id += doc_offset;
@@ -1627,7 +1614,6 @@ std::vector<BM25Result> _BM25::_query_partition(
 			else {
 				doc_scores[doc_id] += bm25_score;
 			}
-			++cntr;
 		}
 	}
 

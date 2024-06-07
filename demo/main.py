@@ -45,6 +45,9 @@ class SearchApp:
         self.bm25 = BM25(
                 min_df=1,
                 ## max_df=0.5,
+                ## num_partitions=1,
+                ## b=0.4,
+                k1=1.5
                 )
         self.save_dir = filename.split('/')[-1].replace('.csv', '_db')
         try:
@@ -95,9 +98,17 @@ class SearchApp:
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
+
+    '''
     DATA_DIR = f"{CURRENT_DIR}/../tests"
     FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
     SEARCH_COL = 'title'
+    '''
+
+    DATA_DIR = f"{CURRENT_DIR}/.."
+    FILEPATH = os.path.join(DATA_DIR, 'nodes_export_subset.csv')
+    ## FILEPATH = os.path.join(DATA_DIR, 'tiny_nodes.csv')
+    SEARCH_COL = 'er_name'
 
     search_app = SearchApp(
             filename=FILEPATH,
