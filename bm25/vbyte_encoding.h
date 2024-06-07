@@ -44,7 +44,7 @@ void decompress_uint64(
 	uint64_t* decompressed_size
 	);
 
-bool compress_uint64_differential_single(
+void compress_uint64_differential_single(
 	std::vector<uint8_t>& data,
 	uint64_t new_uncompressed_id,
 	uint64_t prev_id

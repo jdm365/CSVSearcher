@@ -232,13 +232,12 @@ void decompress_uint64_partial(
 	}
 }
 
-bool compress_uint64_differential_single(
+void compress_uint64_differential_single(
     std::vector<uint8_t>& data,
     uint64_t new_uncompressed_id,
 	uint64_t prev_id
 	) {
     uint64_t diff = new_uncompressed_id - prev_id;
-	bool is_same  = (diff == 0);
 
     while (diff >= 128) {
         data.push_back((diff & 127) | 128);
@@ -247,8 +246,6 @@ bool compress_uint64_differential_single(
 
     // Push back the remaining diff value
     data.push_back(diff);
-
-    return is_same;
 }
 
 void compress_uint64_differential(
