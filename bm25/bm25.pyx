@@ -38,7 +38,7 @@ cdef extern from "engine.h":
     cdef cppclass _BM25:
         _BM25(
                 string filename,
-                string search_col,
+                vector[string] search_col,
                 int   min_df,
                 float max_df,
                 float k1,
@@ -71,7 +71,6 @@ cdef class BM25:
     cdef int    min_df
     cdef float  max_df
     cdef str    filename 
-    cdef str    text_col
     cdef str    db_dir
     cdef float  k1 
     cdef float  b
@@ -79,6 +78,7 @@ cdef class BM25:
     cdef object arrow_table
     cdef vector[string] stopwords
     cdef uint16_t num_partitions
+    cdef vector[string] search_cols
 
 
     def __init__(
@@ -107,11 +107,12 @@ cdef class BM25:
                 self.stopwords.push_back(stopword.upper().encode("utf-8"))
 
 
-    def index_file(self, str filename, str text_col):
+    def index_file(self, str filename, list search_cols):
         self.filename = filename
-        self.text_col = text_col
+        for text_col in search_cols:
+            self.search_cols.push_back(text_col.lower().encode("utf-8"))
 
-        self._init_with_file(filename, text_col)
+        self._init_with_file(filename, self.search_cols)
 
 
     def index_documents(self, list documents):
@@ -170,16 +171,16 @@ cdef class BM25:
                 self.stopwords
                 )
 
-    cdef void _init_with_file(self, str filename, str text_col):
+    cdef void _init_with_file(self, str filename, vector[string] search_cols):
         if filename.endswith(".parquet"):
             self.is_parquet = True
-            self._init_with_parquet(filename, text_col)
+            ## self._init_with_parquet(filename, text_col)
             return
 
         self.is_parquet = False
         self.bm25 = new _BM25(
                 filename.encode("utf-8"),
-                text_col.encode("utf-8"),
+                self.search_cols,
                 self.min_df,
                 self.max_df,
                 self.k1,

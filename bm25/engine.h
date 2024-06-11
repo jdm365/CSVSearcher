@@ -105,10 +105,12 @@ class _BM25 {
 
 		SupportedFileTypes file_type;
 
-		std::string search_col;
+		// std::string search_col;
+		std::vector<std::string> search_cols;
 		std::string filename;
 		std::vector<std::string> columns;
-		int16_t search_col_idx;
+		// int16_t search_col_idx;
+		std::vector<int16_t> search_col_idxs;
 		uint16_t header_bytes;
 
 		std::vector<uint64_t> partition_boundaries;
@@ -122,7 +124,8 @@ class _BM25 {
 
 		_BM25(
 				std::string filename,
-				std::string search_col,
+				// std::string search_col,
+				std::vector<std::string> search_cols,
 				int   min_df,
 				float max_df,
 				float k1,
@@ -183,7 +186,7 @@ class _BM25 {
 		void save_to_disk(const std::string& db_dir);
 		void load_from_disk(const std::string& db_dir);
 
-		void process_doc_partition(
+		uint32_t process_doc_partition(
 				const char* doc,
 				const char terminator,
 				uint64_t doc_id,

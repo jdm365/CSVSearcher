@@ -168,7 +168,7 @@ void _BM25::proccess_csv_header() {
 	FILE* f = reference_file_handles[0];
 	char* line = NULL;
 	size_t len = 0;
-	search_col_idx = -1;
+	// search_col_idx = -1;
 
 	fseek(f, 0, SEEK_SET);
 
@@ -181,12 +181,21 @@ void _BM25::proccess_csv_header() {
 			value.erase(value.find("\n"));
 		}
 		columns.push_back(value);
+		for (const auto& col : search_cols) {
+			if (value == col) {
+				search_col_idxs.push_back(columns.size() - 1);
+			}
+		}
+
+		/*
 		if (value == search_col) {
 			search_col_idx = columns.size() - 1;
 		}
+		*/
 	}
 
-	if (search_col_idx == -1) {
+	// if (search_col_idx == -1) {
+	if (search_col_idxs.empty()) {
 		std::cerr << "Search column not found in header" << std::endl;
 		std::cerr << "Cols found:  ";
 		for (size_t i = 0; i < columns.size(); ++i) {
@@ -197,7 +206,10 @@ void _BM25::proccess_csv_header() {
 		exit(1);
 	}
 
+	std::sort(search_col_idxs.begin(), search_col_idxs.end());
+
 	header_bytes = read;
+	free(line);
 }
 
 inline RLEElement_u8 init_rle_element_u8(uint8_t value) {
@@ -386,25 +398,22 @@ void _BM25::process_doc_partition(
 }
 */
 
-void _BM25::process_doc_partition(
+uint32_t _BM25::process_doc_partition(
 		const char* doc,
 		const char terminator,
 		uint64_t doc_id,
 		uint32_t& unique_terms_found,
 		uint16_t partition_id
 		) {
+	// TODO: Take char_idx as reference
+
 	BM25Partition& IP = index_partitions[partition_id];
 
 	uint64_t char_idx = 0;
 
 	std::string term = "";
 
-	typedef struct {
-		uint8_t tf;
-		uint64_t doc_id;
-	} Pair;
-
-	robin_hood::unordered_flat_map<uint64_t, Pair> terms_seen;
+	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
@@ -438,7 +447,7 @@ void _BM25::process_doc_partition(
 			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
 			if (add) {
 				// New term
-				terms_seen.insert({it->second, {1, doc_id}});
+				terms_seen.insert({it->second, 1});
 				IP.II.inverted_index_compressed.push_back(InvertedIndexElement());
 				IP.II.prev_doc_ids.push_back(0);
 				++unique_terms_found;
@@ -447,10 +456,10 @@ void _BM25::process_doc_partition(
 				// Term already exists
 
 				if (terms_seen.find(it->second) == terms_seen.end()) {
-					terms_seen.insert({it->second, {1, doc_id}});
+					terms_seen.insert({it->second, 1});
 				}
 				else {
-					++(terms_seen[it->second].tf);
+					++(terms_seen[it->second]);
 				}
 			}
 
@@ -471,7 +480,7 @@ void _BM25::process_doc_partition(
 
 			if (add) {
 				// New term
-				terms_seen.insert({it->second, {1, doc_id}});
+				terms_seen.insert({it->second, 1});
 				IP.II.inverted_index_compressed.push_back(InvertedIndexElement());
 				IP.II.prev_doc_ids.push_back(0);
 				++unique_terms_found;
@@ -480,10 +489,10 @@ void _BM25::process_doc_partition(
 				// Term already exists
 
 				if (terms_seen.find(it->second) == terms_seen.end()) {
-					terms_seen.insert({it->second, {1, doc_id}});
+					terms_seen.insert({it->second, 1});
 				}
 				else {
-					++(terms_seen[it->second].tf);
+					++(terms_seen[it->second]);
 				}
 			}
 		}
@@ -492,23 +501,20 @@ void _BM25::process_doc_partition(
 
 	IP.doc_sizes.push_back((uint16_t)doc_size);
 
-	for (const auto& [term_idx, pair] : terms_seen) {
-		// For each term, add row to inverted index.
-		//
-		// Things to be updated:
-		// 1. II doc_ids (compressed) for each term and term freq.
-		// 2. II term_freqs (compressed) for each term.
+	for (const auto& [term_idx, tf] : terms_seen) {
 		compress_uint64_differential_single(
 				IP.II.inverted_index_compressed[term_idx].doc_ids,
-				pair.doc_id,
+				doc_id,
 				IP.II.prev_doc_ids[term_idx]
 				);
 		add_rle_element_u8(
 				IP.II.inverted_index_compressed[term_idx].term_freqs, 
-				pair.tf
+				tf
 				);
 		IP.II.prev_doc_ids[term_idx] = doc_id;
 	}
+
+	return char_idx;
 }
 
 
@@ -584,6 +590,47 @@ IIRow get_II_row(
 	return row;
 }
 
+static inline void get_key(
+		const char* line, 
+		int& char_idx,
+		std::string& key
+		) {
+	int start = char_idx;
+	while (line[char_idx] != ':') {
+		if (line[char_idx] == '\\') {
+			char_idx += 2;
+			continue;
+		}
+	}
+	key = std::string(&line[start], char_idx - start);
+}
+
+static inline void scan_to_next_key(
+		const char* line, 
+		int& char_idx
+		) {
+	while (line[char_idx] != ',') {
+		if (line[char_idx] == '\\') {
+			char_idx += 2;
+			continue;
+		}
+
+		if (line[char_idx] == '"') {
+			++char_idx;
+			// Scan to next quote
+			while (line[char_idx] != '"') {
+				if (line[char_idx] == '\\') {
+					char_idx += 2;
+					continue;
+				}
+				++char_idx;
+			}
+		}
+		++char_idx;
+	}
+	++char_idx;
+}
+
 
 void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
 	FILE* f = reference_file_handles[partition_id];
@@ -649,7 +696,8 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 		IP.line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
-		// Iterate of line chars until we get to relevant column.
+		std::string key = "";
+		bool found = false;
 
 		// First char is always `{`
 		int char_idx = 1;
@@ -662,57 +710,39 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 					// Iter over quote.
 					++char_idx;
 
-					for (const char& c : search_col) {
-						// Scan until next key
-						if (c != line[char_idx]) {
-							while (line[char_idx] != ':') {
-								if (line[char_idx] == '\\') {
-									char_idx += 2;
-									continue;
-								}
-								++char_idx;
-							}
-							// End of key
+					// Get key
+					get_key(line, char_idx, key);
+					for (const auto& search_col : search_cols) {
+						if (key == search_col) {
+							found = true;
 
-							// Scan until comma not in quotes
-							while (line[char_idx] != ',') {
-								if (line[char_idx] == '\\') {
-									char_idx += 2;
-									continue;
-								}
-
-								if (line[char_idx] == '"') {
-									++char_idx;
-									// Scan to next quote
-									while (line[char_idx] != '"') {
-										if (line[char_idx] == '\\') {
-											char_idx += 2;
-											continue;
-										}
-										++char_idx;
-									}
-								}
-								++char_idx;
-							}
+							// Found key. 
+							while (line[char_idx] != ':') ++char_idx;
 							++char_idx;
+
+							// Go to first char of value.
+							while (line[char_idx] == '"' || line[char_idx] == ' ') ++char_idx;
+
+							process_doc_partition(
+									&line[char_idx], 
+									'"', 
+									line_num, 
+									unique_terms_found, 
+									partition_id
+									);
+							key.clear();
 							goto start;
 						}
-						++char_idx;
 					}
-
-					// Found key. 
-					while (line[char_idx] != ':') ++char_idx;
-					++char_idx;
-
-					// Go to first char of value.
-					while (line[char_idx] == '"' || line[char_idx] == ' ') ++char_idx;
-
-					break;
+					key.clear();
+					scan_to_next_key(line, char_idx);
 				}
 				else if (line[char_idx] == '}') {
-					std::cout << "Search field not found on line: " << line_num << std::endl;
-					std::cout << std::flush;
-					std::exit(1);
+					if (!found) {
+						std::cout << "Search field not found on line: " << line_num << std::endl;
+						std::cout << std::flush;
+						std::exit(1);
+					}
 				}
 				else if (char_idx > 1048576) {
 					std::cout << "Search field not found on line: " << line_num << std::endl;
@@ -729,7 +759,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 				}
 		}
 
-		process_doc_partition(&line[char_idx], '"', line_num, unique_terms_found, partition_id);
+		// process_doc_partition(&line[char_idx], '"', line_num, unique_terms_found, partition_id);
 		++line_num;
 	}
 	if (!DEBUG) update_progress(line_num, num_lines, partition_id);
@@ -814,9 +844,6 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 	doc.reserve(22);
 
 	char end_delim = ',';
-	if (search_col_idx == (int)columns.size() - 1) {
-		end_delim = '\n';
-	}
 
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, f)) != -1) {
@@ -832,45 +859,54 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 		IP.line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
-		// Iterate of line chars until we get to relevant column.
-		int char_idx = 0;
-		int col_idx  = 0;
-		while (col_idx != search_col_idx) {
-			if (line[char_idx] == '"') {
-				// Skip to next quote.
-				++char_idx;
-				while (line[char_idx] == '"') {
+		for (const auto& search_col_idx : search_col_idxs) {
+
+			if (search_col_idx == (int)columns.size() - 1) {
+				end_delim = '\n';
+			}
+			else {
+				end_delim = ',';
+			}
+
+			// Iterate of line chars until we get to relevant column.
+			int char_idx = 0;
+			int col_idx  = 0;
+			while (col_idx != search_col_idx) {
+				if (line[char_idx] == '"') {
+					// Skip to next quote.
 					++char_idx;
+					while (line[char_idx] == '"') {
+						++char_idx;
+					}
 				}
+
+				if (line[char_idx] == ',') {
+					++col_idx;
+				}
+				++char_idx;
 			}
 
-			if (line[char_idx] == ',') {
-				++col_idx;
+			// Split by commas not inside double quotes
+			if (line[char_idx] == '"') {
+				++char_idx;
+				char_idx += process_doc_partition(
+					&line[char_idx], 
+					'"', 
+					line_num, 
+					unique_terms_found, 
+					partition_id
+					);
+				continue;
 			}
-			++char_idx;
-		}
 
-		// Split by commas not inside double quotes
-		if (line[char_idx] == '"') {
-			++char_idx;
-			process_doc_partition(
+			char_idx += process_doc_partition(
 				&line[char_idx], 
-				'"', 
+				end_delim,
 				line_num, 
 				unique_terms_found, 
 				partition_id
 				);
-			++line_num;
-			continue;
 		}
-
-		process_doc_partition(
-			&line[char_idx], 
-			end_delim,
-			line_num, 
-			unique_terms_found, 
-			partition_id
-			);
 		++line_num;
 	}
 	if (!DEBUG) update_progress(line_num + 1, num_lines, partition_id);
@@ -1169,9 +1205,9 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 	}
 
 	// Write search_col std::string
-	size_t search_col_length = search_col.size();
-	out_file.write(reinterpret_cast<const char*>(&search_col_length), sizeof(search_col_length));
-	out_file.write(search_col.data(), search_col_length);
+	// size_t search_col_length = search_col.size();
+	// out_file.write(reinterpret_cast<const char*>(&search_col_length), sizeof(search_col_length));
+	// out_file.write(search_col.data(), search_col_length);
 
 	out_file.close();
 
@@ -1253,8 +1289,8 @@ void _BM25::load_from_disk(const std::string& db_dir) {
     // Read search_col std::string
     size_t search_col_length;
     in_file.read(reinterpret_cast<char*>(&search_col_length), sizeof(search_col_length));
-    search_col.resize(search_col_length);
-    in_file.read(&search_col[0], search_col_length);
+    // search_col.resize(search_col_length);
+    // in_file.read(&search_col[0], search_col_length);
 
     in_file.close();
 
@@ -1269,7 +1305,7 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 
 _BM25::_BM25(
 		std::string filename,
-		std::string search_col,
+		std::vector<std::string> search_cols,
 		int min_df,
 		float max_df,
 		float k1,
@@ -1281,7 +1317,7 @@ _BM25::_BM25(
 			k1(k1), 
 			b(b),
 			num_partitions(num_partitions),
-			search_col(search_col), 
+			search_cols(search_cols), 
 			filename(filename) {
 
 
