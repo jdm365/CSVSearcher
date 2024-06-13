@@ -257,147 +257,6 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value) {
 	}
 }
 
-
-/*
-void _BM25::process_doc_partition(
-		const char* doc,
-		const char terminator,
-		uint64_t doc_id,
-		uint32_t& unique_terms_found,
-		uint16_t partition_id
-		) {
-	BM25Partition& IP = index_partitions[partition_id];
-
-	uint64_t char_idx = 0;
-
-	std::string term = "";
-	// term.reserve(22);
-
-	robin_hood::unordered_flat_set<uint64_t> terms_seen;
-	// robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
-
-	// Split by commas not inside double quotes
-	uint64_t doc_size = 0;
-	while (doc[char_idx] != terminator) {
-		if (char_idx > 1048576) {
-			std::cout << "Search field not found on line: " << doc_id << std::endl;
-			std::cout << "Doc: " << doc << std::endl;
-			std::cout << std::flush;
-			std::exit(1);
-		}
-		if (doc[char_idx] == '\\') {
-			++char_idx;
-			term += toupper(doc[char_idx]);
-			++char_idx;
-			continue;
-		}
-
-		if (doc[char_idx] == ' ' && term == "") {
-			++char_idx;
-			continue;
-		}
-
-		if (doc[char_idx] == ' ') {
-			if (stop_words.find(term) != stop_words.end()) {
-				term.clear();
-				++char_idx;
-				++doc_size;
-				continue;
-			}
-
-			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
-			if (add) {
-				// New term
-				InvertedIndexElement entry;
-
-				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
-				entry.term_freqs.push_back(init_rle_element_u8(1));
-
-				IP.II.inverted_index_compressed.push_back(entry);
-
-				terms_seen.insert(it->second);
-
-				IP.II.prev_doc_ids.push_back(doc_id);
-
-				++unique_terms_found;
-			}
-			else {
-				// Term already exists
-
-				if (terms_seen.find(it->second) == terms_seen.end()) {
-					compress_uint64_differential_single(
-							IP.II.inverted_index_compressed[it->second].doc_ids, 
-							doc_id,
-							IP.II.prev_doc_ids[it->second]
-							);
-					IP.II.prev_doc_ids[it->second] = doc_id;
-					terms_seen.insert(it->second);
-
-					IP.II.inverted_index_compressed[it->second].term_freqs.push_back(
-							init_rle_element_u8(1)
-							);
-				}
-				else {
-					++(IP.II.inverted_index_compressed[it->second].term_freqs.back().num_repeats);
-				}
-			}
-
-			++doc_size;
-			term.clear();
-
-			++char_idx;
-			continue;
-		}
-
-		term += toupper(doc[char_idx]);
-		++char_idx;
-	}
-
-	if (term != "") {
-		if (stop_words.find(term) == stop_words.end()) {
-			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
-
-			if (add) {
-				// New term
-				InvertedIndexElement entry;
-
-				compress_uint64_differential_single(entry.doc_ids, doc_id, 0);
-				entry.term_freqs.push_back(init_rle_element_u8(1));
-
-				IP.II.inverted_index_compressed.push_back(entry);
-
-				IP.II.prev_doc_ids.push_back(doc_id);
-
-				++unique_terms_found;
-			}
-			else {
-				// Term already exists
-
-				if (terms_seen.find(it->second) == terms_seen.end()) {
-					compress_uint64_differential_single(
-							IP.II.inverted_index_compressed[it->second].doc_ids, 
-							doc_id,
-							IP.II.prev_doc_ids[it->second]
-							);
-					IP.II.prev_doc_ids[it->second] = doc_id;
-					terms_seen.insert(it->second);
-
-					IP.II.inverted_index_compressed[it->second].term_freqs.push_back(
-							init_rle_element_u8(1)
-							);
-				}
-				else {
-					++(IP.II.inverted_index_compressed[it->second].term_freqs.back().num_repeats);
-				}
-			}
-		}
-		++doc_size;
-	}
-
-	IP.doc_sizes.push_back((uint16_t)doc_size);
-}
-*/
-
 uint32_t _BM25::process_doc_partition(
 		const char* doc,
 		const char terminator,
@@ -405,8 +264,6 @@ uint32_t _BM25::process_doc_partition(
 		uint32_t& unique_terms_found,
 		uint16_t partition_id
 		) {
-	// TODO: Take char_idx as reference
-
 	BM25Partition& IP = index_partitions[partition_id];
 
 	uint64_t char_idx = 0;
@@ -601,8 +458,9 @@ static inline void get_key(
 			char_idx += 2;
 			continue;
 		}
+		++char_idx;
 	}
-	key = std::string(&line[start], char_idx - start);
+	key = std::string(&line[start], char_idx - start - 1);
 }
 
 static inline void scan_to_next_key(
@@ -610,6 +468,8 @@ static inline void scan_to_next_key(
 		int& char_idx
 		) {
 	while (line[char_idx] != ',') {
+		if (line[char_idx] == '}') return;
+
 		if (line[char_idx] == '\\') {
 			char_idx += 2;
 			continue;
@@ -617,7 +477,8 @@ static inline void scan_to_next_key(
 
 		if (line[char_idx] == '"') {
 			++char_idx;
-			// Scan to next quote
+
+			// Scan to next unescaped quote
 			while (line[char_idx] != '"') {
 				if (line[char_idx] == '\\') {
 					char_idx += 2;
@@ -630,7 +491,6 @@ static inline void scan_to_next_key(
 	}
 	++char_idx;
 }
-
 
 void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
 	FILE* f = reference_file_handles[partition_id];
@@ -710,30 +570,39 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 					// Iter over quote.
 					++char_idx;
 
-					// Get key
-					get_key(line, char_idx, key);
+					// Get key. char_idx will now be on a ':'.
+					get_key(line, char_idx, key); ++char_idx;
+
 					for (const auto& search_col : search_cols) {
 						if (key == search_col) {
 							found = true;
 
-							// Found key. 
-							while (line[char_idx] != ':') ++char_idx;
+							// Go to first char of value.
+							while (line[char_idx] == ' ') ++char_idx;
+
+							if (line[char_idx] != '"') {
+								// Assume null. Must be string values.
+								scan_to_next_key(line, char_idx);
+								key.clear();
+								goto start;
+							}
+
+							// Iter over quote.
 							++char_idx;
 
-							// Go to first char of value.
-							while (line[char_idx] == '"' || line[char_idx] == ' ') ++char_idx;
-
-							process_doc_partition(
+							char_idx += process_doc_partition(
 									&line[char_idx], 
 									'"', 
 									line_num, 
 									unique_terms_found, 
 									partition_id
-									);
+									); ++char_idx;
+							scan_to_next_key(line, char_idx);
 							key.clear();
 							goto start;
 						}
 					}
+
 					key.clear();
 					scan_to_next_key(line, char_idx);
 				}
@@ -743,6 +612,8 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 						std::cout << std::flush;
 						std::exit(1);
 					}
+					// Success. Break.
+					break;
 				}
 				else if (char_idx > 1048576) {
 					std::cout << "Search field not found on line: " << line_num << std::endl;
@@ -759,9 +630,13 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 				}
 		}
 
-		// process_doc_partition(&line[char_idx], '"', line_num, unique_terms_found, partition_id);
+		if (!DEBUG) {
+			if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, num_lines, partition_id);
+		}
+
 		++line_num;
 	}
+
 	if (!DEBUG) update_progress(line_num, num_lines, partition_id);
 
 	free(line);

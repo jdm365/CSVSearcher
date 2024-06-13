@@ -5,20 +5,21 @@ import numpy as np
 import os
 from tqdm import tqdm
 from time import perf_counter
+from typing import List
 
 
-def test_okapi_bm25(csv_filename: str, search_col: str):
+def test_okapi_bm25(csv_filename: str, search_cols: List[str]):
     from rank_bm25 import BM25Okapi
 
     df = pl.read_csv(csv_filename)
-    names = df.select(search_col)
+    names = df.select(search_cols)
 
-    companies_sample = names.select(search_col).sample(1000).to_pandas()[search_col]
+    companies_sample = names.select(search_cols).sample(1000).to_pandas()[search_cols]
 
     init = perf_counter()
     ## tokenized_names = [name.split() for name in tqdm(names, desc="Tokenizing")]
     tokenized_names = names.with_columns(
-        pl.col(search_col).fill_null('').str.split(' ').alias('tokens')
+        pl.col(search_cols).fill_null('').str.split(' ').alias('tokens')
     ).select("tokens").to_series(0).to_list()
     bm25 = BM25Okapi(tokenized_names)
     print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
@@ -30,11 +31,11 @@ def test_okapi_bm25(csv_filename: str, search_col: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
 
-def test_retriv(csv_filename: str, search_col: str):
+def test_retriv(csv_filename: str, search_cols: List[str]):
     from retriv import SparseRetriever
 
     df = pd.read_csv(csv_filename)
-    names = df[search_col]
+    names = df[search_cols]
 
     ## rename index id
     df['id'] = df.index.astype(str)
@@ -49,7 +50,7 @@ def test_retriv(csv_filename: str, search_col: str):
         show_progress=True,
         callback=lambda doc: {
             "id": doc['id'],
-            "text": doc[search_col]
+            "text": doc[search_cols]
         }
     )
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
@@ -97,18 +98,18 @@ def test_duckdb(csv_filename: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
 
-def test_anserini(csv_filename: str, search_col: str):
+def test_anserini(csv_filename: str, search_cols: List[str]):
     from pyserini.search import LuceneSearcher
     from pyserini.index.lucene import LuceneIndexer
 
     ## convert to json
     df = pl.read_csv(csv_filename)
     df = df.fill_null('')
-    companies_sample = df.select(search_col).sample(1000)
+    companies_sample = df.select(search_cols).sample(1000)
 
     df = df.with_columns(pl.lit(np.arange(len(df))).cast(str).alias('id'))
 
-    df = df.with_columns(pl.col(search_col).alias('contents'))
+    df = df.with_columns(pl.col(search_cols).alias('contents'))
     os.system('rm -rf tmp_data_dir')
     os.system('mkdir tmp_data_dir')
 
@@ -159,13 +160,13 @@ def test_sklearn(csv_filename: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
 
-def test_bm25_json(json_filename: str, search_col: str):
+def test_bm25_json(json_filename: str, search_cols: List[str]):
     df = pd.read_json(json_filename, lines=True, nrows=1000)
-    sample = df[search_col].values
+    sample = df[search_cols[0]].values
 
     init = perf_counter()
-    model = BM25(stopwords='english')
-    model.index_file(filename=json_filename, text_col=search_col)
+    model = BM25(stopwords='english')#, num_partitions=1)
+    model.index_file(filename=json_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
@@ -176,14 +177,14 @@ def test_bm25_json(json_filename: str, search_col: str):
     print(f"Queries per second: {1000 / time:.2f}")
     
 
-def test_bm25_csv(csv_filename: str, search_col: str):
-    df = pd.read_csv(csv_filename, usecols=[search_col], nrows=1000)
-    sample = df[search_col].fillna('').astype(str).values
+def test_bm25_csv(csv_filename: str, search_cols: List[str]):
+    df = pd.read_csv(csv_filename, usecols=search_cols, nrows=1000)
+    sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
-    model = BM25(max_df=25_000, stopwords='english')
-    ## model = BM25(stopwords='english')
-    model.index_file(filename=csv_filename, text_col=search_col)
+    ## model = BM25(max_df=25_000, stopwords='english')
+    model = BM25(stopwords='english')
+    model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     ## Save and load
@@ -207,13 +208,13 @@ def test_bm25_csv(csv_filename: str, search_col: str):
 
     print(f"Queries per second: {1000 / time:.2f}")
 
-def test_bm25_parquet(filename: str, search_col: str):
-    df = pd.read_parquet(filename, columns=[search_col]).iloc[:1000]
-    sample = df[search_col].fillna('').astype(str).values
+def test_bm25_parquet(filename: str, search_cols: List[str]):
+    df = pd.read_parquet(filename, columns=search_cols).iloc[:1000]
+    sample = df[search_cols].fillna('').astype(str).values
 
     init = perf_counter()
     model = BM25(max_df=50_000, stopwords=['netflix'])
-    model.index_file(filename=filename, text_col=search_col)
+    model.index_file(filename=filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
@@ -223,9 +224,9 @@ def test_bm25_parquet(filename: str, search_col: str):
 
     print(f"Queries per second: {1000 / time:.2f}")
 
-def test_documents(csv_filename: str, search_col: str):
+def test_documents(csv_filename: str, search_cols: List[str]):
     df = pl.read_csv(csv_filename)
-    names = df.select(search_col).to_series(0)
+    names = df.select(search_cols).to_series(0)
 
     companies_sample = names.sample(1000)
 
@@ -259,14 +260,14 @@ if __name__ == '__main__':
     CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
 
-    ## test_okapi_bm25(CSV_FILENAME, search_col='title')
-    ## test_retriv(CSV_FILENAME, search_col='title')
+    ## test_okapi_bm25(CSV_FILENAME, search_cols='title')
+    ## test_retriv(CSV_FILENAME, search_cols='title')
     ## test_duckdb(FILENAME)
-    ## test_anserini(CSV_FILENAME, search_col='title')
+    ## test_anserini(CSV_FILENAME, search_cols='title')
     ## test_sklearn(FILENAME)
-    ## test_bm25_csv(CSV_FILENAME, search_col='text')
-    ## test_bm25_csv(CSV_FILENAME, search_col='name')
-    test_bm25_csv(CSV_FILENAME, search_col='title')
-    ## test_bm25_json(JSON_FILENAME, search_col='title')
-    ## test_bm25_parquet(PARQUET_FILENAME, search_col='name')
-    ## test_documents(CSV_FILENAME, search_col='title')
+    ## test_bm25_csv(CSV_FILENAME, search_cols='text')
+    ## test_bm25_csv(CSV_FILENAME, search_cols='name')
+    test_bm25_csv(CSV_FILENAME, search_cols=['title'])
+    test_bm25_json(JSON_FILENAME, search_cols=['title'])
+    ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
+    ## test_documents(CSV_FILENAME, search_cols='title')
