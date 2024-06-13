@@ -56,11 +56,17 @@ cdef extern from "engine.h":
                 uint16_t num_partitions,
                 const vector[string]& stopwords
                 ) nogil
-        vector[BM25Result] query(string& term, uint32_t top_k, uint32_t query_max_df) nogil
+        vector[BM25Result] query(
+                string& term, 
+                uint32_t top_k, 
+                uint32_t query_max_df,
+                vector[float] boost_factors
+                ) nogil
         vector[vector[pair[string, string]]] get_topk_internal(
                 string& term, 
                 uint32_t k, 
-                uint32_t query_max_df
+                uint32_t query_max_df,
+                vector[float] boost_factors
                 ) nogil 
         void save_to_disk(string db_dir) nogil
         void load_from_disk(string db_dir) nogil
@@ -75,7 +81,6 @@ cdef class BM25:
     cdef float  k1 
     cdef float  b
     cdef bool   is_parquet
-    cdef object arrow_table
     cdef vector[string] stopwords
     cdef uint16_t num_partitions
     cdef vector[string] search_cols
@@ -217,11 +222,26 @@ cdef class BM25:
                 )
         print(f"Reading parquet file took {perf_counter() - init:.2f} seconds")
 
-    cpdef get_topk_indices(self, str query, int query_max_df = INT_MAX, int k = 10):
+    cpdef get_topk_indices(
+            self, 
+            str query, 
+            int query_max_df = INT_MAX, 
+            int k = 10,
+            list boost_factors = None
+            ):
+        if boost_factors is None:
+            boost_factors = len(self.search_cols) * [1]
+
+        cdef vector[float] _boost_factors
+        _boost_factors.reserve(len(boost_factors))
+        for factor in boost_factors:
+            _boost_factors.push_back(factor)
+
         cdef vector[BM25Result] results = self.bm25.query(
                 query.upper().encode("utf-8"), 
                 k, 
-                query_max_df
+                query_max_df,
+                _boost_factors
                 )
 
         if results.size() == 0:
@@ -235,11 +255,26 @@ cdef class BM25:
 
         return scores, indices
 
-    cdef list _get_topk_docs_parquet(self, str query, int k = 10, int query_max_df = INT_MAX):
+    cdef list _get_topk_docs_parquet(
+            self, 
+            str query, 
+            int k = 10, 
+            int query_max_df = INT_MAX,
+            list boost_factors = None
+            ):
+        if boost_factors is None:
+            boost_factors = len(self.search_cols) * [1]
+
+        cdef vector[float] _boost_factors
+        _boost_factors.reserve(len(boost_factors))
+        for factor in boost_factors:
+            _boost_factors.push_back(factor)
+
         cdef vector[BM25Result] results = self.bm25.query(
                 query.upper().encode("utf-8"), 
                 k, 
-                query_max_df
+                query_max_df,
+                _boost_factors
                 )
 
         if results.size() == 0:
@@ -263,10 +298,19 @@ cdef class BM25:
             self, 
             str query, 
             int k = 10, 
-            int query_max_df = INT_MAX
+            int query_max_df = INT_MAX,
+            list boost_factors = None
             ):
         if self.is_parquet:
             return self._get_topk_docs_parquet(query, k, query_max_df)
+
+        if boost_factors is None:
+            boost_factors = len(self.search_cols) * [1]
+
+        cdef vector[float] _boost_factors
+        _boost_factors.reserve(len(boost_factors))
+        for factor in boost_factors:
+            _boost_factors.push_back(factor)
 
         cdef vector[vector[pair[string, string]]] results
         cdef list output = []
@@ -281,7 +325,8 @@ cdef class BM25:
                 results = self.bm25.get_topk_internal(
                         _query,
                         k, 
-                        query_max_df
+                        query_max_df,
+                        _boost_factors
                         )
 
         for idx in range(len(results)):

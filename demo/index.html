@@ -4,12 +4,12 @@
   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
   <link rel="shortcut icon" type="image/ico" href="favicon.ico" />
   <title>Search App</title>
-  <link rel="stylesheet" href="SlickGrid/dist/styles/css/slick-alpine-theme.css" type="text/css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/6pac/SlickGrid/dist/styles/css/slick-alpine-theme.css" type="text/css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/6pac/SlickGrid/examples/examples.css" type="text/css"/>
 </head>
 <body>
 
 <input type="text" id="search_box" placeholder="Type to search..." onkeyup="search()">
-<!-- <input type="text" id="search_box" placeholder="Type to search..."> -->
 <div id="metadata"></div>
 
 <table width="100%">
@@ -23,16 +23,16 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs/Sortable.min.js"></script>
 <script src="sortable-cdn-fallback.js"></script>
 
-<script src="SlickGrid/dist/browser/slick.core.js"></script>
-<script src="SlickGrid/dist/browser/slick.interactions.js"></script>
-<script src="SlickGrid/dist/browser/slick.grid.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/6pac/SlickGrid/dist/browser/slick.core.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/6pac/SlickGrid/dist/browser/slick.interactions.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/6pac/SlickGrid/dist/browser/slick.grid.js"></script>
 
 <script>
 	var grid;
 
 	var options = {
 	enableCellNavigation: true,
-	enableColumnReorder: false
+	enableColumnReorder: true,
 	};
 
 	var data = [];

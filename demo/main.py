@@ -26,19 +26,16 @@ def search():
 def columns():
     column_names = search_app.get_column_names()
     ## Move search_col to the front
-    column_names.remove(search_app.search_col)
-    column_names.insert(0, search_app.search_col)
+    for col in reversed(search_app.search_cols):
+        column_names.remove(col)
+        column_names.insert(0, col)
     return jsonify({'columns': column_names})
-
-@app.route('/search_col', methods=['GET'])
-def search_col():
-    return jsonify({'search_col': search_app.search_col})
 
 
 class SearchApp:
     def __init__(
             self,
-            search_col: str,
+            search_cols: str,
             filename: str
             ) -> None:
         self.filename = filename
@@ -56,11 +53,11 @@ class SearchApp:
         except Exception as e:
             print(f"Error loading BM25 index: {e}")
 
-            self.bm25.index_file(filename, search_col)
+            self.bm25.index_file(filename, search_cols)
             self.bm25.save(db_dir=self.save_dir)
             print(f"Saved BM25 index to {self.save_dir}")
 
-        self.search_col = search_col
+        self.search_cols = search_cols
 
     def get_column_names(self):
         if self.filename.endswith('.csv'):
@@ -99,20 +96,18 @@ class SearchApp:
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
 
-    '''
     DATA_DIR = f"{CURRENT_DIR}/../tests"
     FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
-    SEARCH_COL = 'title'
-    '''
+    SEARCH_COLS = ['title', 'artist']
 
-    DATA_DIR = f"{CURRENT_DIR}/.."
-    FILEPATH = os.path.join(DATA_DIR, 'nodes_export_subset.csv')
+    ## DATA_DIR = f"{CURRENT_DIR}/.."
+    ## FILEPATH = os.path.join(DATA_DIR, 'nodes_export_subset.csv')
     ## FILEPATH = os.path.join(DATA_DIR, 'tiny_nodes.csv')
-    SEARCH_COL = 'er_name'
+    ## SEARCH_COLS = ['er_name']
 
     search_app = SearchApp(
             filename=FILEPATH,
-            search_col=SEARCH_COL
+            search_cols=SEARCH_COLS
             )
 
     os.system(f"open {CURRENT_DIR}/index.html")

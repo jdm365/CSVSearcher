@@ -225,19 +225,22 @@ class _BM25 {
 		std::vector<BM25Result> query(
 				std::string& query,
 				uint32_t top_k,
-				uint32_t query_max_df
+				uint32_t query_max_df,
+				std::vector<float> boost_factors
 				);
 		std::vector<BM25Result> _query_partition(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df,
-				uint16_t partition_id
+				uint16_t partition_id,
+				std::vector<float> boost_factors
 				);
 
 		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(
 				std::string& _query,
 				uint32_t top_k,
-				uint32_t query_max_df
+				uint32_t query_max_df,
+				std::vector<float> boost_factors
 				);
 
 		void update_progress(int line_num, int num_lines, uint16_t partition_id);

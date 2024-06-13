@@ -356,7 +356,12 @@ uint32_t _BM25::process_doc_partition(
 		++doc_size;
 	}
 
-	IP.doc_sizes.push_back((uint16_t)doc_size);
+	if (doc_id == IP.doc_sizes.size() - 1) {
+		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	}
+	else {
+		IP.doc_sizes.push_back((uint16_t)doc_size);
+	}
 
 	for (const auto& [term_idx, tf] : terms_seen) {
 		compress_uint64_differential_single(
@@ -1452,7 +1457,8 @@ std::vector<BM25Result> _BM25::_query_partition(
 		std::string& query, 
 		uint32_t k,
 		uint32_t query_max_df,
-		uint16_t partition_id
+		uint16_t partition_id,
+		std::vector<float> boost_factors
 		) {
 	auto start = std::chrono::high_resolution_clock::now();
 	std::vector<uint64_t> term_idxs;
@@ -1583,7 +1589,8 @@ std::vector<BM25Result> _BM25::_query_partition(
 std::vector<BM25Result> _BM25::query(
 		std::string& query, 
 		uint32_t k,
-		uint32_t query_max_df
+		uint32_t query_max_df,
+		std::vector<float> boost_factors
 		) {
 	auto start = std::chrono::high_resolution_clock::now();
 
@@ -1593,8 +1600,8 @@ std::vector<BM25Result> _BM25::query(
 	// _query_partition on each thread
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		threads.push_back(std::thread(
-			[this, &query, k, query_max_df, i, &results] {
-				results[i] = _query_partition(query, k, query_max_df, i);
+			[this, &query, k, query_max_df, i, &results, boost_factors] {
+				results[i] = _query_partition(query, k, query_max_df, i, boost_factors);
 			}
 		));
 	}
@@ -1648,10 +1655,16 @@ std::vector<BM25Result> _BM25::query(
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& _query,
 		uint32_t top_k,
-		uint32_t query_max_df
+		uint32_t query_max_df,
+		std::vector<float> boost_factors
 		) {
+	if (boost_factors.size() != search_cols.size()) {
+		std::cout << "Error: Boost factors must be the same size as the number of partitions." << std::endl;
+		std::exit(1);
+	}
+
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
-	std::vector<BM25Result> top_k_docs = query(_query, top_k, query_max_df);
+	std::vector<BM25Result> top_k_docs = query(_query, top_k, query_max_df, boost_factors);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;
