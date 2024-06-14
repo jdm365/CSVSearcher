@@ -186,15 +186,8 @@ void _BM25::proccess_csv_header() {
 				search_col_idxs.push_back(columns.size() - 1);
 			}
 		}
-
-		/*
-		if (value == search_col) {
-			search_col_idx = columns.size() - 1;
-		}
-		*/
 	}
 
-	// if (search_col_idx == -1) {
 	if (search_col_idxs.empty()) {
 		std::cerr << "Search column not found in header" << std::endl;
 		std::cerr << "Cols found:  ";
@@ -262,15 +255,19 @@ uint32_t _BM25::process_doc_partition(
 		const char terminator,
 		uint64_t doc_id,
 		uint32_t& unique_terms_found,
-		uint16_t partition_id
+		uint16_t partition_id,
+		uint16_t col_idx
 		) {
 	BM25Partition& IP = index_partitions[partition_id];
+	InvertedIndex& II = IP.II[col_idx];
 
 	uint64_t char_idx = 0;
 
 	std::string term = "";
 
 	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	printf("Doc id: %lu\n", doc_id);
+	fflush(stdout);
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
@@ -301,12 +298,12 @@ uint32_t _BM25::process_doc_partition(
 				continue;
 			}
 
-			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
+			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(term, unique_terms_found);
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
-				IP.II.inverted_index_compressed.push_back(InvertedIndexElement());
-				IP.II.prev_doc_ids.push_back(0);
+				II.inverted_index_compressed.push_back(InvertedIndexElement());
+				II.prev_doc_ids.push_back(0);
 				++unique_terms_found;
 			}
 			else {
@@ -333,13 +330,13 @@ uint32_t _BM25::process_doc_partition(
 
 	if (term != "") {
 		if (stop_words.find(term) == stop_words.end()) {
-			auto [it, add] = IP.unique_term_mapping.try_emplace(term, unique_terms_found);
+			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(term, unique_terms_found);
 
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
-				IP.II.inverted_index_compressed.push_back(InvertedIndexElement());
-				IP.II.prev_doc_ids.push_back(0);
+				II.inverted_index_compressed.push_back(InvertedIndexElement());
+				II.prev_doc_ids.push_back(0);
 				++unique_terms_found;
 			}
 			else {
@@ -365,15 +362,15 @@ uint32_t _BM25::process_doc_partition(
 
 	for (const auto& [term_idx, tf] : terms_seen) {
 		compress_uint64_differential_single(
-				IP.II.inverted_index_compressed[term_idx].doc_ids,
+				II.inverted_index_compressed[term_idx].doc_ids,
 				doc_id,
-				IP.II.prev_doc_ids[term_idx]
+				II.prev_doc_ids[term_idx]
 				);
 		add_rle_element_u8(
-				IP.II.inverted_index_compressed[term_idx].term_freqs, 
+				II.inverted_index_compressed[term_idx].term_freqs, 
 				tf
 				);
-		IP.II.prev_doc_ids[term_idx] = doc_id;
+		II.prev_doc_ids[term_idx] = doc_id;
 	}
 
 	return char_idx;
@@ -578,6 +575,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 					// Get key. char_idx will now be on a ':'.
 					get_key(line, char_idx, key); ++char_idx;
 
+					uint16_t search_col_idx = 0;
 					for (const auto& search_col : search_cols) {
 						if (key == search_col) {
 							found = true;
@@ -589,6 +587,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 								// Assume null. Must be string values.
 								scan_to_next_key(line, char_idx);
 								key.clear();
+								++search_col_idx;
 								goto start;
 							}
 
@@ -600,7 +599,8 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 									'"', 
 									line_num, 
 									unique_terms_found, 
-									partition_id
+									partition_id,
+									search_col_idx++
 									); ++char_idx;
 							scan_to_next_key(line, char_idx);
 							key.clear();
@@ -610,6 +610,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 
 					key.clear();
 					scan_to_next_key(line, char_idx);
+					++search_col_idx;
 				}
 				else if (line[char_idx] == '}') {
 					if (!found) {
@@ -659,15 +660,17 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	}
 	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
 
-	IP.II.prev_doc_ids.clear();
-	IP.II.prev_doc_ids.shrink_to_fit();
+	for (uint16_t search_col_idx = 0; search_col_idx < IP.II.size(); ++search_col_idx) {
+		IP.II[search_col_idx].prev_doc_ids.clear();
+		IP.II[search_col_idx].prev_doc_ids.shrink_to_fit();
 
-	for (auto& row : IP.II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
-			row.doc_ids.clear();
-			row.doc_ids.clear();
-			row.term_freqs.clear();
-			row.term_freqs.shrink_to_fit();
+		for (auto& row : IP.II[search_col_idx].inverted_index_compressed) {
+			if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+				row.doc_ids.clear();
+				row.doc_ids.clear();
+				row.term_freqs.clear();
+				row.term_freqs.shrink_to_fit();
+			}
 		}
 	}
 }
@@ -739,6 +742,9 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 		IP.line_offsets.push_back(byte_offset);
 		byte_offset += read;
 
+		int char_idx = 0;
+		int col_idx  = 0;
+		uint16_t _search_col_idx = 0;
 		for (const auto& search_col_idx : search_col_idxs) {
 
 			if (search_col_idx == (int)columns.size() - 1) {
@@ -749,22 +755,30 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 			}
 
 			// Iterate of line chars until we get to relevant column.
-			int char_idx = 0;
-			int col_idx  = 0;
 			while (col_idx != search_col_idx) {
-				if (line[char_idx] == '"') {
-					// Skip to next quote.
-					++char_idx;
-					while (line[char_idx] == '"') {
-						++char_idx;
-					}
+				if (line[char_idx] == '\\') {
+					char_idx += 2;
+					continue;
 				}
 
-				if (line[char_idx] == ',') {
-					++col_idx;
+				if (line[char_idx] == '"') {
+					// Skip to next unescaped quote
+					++char_idx;
+
+					while (line[char_idx] != '"') {
+						if (line[char_idx] == '\\') {
+							char_idx += 2;
+							continue;
+						}
+						++char_idx;
+					}
+					++char_idx;
 				}
+
+				if (line[char_idx] == ',') ++col_idx;
 				++char_idx;
 			}
+			++col_idx;
 
 			// Split by commas not inside double quotes
 			if (line[char_idx] == '"') {
@@ -774,8 +788,9 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 					'"', 
 					line_num, 
 					unique_terms_found, 
-					partition_id
-					);
+					partition_id,
+					_search_col_idx++
+					); ++char_idx;
 				continue;
 			}
 
@@ -784,8 +799,9 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 				end_delim,
 				line_num, 
 				unique_terms_found, 
-				partition_id
-				);
+				partition_id,
+				_search_col_idx++
+				); ++char_idx;
 		}
 		++line_num;
 	}
@@ -795,8 +811,6 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 		std::cout << "Vocab size: " << unique_terms_found << std::endl;
 	}
 
-	IP.II.prev_doc_ids.clear();
-	IP.II.prev_doc_ids.shrink_to_fit();
 
 	IP.num_docs = IP.doc_sizes.size();
 
@@ -807,12 +821,17 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 	}
 	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
 
-	for (auto& row : IP.II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
-			row.doc_ids.clear();
-			row.doc_ids.clear();
-			row.term_freqs.clear();
-			row.term_freqs.shrink_to_fit();
+	for (uint16_t col_idx = 0; col_idx < search_col_idxs.size(); ++col_idx) {
+		IP.II[col_idx].prev_doc_ids.clear();
+		IP.II[col_idx].prev_doc_ids.shrink_to_fit();
+
+		for (auto& row : IP.II[col_idx].inverted_index_compressed) {
+			if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+				row.doc_ids.clear();
+				row.doc_ids.clear();
+				row.term_freqs.clear();
+				row.term_freqs.shrink_to_fit();
+			}
 		}
 	}
 }
@@ -823,6 +842,8 @@ void _BM25::read_in_memory(
 		uint64_t end_idx, 
 		uint16_t partition_id
 		) {
+	// TODO: Fix
+
 	BM25Partition& IP = index_partitions[partition_id];
 
 	IP.num_docs = end_idx - start_idx;
@@ -846,15 +867,14 @@ void _BM25::read_in_memory(
 			'\n',
 			cntr, 
 			unique_terms_found, 
-			partition_id
+			partition_id,
+			0
 			);
 
 		++cntr;
 	}
 	if (!DEBUG) update_progress(cntr + 1, IP.num_docs, partition_id);
 
-	IP.II.prev_doc_ids.clear();
-	IP.II.prev_doc_ids.shrink_to_fit();
 
 	// Calc avg_doc_size
 	double avg_doc_size = 0;
@@ -863,12 +883,17 @@ void _BM25::read_in_memory(
 	}
 	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 
-	for (auto& row : IP.II.inverted_index_compressed) {
-		if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
-			row.doc_ids.clear();
-			row.doc_ids.clear();
-			row.term_freqs.clear();
-			row.term_freqs.shrink_to_fit();
+	for (uint16_t col_idx = 0; col_idx < search_col_idxs.size(); ++col_idx) {
+		IP.II[col_idx].prev_doc_ids.clear();
+		IP.II[col_idx].prev_doc_ids.shrink_to_fit();
+
+		for (auto& row : IP.II[col_idx].inverted_index_compressed) {
+			if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+				row.doc_ids.clear();
+				row.doc_ids.clear();
+				row.term_freqs.clear();
+				row.term_freqs.shrink_to_fit();
+			}
 		}
 	}
 }
@@ -981,11 +1006,17 @@ void _BM25::save_index_partition(
 
 	BM25Partition& IP = index_partitions[partition_id];
 
-	serialize_robin_hood_flat_map_string_u32(
-			IP.unique_term_mapping, 
-			UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id)
-			);
-	serialize_inverted_index(IP.II, INVERTED_INDEX_PATH + "_" + std::to_string(partition_id));
+
+	for (uint16_t col_idx = 0; col_idx < search_col_idxs.size(); ++col_idx) {
+		serialize_robin_hood_flat_map_string_u32(
+				IP.unique_term_mapping[col_idx],
+				UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id) + "_" + std::to_string(col_idx)
+				);
+		serialize_inverted_index(
+				IP.II[col_idx], 
+				INVERTED_INDEX_PATH + "_" + std::to_string(partition_id) + "_" + std::to_string(col_idx)
+				);
+	}
 	serialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
 	std::vector<uint8_t> compressed_line_offsets;
@@ -1006,8 +1037,16 @@ void _BM25::load_index_partition(
 
 	BM25Partition& IP = index_partitions[partition_id];
 
-	deserialize_robin_hood_flat_map_string_u32(IP.unique_term_mapping, UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id));
-	deserialize_inverted_index(IP.II, INVERTED_INDEX_PATH + "_" + std::to_string(partition_id));
+	for (uint16_t col_idx = 0; col_idx < search_col_idxs.size(); ++col_idx) {
+		deserialize_robin_hood_flat_map_string_u32(
+				IP.unique_term_mapping[col_idx],
+				UNIQUE_TERM_MAPPING_PATH + "_" + std::to_string(partition_id) + "_" + std::to_string(col_idx)
+				);
+		deserialize_inverted_index(
+				IP.II[col_idx], 
+				INVERTED_INDEX_PATH + "_" + std::to_string(partition_id) + "_" + std::to_string(col_idx)
+				);
+	}
 	deserialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
 	std::vector<uint8_t> compressed_line_offsets;
@@ -1084,10 +1123,14 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 		out_file.write(col.data(), col_length);
 	}
 
-	// Write search_col std::string
-	// size_t search_col_length = search_col.size();
-	// out_file.write(reinterpret_cast<const char*>(&search_col_length), sizeof(search_col_length));
-	// out_file.write(search_col.data(), search_col_length);
+	// Write search_cols std::vector<std::string>
+	columns_size = search_cols.size();
+	out_file.write(reinterpret_cast<const char*>(&columns_size), sizeof(columns_size));
+	for (const auto& search_col : search_cols) {
+		size_t search_col_length = search_col.size();
+		out_file.write(reinterpret_cast<const char*>(&search_col_length), sizeof(search_col_length));
+		out_file.write(search_col.data(), search_col_length);
+	}
 
 	out_file.close();
 
@@ -1166,11 +1209,17 @@ void _BM25::load_from_disk(const std::string& db_dir) {
         in_file.read(&col[0], col_length);
     }
 
-    // Read search_col std::string
-    size_t search_col_length;
-    in_file.read(reinterpret_cast<char*>(&search_col_length), sizeof(search_col_length));
-    // search_col.resize(search_col_length);
-    // in_file.read(&search_col[0], search_col_length);
+    // Read search_cols std::vector<std::string>
+	in_file.read(reinterpret_cast<char*>(&columns_size), sizeof(columns_size));
+	search_cols.resize(columns_size);
+	for (auto& search_col : search_cols) {
+		size_t search_col_length;
+		in_file.read(reinterpret_cast<char*>(&search_col_length), sizeof(search_col_length));
+		search_col.resize(search_col_length);
+		in_file.read(&search_col[0], search_col_length);
+	}
+
+	search_col_idxs.resize(search_cols.size());
 
     in_file.close();
 
@@ -1220,6 +1269,11 @@ _BM25::_BM25(
 	std::vector<std::thread> threads;
 
 	index_partitions.resize(num_partitions);
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		index_partitions[i].II.resize(search_cols.size());
+		index_partitions[i].unique_term_mapping.resize(search_cols.size());
+	}
+
 	num_docs = 0;
 
 	progress_bars.resize(num_partitions);
@@ -1290,13 +1344,15 @@ _BM25::_BM25(
 		BM25Partition& IP = index_partitions[i];
 
 		uint64_t part_size = 0;
-		for (const auto& row : IP.II.inverted_index_compressed) {
-			part_size += sizeof(uint8_t) * row.doc_ids.size();
-			part_size += sizeof(RLEElement_u8) * row.term_freqs.size();
+		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+			for (const auto& row : IP.II[col_idx].inverted_index_compressed) {
+				part_size += sizeof(uint8_t) * row.doc_ids.size();
+				part_size += sizeof(RLEElement_u8) * row.term_freqs.size();
+			}
+			unique_terms_found += IP.unique_term_mapping[col_idx].size();
 		}
 		total_size += part_size;
 
-		unique_terms_found += IP.unique_term_mapping.size();
 	}
 	total_size /= 1024 * 1024;
 	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
@@ -1399,13 +1455,15 @@ _BM25::_BM25(
 		BM25Partition& IP = index_partitions[i];
 
 		uint64_t part_size = 0;
-		for (const auto& row : IP.II.inverted_index_compressed) {
-			part_size += sizeof(uint8_t) * row.doc_ids.size();
-			part_size += sizeof(RLEElement_u8) * row.term_freqs.size();
+		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+			for (const auto& row : IP.II[col_idx].inverted_index_compressed) {
+				part_size += sizeof(uint8_t) * row.doc_ids.size();
+				part_size += sizeof(RLEElement_u8) * row.term_freqs.size();
+			}
+			unique_terms_found += IP.unique_term_mapping[col_idx].size();
 		}
 		total_size += part_size;
 
-		unique_terms_found += IP.unique_term_mapping.size();
 	}
 	total_size /= 1024 * 1024;
 	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
@@ -1427,15 +1485,17 @@ _BM25::_BM25(
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		BM25Partition& IP = index_partitions[i];
 
-		IP.II.prev_doc_ids.clear();
-		IP.II.prev_doc_ids.shrink_to_fit();
+		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+			IP.II[col_idx].prev_doc_ids.clear();
+			IP.II[col_idx].prev_doc_ids.shrink_to_fit();
 
-		for (auto& row : IP.II.inverted_index_compressed) {
-			if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
-				row.doc_ids.clear();
-				row.doc_ids.clear();
-				row.term_freqs.clear();
-				row.term_freqs.shrink_to_fit();
+			for (auto& row : IP.II[col_idx].inverted_index_compressed) {
+				if (row.doc_ids.size() == 0 || get_rle_u8_row_size(row.term_freqs) < (uint64_t)min_df) {
+					row.doc_ids.clear();
+					row.doc_ids.clear();
+					row.term_freqs.clear();
+					row.term_freqs.shrink_to_fit();
+				}
 			}
 		}
 	}
@@ -1472,23 +1532,18 @@ std::vector<BM25Result> _BM25::_query_partition(
 			substr += toupper(c); 
 			continue;
 		}
-		if (IP.unique_term_mapping.find(substr) == IP.unique_term_mapping.end()) {
-			continue;
-		}
 
-		if (IP.II.inverted_index_compressed[IP.unique_term_mapping[substr]].doc_ids.size() < (uint64_t)min_df) {
+		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+			robin_hood::unordered_map<std::string, uint32_t>& vocab = IP.unique_term_mapping[col_idx];
+
+			if (vocab.find(substr) == vocab.end()) {
+				continue;
+			}
+
+			term_idxs.push_back(vocab[substr]);
 			substr.clear();
-			continue;
 		}
 
-		term_idxs.push_back(IP.unique_term_mapping[substr]);
-		substr.clear();
-	}
-
-	if (IP.unique_term_mapping.find(substr) != IP.unique_term_mapping.end()) {
-		if (IP.II.inverted_index_compressed[IP.unique_term_mapping[substr]].doc_ids.size() > 0) {
-			term_idxs.push_back(IP.unique_term_mapping[substr]);
-		}
 	}
 
 	if (term_idxs.size() == 0) {
@@ -1501,35 +1556,39 @@ std::vector<BM25Result> _BM25::_query_partition(
 
 	double total_get_row_time = 0;
 	for (const uint64_t& term_idx : term_idxs) {
-		uint64_t df = get_rle_u8_row_size(IP.II.inverted_index_compressed[term_idx].term_freqs);
+		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+			float boost_factor = boost_factors[col_idx];
 
-		if (df == 0) {
-			continue;
-		}
+			uint64_t df = get_rle_u8_row_size(IP.II[col_idx].inverted_index_compressed[term_idx].term_freqs);
 
-		if (df > query_max_df) continue;
-
-		float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
-
-		auto get_row_start = std::chrono::high_resolution_clock::now();
-		IIRow row = get_II_row(&IP.II, term_idx, k);
-		auto get_row_end = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double, std::milli> get_row_elapsed_ms = get_row_end - get_row_start;
-		total_get_row_time += get_row_elapsed_ms.count();
-
-		// Partial sort row.doc_ids by row.term_freqs to get top k
-		for (uint64_t i = 0; i < df; ++i) {
-
-			uint64_t doc_id  = row.doc_ids[i];
-			float tf 		 = row.term_freqs[i];
-			float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id);
-
-			doc_id += doc_offset;
-			if (doc_scores.find(doc_id) == doc_scores.end()) {
-				doc_scores[doc_id] = bm25_score;
+			if (df == 0) {
+				continue;
 			}
-			else {
-				doc_scores[doc_id] += bm25_score;
+
+			if (df > query_max_df) continue;
+
+			float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
+
+			auto get_row_start = std::chrono::high_resolution_clock::now();
+			IIRow row = get_II_row(&IP.II[col_idx], term_idx, k);
+			auto get_row_end = std::chrono::high_resolution_clock::now();
+			std::chrono::duration<double, std::milli> get_row_elapsed_ms = get_row_end - get_row_start;
+			total_get_row_time += get_row_elapsed_ms.count();
+
+			// Partial sort row.doc_ids by row.term_freqs to get top k
+			for (uint64_t i = 0; i < df; ++i) {
+
+				uint64_t doc_id  = row.doc_ids[i];
+				float tf 		 = row.term_freqs[i];
+				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factor;
+
+				doc_id += doc_offset;
+				if (doc_scores.find(doc_id) == doc_scores.end()) {
+					doc_scores[doc_id] = bm25_score;
+				}
+				else {
+					doc_scores[doc_id] += bm25_score;
+				}
 			}
 		}
 	}
@@ -1658,8 +1717,11 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		uint32_t query_max_df,
 		std::vector<float> boost_factors
 		) {
+
 	if (boost_factors.size() != search_cols.size()) {
-		std::cout << "Error: Boost factors must be the same size as the number of partitions." << std::endl;
+		std::cout << "Error: Boost factors must be the same size as the number of search fields." << std::endl;
+		std::cout << "Number of search fields: " << search_cols.size() << std::endl;
+		std::cout << "Number of boost factors: " << boost_factors.size() << std::endl;
 		std::exit(1);
 	}
 

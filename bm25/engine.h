@@ -9,7 +9,7 @@
 #include "robin_hood.h"
 
 
-#define DEBUG 0
+#define DEBUG 1
 
 #define SEED 42
 
@@ -79,16 +79,15 @@ inline IIRow get_II_row(
 		);
 
 typedef struct {
-	InvertedIndex II;
-	robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
+	std::vector<InvertedIndex> II;
+	// robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
+	std::vector<robin_hood::unordered_flat_map<std::string, uint32_t>> unique_term_mapping;
 	std::vector<uint16_t> doc_sizes;
 	std::vector<uint64_t> line_offsets;
 
 	uint64_t num_docs;
 	float    avg_doc_size;
 } BM25Partition;
-
-BM25Partition init_bm25_partition();
 
 
 class _BM25 {
@@ -105,11 +104,9 @@ class _BM25 {
 
 		SupportedFileTypes file_type;
 
-		// std::string search_col;
 		std::vector<std::string> search_cols;
 		std::string filename;
 		std::vector<std::string> columns;
-		// int16_t search_col_idx;
 		std::vector<int16_t> search_col_idxs;
 		uint16_t header_bytes;
 
@@ -124,7 +121,6 @@ class _BM25 {
 
 		_BM25(
 				std::string filename,
-				// std::string search_col,
 				std::vector<std::string> search_cols,
 				int   min_df,
 				float max_df,
@@ -191,7 +187,8 @@ class _BM25 {
 				const char terminator,
 				uint64_t doc_id,
 				uint32_t& unique_terms_found,
-				uint16_t partition_id
+				uint16_t partition_id,
+				uint16_t col_idx
 				);
 
 		void determine_partition_boundaries_csv();
