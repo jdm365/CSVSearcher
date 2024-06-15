@@ -165,7 +165,7 @@ def test_bm25_json(json_filename: str, search_cols: List[str]):
     sample = df[search_cols[0]].values
 
     init = perf_counter()
-    model = BM25(stopwords='english')#, num_partitions=1)
+    model = BM25(stopwords='english')
     model.index_file(filename=json_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -182,8 +182,8 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str]):
     sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
-    ## model = BM25(max_df=25_000, stopwords='english')
-    model = BM25(stopwords='english')
+    model = BM25(max_df=25_000, stopwords='english')
+    ## model = BM25(stopwords='english')
     model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -267,7 +267,7 @@ if __name__ == '__main__':
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_cols='text')
     ## test_bm25_csv(CSV_FILENAME, search_cols='name')
-    test_bm25_csv(CSV_FILENAME, search_cols=['title'])
-    test_bm25_json(JSON_FILENAME, search_cols=['title'])
+    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
+    ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
     ## test_documents(CSV_FILENAME, search_cols='title')

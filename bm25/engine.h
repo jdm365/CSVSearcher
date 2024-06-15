@@ -9,7 +9,7 @@
 #include "robin_hood.h"
 
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define SEED 42
 
@@ -219,17 +219,22 @@ class _BM25 {
 				uint16_t partition_id
 				);
 
-		std::vector<BM25Result> query(
-				std::string& query,
-				uint32_t top_k,
-				uint32_t query_max_df,
-				std::vector<float> boost_factors
+		void add_query_term(
+				std::string& substr,
+				std::vector<std::vector<uint64_t>>& term_idxs,
+				uint16_t partition_id
 				);
 		std::vector<BM25Result> _query_partition(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df,
 				uint16_t partition_id,
+				std::vector<float> boost_factors
+				);
+		std::vector<BM25Result> query(
+				std::string& query,
+				uint32_t top_k,
+				uint32_t query_max_df,
 				std::vector<float> boost_factors
 				);
 

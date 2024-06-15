@@ -42,7 +42,7 @@ class SearchApp:
         self.bm25 = BM25(
                 min_df=1,
                 ## max_df=0.5,
-                num_partitions=1,
+                ## num_partitions=1,
                 ## b=0.4,
                 k1=1.5
                 )
@@ -86,7 +86,8 @@ class SearchApp:
         init = perf_counter()
         vals = self.bm25.get_topk_docs(
                 query, 
-                k=100
+                k=100,
+                boost_factors=[2, 1]
                )
         print(f"Query took {perf_counter() - init:.4f} seconds")
 
@@ -99,6 +100,7 @@ if __name__ == '__main__':
     DATA_DIR = f"{CURRENT_DIR}/../tests"
     FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
     SEARCH_COLS = ['title', 'artist']
+    ## SEARCH_COLS = ['title']
 
     ## DATA_DIR = f"{CURRENT_DIR}/.."
     ## FILEPATH = os.path.join(DATA_DIR, 'nodes_export_subset.csv')

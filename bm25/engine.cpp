@@ -113,7 +113,9 @@ void _BM25::determine_partition_boundaries_csv() {
 
 	if (max_df < 2.0f) {
 		// Guess for now
-		this->max_df = (int)file_size * max_df / 100;
+		this->max_df = (int)file_size * max_df / (100 * num_partitions);
+	} else {
+		this->max_df = (int)(max_df / num_partitions);
 	}
 
 	partition_boundaries.push_back(header_bytes);
@@ -261,17 +263,16 @@ uint32_t _BM25::process_doc_partition(
 	BM25Partition& IP = index_partitions[partition_id];
 	InvertedIndex& II = IP.II[col_idx];
 
-	uint64_t char_idx = 0;
+	uint32_t char_idx = 0;
 
 	std::string term = "";
 
 	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
-	printf("Doc id: %lu\n", doc_id);
-	fflush(stdout);
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
-	while (doc[char_idx] != terminator) {
+	// while (doc[char_idx] != ',') {
+	while (true) {
 		if (char_idx > 1048576) {
 			std::cout << "Search field not found on line: " << doc_id << std::endl;
 			std::cout << "Doc: " << doc << std::endl;
@@ -283,6 +284,22 @@ uint32_t _BM25::process_doc_partition(
 			term += toupper(doc[char_idx]);
 			++char_idx;
 			continue;
+		}
+		if (terminator == ',' && doc[char_idx] == ',') {
+			++char_idx;
+			break;
+		}
+
+		if (terminator == '"' && doc[char_idx] == '"') {
+			if (doc[++char_idx] == ',') {
+				break;
+			}
+
+			if (doc[char_idx] == terminator) {
+				term += terminator;
+				++char_idx;
+				continue;
+			}
 		}
 
 		if (doc[char_idx] == ' ' && term == "") {
@@ -298,7 +315,10 @@ uint32_t _BM25::process_doc_partition(
 				continue;
 			}
 
-			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(term, unique_terms_found);
+			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+					term, 
+					unique_terms_found
+					);
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
@@ -330,7 +350,10 @@ uint32_t _BM25::process_doc_partition(
 
 	if (term != "") {
 		if (stop_words.find(term) == stop_words.end()) {
-			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(term, unique_terms_found);
+			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+					term, 
+					unique_terms_found
+					);
 
 			if (add) {
 				// New term
@@ -536,7 +559,8 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	uint64_t line_num = 0;
 	uint64_t byte_offset = start_byte;
 
-	uint32_t unique_terms_found = 0;
+	// uint32_t unique_terms_found = 0;
+	std::vector<uint32_t> unique_terms_found(search_cols.size(), 0);
 
 	const int UPDATE_INTERVAL = 10000;
 	while ((read = getline(&line, &len, f)) != -1) {
@@ -598,7 +622,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 									&line[char_idx], 
 									'"', 
 									line_num, 
-									unique_terms_found, 
+									unique_terms_found[search_col_idx], 
 									partition_id,
 									search_col_idx++
 									); ++char_idx;
@@ -648,7 +672,9 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	free(line);
 
 	if (DEBUG) {
-		std::cout << "Vocab size: " << unique_terms_found << std::endl;
+		for (uint16_t col = 0; col < search_cols.size(); ++col) {
+			std::cout << "Vocab size: " << unique_terms_found[col] << std::endl;
+		}
 	}
 
 	IP.num_docs = num_lines;
@@ -713,14 +739,15 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 		std::exit(1);
 	}
 
-		// Read the file line by line
+	// Read the file line by line
 	char*    line = NULL;
 	size_t   len = 0;
 	ssize_t  read;
 	uint64_t line_num = 0;
 	uint64_t byte_offset = start_byte;
 
-	uint32_t unique_terms_found = 0;
+	// uint32_t unique_terms_found = 0;
+	std::vector<uint32_t> unique_terms_found(search_cols.size());
 
 	// Small string optimization limit on most platforms
 	std::string doc = "";
@@ -761,18 +788,30 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 					continue;
 				}
 
+				if (line[char_idx] == '\n') {
+					printf("Newline found before end.\n");
+					printf("Col idx: %d\n", col_idx);
+					printf("Line: %s", line);
+					exit(1);
+				}
+
 				if (line[char_idx] == '"') {
 					// Skip to next unescaped quote
 					++char_idx;
 
-					while (line[char_idx] != '"') {
-						if (line[char_idx] == '\\') {
-							char_idx += 2;
-							continue;
+					while (1) {
+						if (line[char_idx] == '"') {
+							if (line[char_idx + 1] == '"') {
+								char_idx += 2;
+								continue;
+							} 
+							else {
+								++char_idx;
+								break;
+							}
 						}
 						++char_idx;
 					}
-					++char_idx;
 				}
 
 				if (line[char_idx] == ',') ++col_idx;
@@ -784,13 +823,14 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 			if (line[char_idx] == '"') {
 				++char_idx;
 				char_idx += process_doc_partition(
-					&line[char_idx], 
-					'"', 
-					line_num, 
-					unique_terms_found, 
+					&line[char_idx],
+					'"',
+					line_num,
+					unique_terms_found[_search_col_idx],
 					partition_id,
-					_search_col_idx++
+					_search_col_idx
 					); ++char_idx;
+				++_search_col_idx;
 				continue;
 			}
 
@@ -798,17 +838,20 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 				&line[char_idx], 
 				end_delim,
 				line_num, 
-				unique_terms_found, 
+				unique_terms_found[_search_col_idx], 
 				partition_id,
-				_search_col_idx++
+				_search_col_idx
 				); ++char_idx;
+			++_search_col_idx;
 		}
 		++line_num;
 	}
 	if (!DEBUG) update_progress(line_num + 1, num_lines, partition_id);
 
 	if (DEBUG) {
-		std::cout << "Vocab size: " << unique_terms_found << std::endl;
+		for (uint32_t col = 0; col < search_col_idxs.size(); ++col) {
+			std::cout << "Vocab size " << col << ": " << unique_terms_found[col] << std::endl;
+		}
 	}
 
 
@@ -1513,6 +1556,26 @@ inline float _BM25::_compute_bm25(
 	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.avg_doc_size));
 }
 
+void _BM25::add_query_term(
+		std::string& substr,
+		std::vector<std::vector<uint64_t>>& term_idxs,
+		uint16_t partition_id
+		) {
+	BM25Partition& IP = index_partitions[partition_id];
+
+	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		robin_hood::unordered_map<std::string, uint32_t>& vocab = IP.unique_term_mapping[col_idx];
+
+		if (vocab.find(substr) == vocab.end()) {
+			continue;
+		}
+
+		term_idxs[col_idx].push_back(vocab[substr]);
+	}
+	substr.clear();
+}
+
+
 std::vector<BM25Result> _BM25::_query_partition(
 		std::string& query, 
 		uint32_t k,
@@ -1521,7 +1584,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 		std::vector<float> boost_factors
 		) {
 	auto start = std::chrono::high_resolution_clock::now();
-	std::vector<uint64_t> term_idxs;
+	std::vector<std::vector<uint64_t>> term_idxs(search_cols.size());
 	BM25Partition& IP = index_partitions[partition_id];
 
 	uint64_t doc_offset = (file_type == IN_MEMORY) ? partition_boundaries[partition_id] : 0;
@@ -1533,33 +1596,26 @@ std::vector<BM25Result> _BM25::_query_partition(
 			continue;
 		}
 
-		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
-			robin_hood::unordered_map<std::string, uint32_t>& vocab = IP.unique_term_mapping[col_idx];
-
-			if (vocab.find(substr) == vocab.end()) {
-				continue;
-			}
-
-			term_idxs.push_back(vocab[substr]);
-			substr.clear();
-		}
-
+		add_query_term(substr, term_idxs, partition_id);	
+	}
+	if (!substr.empty()) {
+		add_query_term(substr, term_idxs, partition_id);
 	}
 
-	if (term_idxs.size() == 0) {
-		return std::vector<BM25Result>();
-	}
+	if (term_idxs.size() == 0) return std::vector<BM25Result>();
 
 	// Gather docs that contain at least one term from the query
 	// Uses dynamic max_df for performance
 	robin_hood::unordered_map<uint64_t, float> doc_scores;
 
 	double total_get_row_time = 0;
-	for (const uint64_t& term_idx : term_idxs) {
-		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		for (const uint64_t& term_idx : term_idxs[col_idx]) {
 			float boost_factor = boost_factors[col_idx];
 
-			uint64_t df = get_rle_u8_row_size(IP.II[col_idx].inverted_index_compressed[term_idx].term_freqs);
+			uint64_t df = get_rle_u8_row_size(
+					IP.II[col_idx].inverted_index_compressed[term_idx].term_freqs
+					);
 
 			if (df == 0) {
 				continue;
