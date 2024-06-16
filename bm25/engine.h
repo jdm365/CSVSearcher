@@ -157,7 +157,7 @@ class _BM25 {
 		}
 
 		_BM25(
-				std::vector<std::string>& documents,
+				std::vector<std::vector<std::string>>& documents,
 				int   min_df,
 				float max_df,
 				float k1,
@@ -195,7 +195,7 @@ class _BM25 {
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_in_memory(
-				std::vector<std::string>& documents,
+				std::vector<std::vector<std::string>>& documents,
 				uint64_t start_idx, 
 				uint64_t end_idx, 
 				uint16_t partition_id

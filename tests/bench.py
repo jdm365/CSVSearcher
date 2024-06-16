@@ -226,14 +226,14 @@ def test_bm25_parquet(filename: str, search_cols: List[str]):
 
 def test_documents(csv_filename: str, search_cols: List[str]):
     df = pl.read_csv(csv_filename)
-    names = df.select(search_cols).to_series(0)
+    names = df.select(search_cols)
 
     companies_sample = names.sample(1000)
 
     bm25 = BM25(min_df=10, max_df=50_000)
 
     init = perf_counter()
-    bm25.index_documents(documents=names.to_list())
+    bm25.index_documents(documents=names)
     print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
 
     for company in tqdm(companies_sample, desc="Querying"):
@@ -267,7 +267,7 @@ if __name__ == '__main__':
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_cols='text')
     ## test_bm25_csv(CSV_FILENAME, search_cols='name')
-    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
+    ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
     ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
-    ## test_documents(CSV_FILENAME, search_cols='title')
+    test_documents(CSV_FILENAME, search_cols=['title', 'artist'])

@@ -272,7 +272,6 @@ uint32_t _BM25::process_doc_partition(
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
-	// while (doc[char_idx] != ',') {
 	while (true) {
 		if (char_idx > 1048576) {
 			std::cout << "Search field not found on line: " << doc_id << std::endl;
@@ -286,7 +285,13 @@ uint32_t _BM25::process_doc_partition(
 			++char_idx;
 			continue;
 		}
+
 		if (terminator == ',' && doc[char_idx] == ',') {
+			++char_idx;
+			break;
+		}
+
+		if (terminator == '\n' && doc[char_idx] == '\n') {
 			++char_idx;
 			break;
 		}
@@ -881,13 +886,11 @@ void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_
 }
 
 void _BM25::read_in_memory(
-		std::vector<std::string>& documents,
+		std::vector<std::vector<std::string>>& documents,
 		uint64_t start_idx, 
 		uint64_t end_idx, 
 		uint16_t partition_id
 		) {
-	// TODO: Fix
-
 	BM25Partition& IP = index_partitions[partition_id];
 
 	IP.num_docs = end_idx - start_idx;
@@ -898,27 +901,27 @@ void _BM25::read_in_memory(
 	const int UPDATE_INTERVAL = 10000;
 
 	for (uint64_t line_num = start_idx; line_num < end_idx; ++line_num) {
-		std::string& doc = documents[line_num];
-
 		if (!DEBUG) {
 			if (cntr % UPDATE_INTERVAL == 0) {
 				update_progress(cntr, IP.num_docs, partition_id);
 			}
 		}
 
-		process_doc_partition(
-			(doc + "\n").c_str(),
-			'\n',
-			cntr, 
-			unique_terms_found, 
-			partition_id,
-			0
-			);
+		for (uint16_t col = 0; col < search_cols.size(); ++col) {
+			std::string& doc = documents[line_num][col];
+			process_doc_partition(
+				(doc + "\n").c_str(),
+				'\n',
+				cntr, 
+				unique_terms_found, 
+				partition_id,
+				col
+				);
 
+		}
 		++cntr;
 	}
 	if (!DEBUG) update_progress(cntr + 1, IP.num_docs, partition_id);
-
 
 	// Calc avg_doc_size
 	double avg_doc_size = 0;
@@ -1432,7 +1435,7 @@ _BM25::_BM25(
 
 
 _BM25::_BM25(
-		std::vector<std::string>& documents,
+		std::vector<std::vector<std::string>>& documents,
 		int min_df,
 		float max_df,
 		float k1,
@@ -1455,7 +1458,16 @@ _BM25::_BM25(
 	num_docs = documents.size();
 
 	if (max_df < 2.0f) {
-		this->max_df = (int)num_docs * max_df;
+		// Guess for now
+		this->max_df = documents.size() * max_df / (100 * num_partitions);
+	} else {
+		this->max_df = (int)(max_df / num_partitions);
+	}
+
+	index_partitions.resize(num_partitions);
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		index_partitions[i].II.resize(search_cols.size());
+		index_partitions[i].unique_term_mapping.resize(search_cols.size());
 	}
 
 	index_partitions.resize(num_partitions);
