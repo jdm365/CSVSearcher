@@ -895,7 +895,7 @@ void _BM25::read_in_memory(
 
 	IP.num_docs = end_idx - start_idx;
 
-	uint32_t unique_terms_found = 0;
+	std::vector<uint32_t> unique_terms_found(search_cols.size(), 0);
 
 	uint32_t cntr = 0;
 	const int UPDATE_INTERVAL = 10000;
@@ -913,11 +913,10 @@ void _BM25::read_in_memory(
 				(doc + "\n").c_str(),
 				'\n',
 				cntr, 
-				unique_terms_found, 
+				unique_terms_found[col],
 				partition_id,
 				col
 				);
-
 		}
 		++cntr;
 	}
@@ -1456,6 +1455,9 @@ _BM25::_BM25(
 	file_type = IN_MEMORY;
 
 	num_docs = documents.size();
+
+	search_cols.resize(documents[0].size());
+	search_col_idxs.resize(documents[0].size());
 
 	if (max_df < 2.0f) {
 		// Guess for now
