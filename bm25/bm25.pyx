@@ -71,6 +71,8 @@ cdef extern from "engine.h":
         void save_to_disk(string db_dir) nogil
         void load_from_disk(string db_dir) nogil
 
+        
+
 
 cdef class BM25:
     cdef _BM25* bm25
@@ -227,10 +229,8 @@ cdef class BM25:
             str query, 
             int query_max_df = INT_MAX, 
             int k = 10,
-            list boost_factors = None
+            list boost_factors = [] 
             ):
-        if boost_factors is None:
-            boost_factors = len(self.search_cols) * [1]
 
         cdef vector[float] _boost_factors
         _boost_factors.reserve(len(boost_factors))

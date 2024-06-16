@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -113,7 +114,7 @@ void _BM25::determine_partition_boundaries_csv() {
 
 	if (max_df < 2.0f) {
 		// Guess for now
-		this->max_df = (int)file_size * max_df / (100 * num_partitions);
+		this->max_df = file_size * max_df / (100 * num_partitions);
 	} else {
 		this->max_df = (int)(max_df / num_partitions);
 	}
@@ -1066,7 +1067,9 @@ void _BM25::save_index_partition(
 	compressed_line_offsets.reserve(IP.line_offsets.size() * 2);
 	compress_uint64(IP.line_offsets, compressed_line_offsets);
 
-	serialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id));
+	serialize_vector_u8(
+			compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id)
+			);
 }
 
 void _BM25::load_index_partition(
@@ -1079,6 +1082,8 @@ void _BM25::load_index_partition(
 	std::string LINE_OFFSETS_PATH 		 = db_dir + "/line_offsets.bin";
 
 	BM25Partition& IP = index_partitions[partition_id];
+	IP.unique_term_mapping.resize(search_col_idxs.size());
+	IP.II.resize(search_col_idxs.size());
 
 	for (uint16_t col_idx = 0; col_idx < search_col_idxs.size(); ++col_idx) {
 		deserialize_robin_hood_flat_map_string_u32(
@@ -1093,7 +1098,9 @@ void _BM25::load_index_partition(
 	deserialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
 	std::vector<uint8_t> compressed_line_offsets;
-	deserialize_vector_u8(compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id));
+	deserialize_vector_u8(
+			compressed_line_offsets, LINE_OFFSETS_PATH + "_" + std::to_string(partition_id)
+			);
 
 	decompress_uint64(compressed_line_offsets, IP.line_offsets);
 }
@@ -1123,6 +1130,7 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
 		threads.push_back(std::thread(&_BM25::save_index_partition, this, db_dir, partition_id));
 	}
+
 	for (auto& thread : threads) {
 		thread.join();
 	}
@@ -1210,18 +1218,9 @@ void _BM25::load_from_disk(const std::string& db_dir) {
     in_file.read(reinterpret_cast<char*>(&b), sizeof(b));
 	in_file.read(reinterpret_cast<char*>(&num_partitions), sizeof(num_partitions));
 
+
 	index_partitions.clear();
 	index_partitions.resize(num_partitions);
-
-	std::vector<std::thread> threads;
-
-	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
-		threads.push_back(std::thread(&_BM25::load_index_partition, this, db_dir, partition_id));
-	}
-
-	for (auto& thread : threads) {
-		thread.join();
-	}
 
 	// Load rest of metadata.
 	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
@@ -1265,6 +1264,16 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 	search_col_idxs.resize(search_cols.size());
 
     in_file.close();
+
+	std::vector<std::thread> threads;
+
+	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
+		threads.push_back(std::thread(&_BM25::load_index_partition, this, db_dir, partition_id));
+	}
+
+	for (auto& thread : threads) {
+		thread.join();
+	}
 
 	auto end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> elapsed_seconds = end - start;
@@ -1617,11 +1626,9 @@ std::vector<BM25Result> _BM25::_query_partition(
 					IP.II[col_idx].inverted_index_compressed[term_idx].term_freqs
 					);
 
-			if (df == 0) {
+			if (df == 0 || df > query_max_df || df > max_df) {
 				continue;
 			}
-
-			if (df > query_max_df) continue;
 
 			float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
 
@@ -1773,6 +1780,14 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		uint32_t query_max_df,
 		std::vector<float> boost_factors
 		) {
+	if (boost_factors.size() == 0) {
+		boost_factors.resize(search_cols.size());
+		memset(
+				&boost_factors[0],
+				1.0f,
+				search_cols.size() * sizeof(float)
+			  );
+	}
 
 	if (boost_factors.size() != search_cols.size()) {
 		std::cout << "Error: Boost factors must be the same size as the number of search fields." << std::endl;

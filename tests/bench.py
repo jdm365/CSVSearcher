@@ -182,7 +182,7 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str]):
     sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
-    model = BM25(max_df=25_000, stopwords='english')
+    model = BM25(max_df=0.1, stopwords='english')
     ## model = BM25(stopwords='english')
     model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
@@ -193,7 +193,7 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str]):
     print(f"Time to save: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
-    ## model.load(db_dir='bm25_model')
+    model.load(db_dir='bm25_model')
     print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     lens = []
@@ -219,7 +219,7 @@ def test_bm25_parquet(filename: str, search_cols: List[str]):
 
     init = perf_counter()
     for query in tqdm(sample, desc="Querying"):
-        result = model.get_topk_docs(query, k=10)
+        _ = model.get_topk_docs(query, k=10)
     time = perf_counter() - init
 
     print(f"Queries per second: {1000 / time:.2f}")

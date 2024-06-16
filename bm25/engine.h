@@ -49,8 +49,6 @@ enum SupportedFileTypes {
 	IN_MEMORY
 };
 
-uint64_t count_newlines_simd(FILE* f);
-
 typedef struct {
 	uint16_t num_repeats;
 	uint8_t  value;
