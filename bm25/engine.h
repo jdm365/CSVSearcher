@@ -145,6 +145,20 @@ class _BM25 {
 			fclose(f);
 			filename = std::string(buf);
 
+			if (filename == "in_memory") {
+				file_type = IN_MEMORY;
+			} else if (filename.find(".json") != std::string::npos) {
+				file_type = CSV;
+			} else if (filename.find(".csv") != std::string::npos) {
+				file_type = JSON;
+			} else {
+				std::cerr << "Error: file type not supported" << std::endl;
+				exit(1);
+			}
+
+			if (file_type == IN_MEMORY) {
+				return;
+			}
 			// Open the reference file
 			for (uint16_t i = 0; i < num_partitions; i++) {
 				FILE* ref_f = fopen(filename.c_str(), "r");

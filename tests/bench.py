@@ -230,7 +230,7 @@ def test_documents(csv_filename: str, search_cols: List[str]):
 
     companies_sample = names.sample(1000).to_series(0)
 
-    bm25 = BM25(max_df=50_000, num_partitions=1)
+    bm25 = BM25(max_df=50_000)
 
     init = perf_counter()
     bm25.index_documents(documents=names)

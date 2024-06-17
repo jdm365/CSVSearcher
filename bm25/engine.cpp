@@ -286,6 +286,10 @@ uint32_t _BM25::process_doc_partition(
 			continue;
 		}
 
+		if (doc[char_idx] == '\0') {
+			break;
+		}
+
 		if (terminator == ',' && doc[char_idx] == ',') {
 			++char_idx;
 			break;
@@ -1137,6 +1141,10 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 		thread.join();
 	}
 
+	// Save partition boundaries
+	std::string PARTITION_BOUNDARY_PATH = db_dir + "/partition_boundaries.bin";
+	serialize_vector_u64(partition_boundaries, PARTITION_BOUNDARY_PATH);
+
 	// Serialize smaller members.
 	std::ofstream out_file(METADATA_PATH, std::ios::binary);
 	if (!out_file) {
@@ -1204,6 +1212,7 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 	std::string DOC_SIZES_PATH 		     = db_dir + "/doc_sizes.bin";
 	std::string LINE_OFFSETS_PATH 		 = db_dir + "/line_offsets.bin";
 	std::string METADATA_PATH 			 = db_dir + "/metadata.bin";
+	std::string PARTITION_BOUNDARY_PATH  = db_dir + "/partition_boundaries.bin";
 
 	// Load smaller members.
 	std::ifstream in_file(METADATA_PATH, std::ios::binary);
@@ -1220,6 +1229,8 @@ void _BM25::load_from_disk(const std::string& db_dir) {
     in_file.read(reinterpret_cast<char*>(&b), sizeof(b));
 	in_file.read(reinterpret_cast<char*>(&num_partitions), sizeof(num_partitions));
 
+	// Load partition boundaries
+	deserialize_vector_u64(partition_boundaries, PARTITION_BOUNDARY_PATH);
 
 	index_partitions.clear();
 	index_partitions.resize(num_partitions);
