@@ -148,9 +148,9 @@ class _BM25 {
 			if (filename == "in_memory") {
 				file_type = IN_MEMORY;
 			} else if (filename.find(".json") != std::string::npos) {
-				file_type = CSV;
-			} else if (filename.find(".csv") != std::string::npos) {
 				file_type = JSON;
+			} else if (filename.find(".csv") != std::string::npos) {
+				file_type = CSV;
 			} else {
 				std::cerr << "Error: file type not supported" << std::endl;
 				exit(1);

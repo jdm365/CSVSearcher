@@ -84,6 +84,9 @@ def is_polars_dataframe(obj):
 def is_polars_series(obj):
     return type(obj).__name__ == 'Series' and hasattr(obj, 'to_frame') and hasattr(obj, 'name')
 
+def is_numpy_array(obj):
+    return type(obj).__name__ == 'ndarray'
+
 cdef class BM25:
     cdef _BM25* bm25
     cdef int    min_df
