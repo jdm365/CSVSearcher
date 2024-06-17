@@ -1730,6 +1730,22 @@ std::vector<BM25Result> _BM25::query(
 		) {
 	auto start = std::chrono::high_resolution_clock::now();
 
+	if (boost_factors.size() == 0) {
+		boost_factors.resize(search_cols.size());
+		memset(
+				&boost_factors[0],
+				1.0f,
+				search_cols.size() * sizeof(float)
+			  );
+	}
+
+	if (boost_factors.size() != search_cols.size()) {
+		std::cout << "Error: Boost factors must be the same size as the number of search fields." << std::endl;
+		std::cout << "Number of search fields: " << search_cols.size() << std::endl;
+		std::cout << "Number of boost factors: " << boost_factors.size() << std::endl;
+		std::exit(1);
+	}
+
 	std::vector<std::thread> threads;
 	std::vector<std::vector<BM25Result>> results(num_partitions);
 
@@ -1794,21 +1810,6 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		uint32_t query_max_df,
 		std::vector<float> boost_factors
 		) {
-	if (boost_factors.size() == 0) {
-		boost_factors.resize(search_cols.size());
-		memset(
-				&boost_factors[0],
-				1.0f,
-				search_cols.size() * sizeof(float)
-			  );
-	}
-
-	if (boost_factors.size() != search_cols.size()) {
-		std::cout << "Error: Boost factors must be the same size as the number of search fields." << std::endl;
-		std::cout << "Number of search fields: " << search_cols.size() << std::endl;
-		std::cout << "Number of boost factors: " << boost_factors.size() << std::endl;
-		std::exit(1);
-	}
 
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
 	std::vector<BM25Result> top_k_docs = query(_query, top_k, query_max_df, boost_factors);

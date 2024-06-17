@@ -308,6 +308,8 @@ cdef class BM25:
             int k = 10,
             list boost_factors = [] 
             ):
+        if query is None:
+            return [], []
 
         cdef vector[float] _boost_factors
         _boost_factors.reserve(len(boost_factors))

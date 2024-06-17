@@ -228,9 +228,9 @@ def test_documents(csv_filename: str, search_cols: List[str]):
     df = pl.read_csv(csv_filename)
     names = df.select(search_cols)
 
-    companies_sample = names.sample(1000)
+    companies_sample = names.sample(1000).to_series(0)
 
-    bm25 = BM25(max_df=50_000)
+    bm25 = BM25(max_df=50_000, num_partitions=1)
 
     init = perf_counter()
     bm25.index_documents(documents=names)
@@ -246,7 +246,7 @@ def test_documents(csv_filename: str, search_cols: List[str]):
     bm25.load(db_dir='bm25_model')
 
     for company in tqdm(companies_sample[:10], desc="Querying"):
-        bm25.get_topk_indices(company.to_list(), k=10)
+        bm25.get_topk_indices(company, k=10)
 
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
