@@ -286,16 +286,12 @@ uint32_t _BM25::process_doc_partition(
 			continue;
 		}
 
-		if (doc[char_idx] == '\0') {
-			break;
-		}
-
 		if (terminator == ',' && doc[char_idx] == ',') {
 			++char_idx;
 			break;
 		}
 
-		if (terminator == '\n' && doc[char_idx] == '\n') {
+		if (doc[char_idx] == '\n') {
 			++char_idx;
 			break;
 		}
