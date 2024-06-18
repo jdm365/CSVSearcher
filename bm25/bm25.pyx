@@ -48,7 +48,7 @@ cdef extern from "engine.h":
                 ) nogil
         _BM25(string db_dir) nogil
         _BM25(
-                vector[string]& documents,
+                vector[vector[string]]& documents,
                 int   min_df,
                 float max_df,
                 float k1,
@@ -71,6 +71,21 @@ cdef extern from "engine.h":
         void save_to_disk(string db_dir) nogil
         void load_from_disk(string db_dir) nogil
 
+        
+def is_pandas_dataframe(obj):
+    return type(obj).__name__ == 'DataFrame' and hasattr(obj, 'loc') and hasattr(obj, 'iloc')
+
+def is_pandas_series(obj):
+    return type(obj).__name__ == 'Series' and hasattr(obj, 'values') and hasattr(obj, 'index')
+
+def is_polars_dataframe(obj):
+    return type(obj).__name__ == 'DataFrame' and hasattr(obj, 'select') and hasattr(obj, 'filter')
+
+def is_polars_series(obj):
+    return type(obj).__name__ == 'Series' and hasattr(obj, 'to_frame') and hasattr(obj, 'name')
+
+def is_numpy_array(obj):
+    return type(obj).__name__ == 'ndarray'
 
 cdef class BM25:
     cdef _BM25* bm25
@@ -120,8 +135,30 @@ cdef class BM25:
         self._init_with_file(filename, self.search_cols)
 
 
-    def index_documents(self, list documents):
-        self._init_with_documents(documents)
+    def index_documents(self, documents):
+        assert len(documents) > 0, "Document count must be greater than 0"
+
+        self.filename = "in_memory"
+
+        if isinstance(documents[0], tuple) or isinstance(documents[0], list):
+            self._init_lists(documents)
+        elif isinstance(documents[0], dict):
+            self._init_dicts(documents)
+        elif isinstance(documents[0], str):
+            self._init_documents(documents)
+        elif is_pandas_dataframe(documents):
+            documents.fillna('', inplace=True)
+            self._init_lists(documents.values.tolist())
+        elif is_pandas_series(documents):
+            documents.fillna('', inplace=True)
+            self._init_documents(documents.tolist())
+        elif is_polars_dataframe(documents):
+            self._init_lists(documents.rows())
+        elif is_polars_series(documents):
+            documents = documents.str.fill_null("")
+            self._init_documents(documents.to_list())
+        else:
+            raise ValueError("Documents must be list, tuple, or dict.")
 
 
     def save(self, db_dir):
@@ -155,16 +192,61 @@ cdef class BM25:
         return True
 
 
-
-    cdef void _init_with_documents(self, list documents):
+    cdef void _init_lists(self, list documents):
         init = perf_counter()
-        self.filename = "in_memory"
 
-        cdef vector[string] docs
-        docs.reserve(len(documents))
+        cdef vector[vector[string]] docs
+        docs.resize(len(documents))
         cdef str doc
-        for doc in documents:
-            docs.push_back(doc.upper().encode("utf-8"))
+        for idx, doc_list in enumerate(documents):
+            for doc in doc_list:
+                if doc is None:
+                    docs[idx].push_back("".encode("utf-8"))
+                    continue
+
+                docs[idx].push_back(doc.upper().encode("utf-8"))
+
+        self.bm25 = new _BM25(
+                docs,
+                self.min_df,
+                self.max_df,
+                self.k1,
+                self.b,
+                self.num_partitions,
+                self.stopwords
+                )
+
+    cdef void _init_dicts(self, list documents):
+        init = perf_counter()
+
+        self.search_cols = sorted(self.search_cols)
+
+        cdef vector[vector[string]] docs
+        docs.resize(len(documents))
+        cdef str doc
+        for idx, doc_list in enumerate(documents):
+            doc_list = dict(sorted(doc_list.items(), key=lambda x: x[0]))
+            for doc in doc_list:
+                docs[idx].push_back(doc.upper().encode("utf-8"))
+
+        self.bm25 = new _BM25(
+                docs,
+                self.min_df,
+                self.max_df,
+                self.k1,
+                self.b,
+                self.num_partitions,
+                self.stopwords
+                )
+
+    cdef void _init_documents(self, list documents):
+        init = perf_counter()
+
+        cdef vector[vector[string]] docs
+        docs.resize(len(documents))
+        cdef str doc
+        for idx, doc in enumerate(documents):
+            docs[idx].push_back(doc.upper().encode("utf-8"))
 
         self.bm25 = new _BM25(
                 docs,
@@ -202,7 +284,7 @@ cdef class BM25:
 
         cdef list pydocs = self.arrow_table.column(text_col).to_pylist()
 
-        cdef vector[string] docs
+        cdef vector[vector[string]] docs
         cdef uint64_t num_docs = self.arrow_table.num_rows
         cdef uint64_t idx
 
@@ -227,10 +309,10 @@ cdef class BM25:
             str query, 
             int query_max_df = INT_MAX, 
             int k = 10,
-            list boost_factors = None
+            list boost_factors = [] 
             ):
-        if boost_factors is None:
-            boost_factors = len(self.search_cols) * [1]
+        if query is None:
+            return [], []
 
         cdef vector[float] _boost_factors
         _boost_factors.reserve(len(boost_factors))

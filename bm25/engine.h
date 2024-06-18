@@ -49,8 +49,6 @@ enum SupportedFileTypes {
 	IN_MEMORY
 };
 
-uint64_t count_newlines_simd(FILE* f);
-
 typedef struct {
 	uint16_t num_repeats;
 	uint8_t  value;
@@ -79,16 +77,15 @@ inline IIRow get_II_row(
 		);
 
 typedef struct {
-	InvertedIndex II;
-	robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
+	std::vector<InvertedIndex> II;
+	// robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
+	std::vector<robin_hood::unordered_flat_map<std::string, uint32_t>> unique_term_mapping;
 	std::vector<uint16_t> doc_sizes;
 	std::vector<uint64_t> line_offsets;
 
 	uint64_t num_docs;
 	float    avg_doc_size;
 } BM25Partition;
-
-BM25Partition init_bm25_partition();
 
 
 class _BM25 {
@@ -105,11 +102,9 @@ class _BM25 {
 
 		SupportedFileTypes file_type;
 
-		// std::string search_col;
 		std::vector<std::string> search_cols;
 		std::string filename;
 		std::vector<std::string> columns;
-		// int16_t search_col_idx;
 		std::vector<int16_t> search_col_idxs;
 		uint16_t header_bytes;
 
@@ -124,7 +119,6 @@ class _BM25 {
 
 		_BM25(
 				std::string filename,
-				// std::string search_col,
 				std::vector<std::string> search_cols,
 				int   min_df,
 				float max_df,
@@ -151,6 +145,20 @@ class _BM25 {
 			fclose(f);
 			filename = std::string(buf);
 
+			if (filename == "in_memory") {
+				file_type = IN_MEMORY;
+			} else if (filename.find(".json") != std::string::npos) {
+				file_type = JSON;
+			} else if (filename.find(".csv") != std::string::npos) {
+				file_type = CSV;
+			} else {
+				std::cerr << "Error: file type not supported" << std::endl;
+				exit(1);
+			}
+
+			if (file_type == IN_MEMORY) {
+				return;
+			}
 			// Open the reference file
 			for (uint16_t i = 0; i < num_partitions; i++) {
 				FILE* ref_f = fopen(filename.c_str(), "r");
@@ -163,7 +171,7 @@ class _BM25 {
 		}
 
 		_BM25(
-				std::vector<std::string>& documents,
+				std::vector<std::vector<std::string>>& documents,
 				int   min_df,
 				float max_df,
 				float k1,
@@ -191,7 +199,8 @@ class _BM25 {
 				const char terminator,
 				uint64_t doc_id,
 				uint32_t& unique_terms_found,
-				uint16_t partition_id
+				uint16_t partition_id,
+				uint16_t col_idx
 				);
 
 		void determine_partition_boundaries_csv();
@@ -200,7 +209,7 @@ class _BM25 {
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_in_memory(
-				std::vector<std::string>& documents,
+				std::vector<std::vector<std::string>>& documents,
 				uint64_t start_idx, 
 				uint64_t end_idx, 
 				uint16_t partition_id
@@ -222,17 +231,22 @@ class _BM25 {
 				uint16_t partition_id
 				);
 
-		std::vector<BM25Result> query(
-				std::string& query,
-				uint32_t top_k,
-				uint32_t query_max_df,
-				std::vector<float> boost_factors
+		void add_query_term(
+				std::string& substr,
+				std::vector<std::vector<uint64_t>>& term_idxs,
+				uint16_t partition_id
 				);
 		std::vector<BM25Result> _query_partition(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df,
 				uint16_t partition_id,
+				std::vector<float> boost_factors
+				);
+		std::vector<BM25Result> query(
+				std::string& query,
+				uint32_t top_k,
+				uint32_t query_max_df,
 				std::vector<float> boost_factors
 				);
 

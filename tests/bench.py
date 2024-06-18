@@ -165,7 +165,7 @@ def test_bm25_json(json_filename: str, search_cols: List[str]):
     sample = df[search_cols[0]].values
 
     init = perf_counter()
-    model = BM25(stopwords='english')#, num_partitions=1)
+    model = BM25(stopwords='english')
     model.index_file(filename=json_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -182,8 +182,8 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str]):
     sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
-    ## model = BM25(max_df=25_000, stopwords='english')
-    model = BM25(stopwords='english')
+    model = BM25(max_df=0.1, stopwords='english')
+    ## model = BM25(stopwords='english')
     model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -219,21 +219,21 @@ def test_bm25_parquet(filename: str, search_cols: List[str]):
 
     init = perf_counter()
     for query in tqdm(sample, desc="Querying"):
-        result = model.get_topk_docs(query, k=10)
+        _ = model.get_topk_docs(query, k=10)
     time = perf_counter() - init
 
     print(f"Queries per second: {1000 / time:.2f}")
 
 def test_documents(csv_filename: str, search_cols: List[str]):
     df = pl.read_csv(csv_filename)
-    names = df.select(search_cols).to_series(0)
+    names = df.select(search_cols)
 
-    companies_sample = names.sample(1000)
+    companies_sample = names.sample(1000).to_series(0)
 
-    bm25 = BM25(min_df=10, max_df=50_000)
+    bm25 = BM25(max_df=50_000)
 
     init = perf_counter()
-    bm25.index_documents(documents=names.to_list())
+    bm25.index_documents(documents=names)
     print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
 
     for company in tqdm(companies_sample, desc="Querying"):
@@ -267,7 +267,7 @@ if __name__ == '__main__':
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_cols='text')
     ## test_bm25_csv(CSV_FILENAME, search_cols='name')
-    test_bm25_csv(CSV_FILENAME, search_cols=['title'])
-    test_bm25_json(JSON_FILENAME, search_cols=['title'])
+    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
+    test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
-    ## test_documents(CSV_FILENAME, search_cols='title')
+    test_documents(CSV_FILENAME, search_cols=['title', 'artist'])
