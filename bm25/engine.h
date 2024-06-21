@@ -25,6 +25,12 @@ struct _compare_64 {
 	}
 };
 
+struct _compare_64_16 {
+	inline bool operator()(const std::pair<uint64_t, uint16_t>& a, const std::pair<uint64_t, uint16_t>& b) {
+		return a.second > b.second;
+	}
+};
+
 typedef struct {
 	uint64_t df;
 	std::vector<uint64_t> doc_ids;
@@ -70,11 +76,7 @@ typedef struct {
 	std::vector<InvertedIndexElement> inverted_index_compressed;
 } InvertedIndex;
 
-inline IIRow get_II_row(
-		InvertedIndex* II, 
-		uint64_t term_idx,
-		uint32_t k
-		);
+inline IIRow get_II_row(InvertedIndex* II, uint64_t term_idx);
 
 typedef struct {
 	std::vector<InvertedIndex> II;
@@ -237,6 +239,13 @@ class _BM25 {
 				uint16_t partition_id
 				);
 		std::vector<BM25Result> _query_partition(
+				std::string& query,
+				uint32_t top_k,
+				uint32_t query_max_df,
+				uint16_t partition_id,
+				std::vector<float> boost_factors
+				);
+		std::vector<BM25Result> _query_partition_streaming(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df,

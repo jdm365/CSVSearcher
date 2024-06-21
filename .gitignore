@@ -10,6 +10,7 @@ gen_compile_commands/
 *.zip
 *.json
 *.parquet
+mb_db/
 
 # C extensions
 *.so
