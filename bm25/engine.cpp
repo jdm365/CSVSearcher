@@ -1793,11 +1793,10 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 	}
 	if (total_terms == 0) return std::vector<BM25Result>();
 
-	InvertedIndexElement** II_streams;
-	II_streams = (InvertedIndexElement**)malloc(total_terms * sizeof(InvertedIndexElement*));
+	InvertedIndexElement** II_streams = (InvertedIndexElement**)malloc(total_terms * sizeof(InvertedIndexElement*));
 
 	std::vector<uint64_t> doc_freqs(total_terms, 0);
-	std::vector<uint64_t> idfs(total_terms, 0);
+	std::vector<float> idfs(total_terms, 0);
 	uint32_t cntr = 0;
 	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 		for (const uint64_t& term_idx : term_idxs[col_idx]) {
@@ -1821,7 +1820,7 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 		_compare_64_16> min_heap;
 
 	std::vector<uint64_t> prev_doc_ids(total_terms, 0);
-	std::vector<uint32_t> stream_idxs(total_terms, 1);
+	std::vector<uint32_t> stream_idxs(total_terms, 0);
 	std::vector<std::pair<uint16_t, uint32_t>> tf_counters(total_terms, std::make_pair(0, 0));
 	std::vector<uint32_t> tf_idxs(total_terms, 0);
 
@@ -1873,6 +1872,19 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 		} else {
 			// Same doc_id.
 			current_doc.score += _compute_bm25(doc_id, tf, idf, partition_id) * boost_factors[col_idx];
+			printf("Doc id: %lu\n", doc_id);
+			fflush(stdout);
+			printf("Min idx: %u\n", min_idx);
+			fflush(stdout);
+			printf("Col idx: %u\n", col_idx);
+			fflush(stdout);
+			printf("IDF: %f\n", idf);
+			fflush(stdout);
+			printf("TF: %f\n", tf);
+			fflush(stdout);
+			printf("Same doc_id: %lu\n", doc_id);
+			printf("Score: %f\n\n", current_doc.score);
+			fflush(stdout);
 		}
 
 		--tf_counters[min_idx].second;
