@@ -20,7 +20,8 @@
             "-L/usr/local/lib"
         ],
         "include_dirs": [
-            "bm25"
+            "bm25",
+            "bm25/bloom"
         ],
         "language": "c++",
         "name": "rapid_bm25",

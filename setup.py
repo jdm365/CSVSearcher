@@ -49,7 +49,7 @@ extensions = [
         sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp", "bm25/serialize.cpp"],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
-        include_dirs=["bm25"],
+        include_dirs=["bm25", "bm25/bloom"],
         extra_link_args=LINK_ARGS,
     ),
 ]

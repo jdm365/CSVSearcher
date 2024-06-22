@@ -201,7 +201,7 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str]):
 
     init = perf_counter()
     ## model = BM25(max_df=0.1, stopwords='english')
-    model = BM25(stopwords='english')#, num_partitions=1)
+    model = BM25(stopwords='english', num_partitions=1)
     model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 

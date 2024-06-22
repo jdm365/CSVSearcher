@@ -29,7 +29,18 @@
 #include "robin_hood.h"
 #include "vbyte_encoding.h"
 #include "serialize.h"
+#include "bloom/filter.hpp"
 
+
+BloomEntry init_bloom_entry(uint32_t num_docs, float fpr) {
+	BloomEntry bloom_entry = {
+		.bloom_filter = Bloom::Filter(
+			Bloom::Options::ForFalsePositiveRate(num_docs, fpr)
+			),
+		.topk_doc_ids = std::vector<uint64_t>()
+	};
+	return bloom_entry;
+}
 
 static inline bool is_valid_token(std::string& str) {
 	return (str.size() > 1 || isalnum(str[0]));
@@ -332,15 +343,16 @@ uint32_t _BM25::process_doc_partition(
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
-				II.inverted_index_compressed.push_back(InvertedIndexElement());
+				II.inverted_index_compressed.emplace_back();
 				II.prev_doc_ids.push_back(0);
+				II.doc_freqs.push_back(1);
 				++unique_terms_found;
 			}
 			else {
 				// Term already exists
-
 				if (terms_seen.find(it->second) == terms_seen.end()) {
 					terms_seen.insert({it->second, 1});
+					++II.doc_freqs[it->second];
 				}
 				else {
 					++(terms_seen[it->second]);
@@ -368,15 +380,16 @@ uint32_t _BM25::process_doc_partition(
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
-				II.inverted_index_compressed.push_back(InvertedIndexElement());
+				II.inverted_index_compressed.emplace_back();
 				II.prev_doc_ids.push_back(0);
+				II.doc_freqs.push_back(1);
 				++unique_terms_found;
 			}
 			else {
 				// Term already exists
-
 				if (terms_seen.find(it->second) == terms_seen.end()) {
 					terms_seen.insert({it->second, 1});
+					++II.doc_freqs[it->second];
 				}
 				else {
 					++(terms_seen[it->second]);
@@ -524,6 +537,51 @@ static inline void scan_to_next_key(
 		++char_idx;
 	}
 	++char_idx;
+}
+
+void _BM25::write_bloom_filters(uint16_t partition_id) {
+	const uint32_t MIN_DF_BLOOM = 10000;
+	const float FP_RATE         = 0.01f;
+	const uint16_t TOP_K        = 100;
+
+	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		BM25Partition& IP = index_partitions[partition_id];
+		InvertedIndex& II = IP.II[col_idx];
+
+		for (uint64_t idx = 0; idx < II.doc_freqs.size(); ++idx) {
+			uint32_t df = II.doc_freqs[idx];
+			if (df < MIN_DF_BLOOM) continue;
+
+			BloomEntry bloom_entry = init_bloom_entry(df, FP_RATE);
+
+			IIRow row = get_II_row(&II, idx);
+
+			// partial sort TOP_K term_freqs descending. Get idxs
+			std::vector<uint32_t> idxs(row.term_freqs.size());
+			std::iota(idxs.begin(), idxs.end(), 0);
+			std::partial_sort(
+					idxs.begin(), 
+					idxs.begin() + TOP_K, 
+					idxs.end(), 
+					[&row](uint32_t i1, uint32_t i2) {
+						return row.term_freqs[i1] > row.term_freqs[i2];
+					}
+					);
+			bloom_entry.topk_doc_ids.reserve(TOP_K);
+			for (uint16_t i = 0; i < TOP_K; ++i) {
+				bloom_entry.topk_doc_ids.push_back(row.doc_ids[idxs[i]]);
+			}
+
+			II.inverted_index_compressed[idx].doc_ids.clear();
+			II.inverted_index_compressed[idx].term_freqs.clear();
+
+			for (const auto& doc_id : row.doc_ids) {
+				bloom_entry.bloom_filter.put(doc_id);
+			}
+
+			II.bloom_filters.insert({idx, bloom_entry});
+		}
+	}
 }
 
 void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
@@ -1366,6 +1424,9 @@ _BM25::_BM25(
 			threads.push_back(std::thread(
 				[this, i] {
 					read_csv(partition_boundaries[i], partition_boundaries[i + 1], i);
+					write_bloom_filters(i);
+					printf("Finished reading file\n");
+					fflush(stdout);
 				}
 			));
 		}
@@ -1381,6 +1442,7 @@ _BM25::_BM25(
 			threads.push_back(std::thread(
 				[this, i] {
 					read_json(partition_boundaries[i], partition_boundaries[i + 1], i);
+					write_bloom_filters(i);
 				}
 			));
 		}
@@ -1390,6 +1452,7 @@ _BM25::_BM25(
 		std::cout << "Only csv and json files are supported." << std::endl;
 		std::exit(1);
 	}
+
 
 	for (auto& thread : threads) {
 		thread.join();
@@ -1721,6 +1784,7 @@ std::vector<BM25Result> _BM25::_query_partition(
 }
 
 
+/*
 static inline uint64_t get_doc_id(
 		InvertedIndexElement* IIE,
 		uint32_t& current_idx,
@@ -1912,6 +1976,7 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 
 	return result;
 }
+*/
 
 
 std::vector<BM25Result> _BM25::query(

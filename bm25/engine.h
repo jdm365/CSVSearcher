@@ -7,11 +7,20 @@
 #include <mutex>
 
 #include "robin_hood.h"
+#include "bloom/filter.hpp"
 
 
 #define DEBUG 0
 
 #define SEED 42
+
+
+enum SupportedFileTypes {
+	CSV,
+	JSON,
+	IN_MEMORY
+};
+
 
 struct _compare {
 	inline bool operator()(const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
@@ -31,6 +40,9 @@ struct _compare_64_16 {
 	}
 };
 
+
+
+
 typedef struct {
 	uint64_t df;
 	std::vector<uint64_t> doc_ids;
@@ -49,11 +61,7 @@ struct _compare_bm25_result {
 	}
 };
 
-enum SupportedFileTypes {
-	CSV,
-	JSON,
-	IN_MEMORY
-};
+
 
 typedef struct {
 	uint16_t num_repeats;
@@ -66,21 +74,31 @@ bool check_rle_u8_row_size(const std::vector<RLEElement_u8>& rle_row, uint64_t m
 void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value);
 
 
+
+
+typedef struct BloomEntry {
+	Bloom::Filter bloom_filter;
+	std::vector<uint64_t> topk_doc_ids;
+} BloomEntry;
+
+BloomEntry init_bloom_entry(uint32_t num_docs, float fpr);
+
 typedef struct {
 	std::vector<uint8_t> doc_ids;
 	std::vector<RLEElement_u8> term_freqs;
-} InvertedIndexElement;
+} StandardEntry;
 
 typedef struct {
 	std::vector<uint64_t> prev_doc_ids;
-	std::vector<InvertedIndexElement> inverted_index_compressed;
+	std::vector<uint32_t> doc_freqs;
+	std::vector<StandardEntry> inverted_index_compressed;
+	robin_hood::unordered_flat_map<uint64_t, BloomEntry> bloom_filters;
 } InvertedIndex;
 
 inline IIRow get_II_row(InvertedIndex* II, uint64_t term_idx);
 
 typedef struct {
 	std::vector<InvertedIndex> II;
-	// robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
 	std::vector<robin_hood::unordered_flat_map<std::string, uint32_t>> unique_term_mapping;
 	std::vector<uint16_t> doc_sizes;
 	std::vector<uint64_t> line_offsets;
@@ -208,6 +226,7 @@ class _BM25 {
 		void determine_partition_boundaries_csv();
 		void determine_partition_boundaries_json();
 
+		void write_bloom_filters(uint16_t partition_id);
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_in_memory(
@@ -225,6 +244,7 @@ class _BM25 {
 				const std::string& term,
 				uint64_t doc_id
 				);
+
 
 		float _compute_bm25(
 				uint64_t doc_id,
