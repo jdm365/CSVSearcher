@@ -39,8 +39,8 @@ cdef extern from "engine.h":
         _BM25(
                 string filename,
                 vector[string] search_col,
-                int   min_df,
-                float max_df,
+                float bloom_df_threshold,
+                float bloom_fpr,
                 float k1,
                 float b,
                 uint16_t num_partitions,
@@ -49,8 +49,8 @@ cdef extern from "engine.h":
         _BM25(string db_dir) nogil
         _BM25(
                 vector[vector[string]]& documents,
-                int   min_df,
-                float max_df,
+                float bloom_df_threshold,
+                float bloom_fpr,
                 float k1,
                 float b,
                 uint16_t num_partitions,
@@ -89,8 +89,8 @@ def is_numpy_array(obj):
 
 cdef class BM25:
     cdef _BM25* bm25
-    cdef int    min_df
-    cdef float  max_df
+    cdef float  bloom_df_threshold
+    cdef float  bloom_fpr
     cdef str    filename 
     cdef str    db_dir
     cdef float  k1 
@@ -103,15 +103,15 @@ cdef class BM25:
 
     def __init__(
             self, 
-            int   min_df = 1,
-            float max_df = 1.0,
+            float bloom_df_threshold = 0.01,
+            float bloom_fpr = 1e-8,
             float k1     = 1.2,
             float b      = 0.4,
             stopwords = [],
             int   num_partitions = os.cpu_count()
             ):
-        self.min_df = min_df
-        self.max_df = max_df
+        self.bloom_df_threshold = bloom_df_threshold
+        self.bloom_fpr = bloom_fpr
         self.k1     = k1
         self.b      = b
 
@@ -208,8 +208,8 @@ cdef class BM25:
 
         self.bm25 = new _BM25(
                 docs,
-                self.min_df,
-                self.max_df,
+                self.bloom_df_threshold,
+                self.bloom_fpr,
                 self.k1,
                 self.b,
                 self.num_partitions,
@@ -231,8 +231,8 @@ cdef class BM25:
 
         self.bm25 = new _BM25(
                 docs,
-                self.min_df,
-                self.max_df,
+                self.bloom_df_threshold,
+                self.bloom_fpr,
                 self.k1,
                 self.b,
                 self.num_partitions,
@@ -250,8 +250,8 @@ cdef class BM25:
 
         self.bm25 = new _BM25(
                 docs,
-                self.min_df,
-                self.max_df,
+                self.bloom_df_threshold,
+                self.bloom_fpr,
                 self.k1,
                 self.b,
                 self.num_partitions,
@@ -268,8 +268,8 @@ cdef class BM25:
         self.bm25 = new _BM25(
                 filename.encode("utf-8"),
                 self.search_cols,
-                self.min_df,
-                self.max_df,
+                self.bloom_df_threshold,
+                self.bloom_fpr,
                 self.k1,
                 self.b,
                 self.num_partitions,
@@ -295,8 +295,8 @@ cdef class BM25:
 
         self.bm25 = new _BM25(
                 docs,
-                self.min_df,
-                self.max_df,
+                self.bloom_df_threshold,
+                self.bloom_fpr,
                 self.k1,
                 self.b,
                 self.num_partitions,

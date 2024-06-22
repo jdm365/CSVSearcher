@@ -195,13 +195,13 @@ def test_bm25_json(json_filename: str, search_cols: List[str]):
     print(f"Queries per second: {1000 / time:.2f}")
     
 
-def test_bm25_csv(csv_filename: str, search_cols: List[str]):
+def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.cpu_count()):
     df = pd.read_csv(csv_filename, usecols=search_cols, nrows=1000)
     sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
     ## model = BM25(max_df=0.1, stopwords='english')
-    model = BM25(stopwords='english', num_partitions=1)
+    model = BM25(stopwords='english', num_partitions=num_partitions)#, bloom_fpr=0.01)
     model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -211,7 +211,7 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str]):
     print(f"Time to save: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
-    model.load(db_dir='bm25_model')
+    ## model.load(db_dir='bm25_model')
     print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     lens = []
@@ -269,7 +269,7 @@ if __name__ == '__main__':
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_cols='text')
     ## test_bm25_csv(CSV_FILENAME, search_cols='name')
-    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
+    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=24)
     ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
     ## test_documents(CSV_FILENAME, search_cols=['title', 'artist'])

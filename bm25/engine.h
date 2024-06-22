@@ -114,8 +114,8 @@ class _BM25 {
 		robin_hood::unordered_flat_set<std::string> stop_words;
 
 		uint64_t num_docs;
-		int      min_df;
-		float    max_df;
+		float    bloom_df_threshold;
+		float    bloom_fpr;
 		float    k1;
 		float    b;
 		uint16_t num_partitions;
@@ -140,8 +140,8 @@ class _BM25 {
 		_BM25(
 				std::string filename,
 				std::vector<std::string> search_cols,
-				int   min_df,
-				float max_df,
+				float bloom_df_threshold,
+				float bloom_fpr,
 				float k1,
 				float b,
 				uint16_t num_partitions,
@@ -192,8 +192,8 @@ class _BM25 {
 
 		_BM25(
 				std::vector<std::vector<std::string>>& documents,
-				int   min_df,
-				float max_df,
+				float bloom_df_threshold,
+				float bloom_fpr,
 				float k1,
 				float b,
 				uint16_t num_partitions,
@@ -258,7 +258,21 @@ class _BM25 {
 				std::vector<std::vector<uint64_t>>& term_idxs,
 				uint16_t partition_id
 				);
+		void add_query_term_bloom(
+				std::string& substr,
+				std::vector<std::vector<uint64_t>>& low_df_term_idxs,
+				std::vector<std::vector<uint64_t>>& high_df_term_idxs,
+				std::vector<BloomEntry>& bloom_filters,
+				uint16_t partition_id
+				);
 		std::vector<BM25Result> _query_partition(
+				std::string& query,
+				uint32_t top_k,
+				uint32_t query_max_df,
+				uint16_t partition_id,
+				std::vector<float> boost_factors
+				);
+		std::vector<BM25Result> _query_partition_bloom(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df,

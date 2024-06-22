@@ -1595,14 +1595,14 @@ struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet {
  * 
  * cdef class BM25:             # <<<<<<<<<<<<<<
  *     cdef _BM25* bm25
- *     cdef int    min_df
+ *     cdef float  bloom_df_threshold
  */
 struct __pyx_obj_10rapid_bm25_BM25 {
   PyObject_HEAD
   struct __pyx_vtabstruct_10rapid_bm25_BM25 *__pyx_vtab;
   _BM25 *bm25;
-  int min_df;
-  float max_df;
+  float bloom_df_threshold;
+  float bloom_fpr;
   PyObject *filename;
   PyObject *db_dir;
   float k1;
@@ -2752,8 +2752,6 @@ static const char __pyx_k_factor[] = "factor";
 static const char __pyx_k_fillna[] = "fillna";
 static const char __pyx_k_filter[] = "filter";
 static const char __pyx_k_import[] = "__import__";
-static const char __pyx_k_max_df[] = "max_df";
-static const char __pyx_k_min_df[] = "min_df";
 static const char __pyx_k_name_2[] = "name";
 static const char __pyx_k_output[] = "output";
 static const char __pyx_k_reduce[] = "__reduce__";
@@ -2791,6 +2789,7 @@ static const char __pyx_k_BM25_save[] = "BM25.save";
 static const char __pyx_k_DataFrame[] = "DataFrame";
 static const char __pyx_k_OURSELVES[] = "OURSELVES";
 static const char __pyx_k_TypeError[] = "TypeError";
+static const char __pyx_k_bloom_fpr[] = "bloom_fpr";
 static const char __pyx_k_cpu_count[] = "cpu_count";
 static const char __pyx_k_documents[] = "documents";
 static const char __pyx_k_enumerate[] = "enumerate";
@@ -2838,6 +2837,7 @@ static const char __pyx_k_is_polars_series[] = "is_polars_series";
 static const char __pyx_k_last_modified_txt[] = "last_modified.txt";
 static const char __pyx_k_BM25_get_topk_docs[] = "BM25.get_topk_docs";
 static const char __pyx_k_asyncio_coroutines[] = "asyncio.coroutines";
+static const char __pyx_k_bloom_df_threshold[] = "bloom_df_threshold";
 static const char __pyx_k_cline_in_traceback[] = "cline_in_traceback";
 static const char __pyx_k_is_pandas_dataframe[] = "is_pandas_dataframe";
 static const char __pyx_k_is_polars_dataframe[] = "is_polars_dataframe";
@@ -2858,7 +2858,7 @@ static PyObject *__pyx_pf_10rapid_bm25_2is_pandas_series(CYTHON_UNUSED PyObject 
 static PyObject *__pyx_pf_10rapid_bm25_4is_polars_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_6is_polars_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
-static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, int __pyx_v_min_df, float __pyx_v_max_df, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions); /* proto */
+static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, float __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_4BM25_2index_file(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_search_cols); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir); /* proto */
@@ -3076,6 +3076,8 @@ typedef struct {
   PyObject *__pyx_n_s_arrow_table;
   PyObject *__pyx_n_s_asyncio_coroutines;
   PyObject *__pyx_n_s_b;
+  PyObject *__pyx_n_s_bloom_df_threshold;
+  PyObject *__pyx_n_s_bloom_fpr;
   PyObject *__pyx_kp_s_bm25_bm25_pyx;
   PyObject *__pyx_n_s_boost_factors;
   PyObject *__pyx_n_s_boost_factors_2;
@@ -3133,9 +3135,7 @@ typedef struct {
   PyObject *__pyx_n_u_loc;
   PyObject *__pyx_n_s_lower;
   PyObject *__pyx_n_s_main;
-  PyObject *__pyx_n_s_max_df;
   PyObject *__pyx_n_s_memory_map;
-  PyObject *__pyx_n_s_min_df;
   PyObject *__pyx_n_s_name;
   PyObject *__pyx_n_u_name_2;
   PyObject *__pyx_n_u_ndarray;
@@ -3432,6 +3432,8 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_arrow_table);
   Py_CLEAR(clear_module_state->__pyx_n_s_asyncio_coroutines);
   Py_CLEAR(clear_module_state->__pyx_n_s_b);
+  Py_CLEAR(clear_module_state->__pyx_n_s_bloom_df_threshold);
+  Py_CLEAR(clear_module_state->__pyx_n_s_bloom_fpr);
   Py_CLEAR(clear_module_state->__pyx_kp_s_bm25_bm25_pyx);
   Py_CLEAR(clear_module_state->__pyx_n_s_boost_factors);
   Py_CLEAR(clear_module_state->__pyx_n_s_boost_factors_2);
@@ -3489,9 +3491,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_u_loc);
   Py_CLEAR(clear_module_state->__pyx_n_s_lower);
   Py_CLEAR(clear_module_state->__pyx_n_s_main);
-  Py_CLEAR(clear_module_state->__pyx_n_s_max_df);
   Py_CLEAR(clear_module_state->__pyx_n_s_memory_map);
-  Py_CLEAR(clear_module_state->__pyx_n_s_min_df);
   Py_CLEAR(clear_module_state->__pyx_n_s_name);
   Py_CLEAR(clear_module_state->__pyx_n_u_name_2);
   Py_CLEAR(clear_module_state->__pyx_n_u_ndarray);
@@ -3762,6 +3762,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_arrow_table);
   Py_VISIT(traverse_module_state->__pyx_n_s_asyncio_coroutines);
   Py_VISIT(traverse_module_state->__pyx_n_s_b);
+  Py_VISIT(traverse_module_state->__pyx_n_s_bloom_df_threshold);
+  Py_VISIT(traverse_module_state->__pyx_n_s_bloom_fpr);
   Py_VISIT(traverse_module_state->__pyx_kp_s_bm25_bm25_pyx);
   Py_VISIT(traverse_module_state->__pyx_n_s_boost_factors);
   Py_VISIT(traverse_module_state->__pyx_n_s_boost_factors_2);
@@ -3819,9 +3821,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_u_loc);
   Py_VISIT(traverse_module_state->__pyx_n_s_lower);
   Py_VISIT(traverse_module_state->__pyx_n_s_main);
-  Py_VISIT(traverse_module_state->__pyx_n_s_max_df);
   Py_VISIT(traverse_module_state->__pyx_n_s_memory_map);
-  Py_VISIT(traverse_module_state->__pyx_n_s_min_df);
   Py_VISIT(traverse_module_state->__pyx_n_s_name);
   Py_VISIT(traverse_module_state->__pyx_n_u_name_2);
   Py_VISIT(traverse_module_state->__pyx_n_u_ndarray);
@@ -4118,6 +4118,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_arrow_table __pyx_mstate_global->__pyx_n_s_arrow_table
 #define __pyx_n_s_asyncio_coroutines __pyx_mstate_global->__pyx_n_s_asyncio_coroutines
 #define __pyx_n_s_b __pyx_mstate_global->__pyx_n_s_b
+#define __pyx_n_s_bloom_df_threshold __pyx_mstate_global->__pyx_n_s_bloom_df_threshold
+#define __pyx_n_s_bloom_fpr __pyx_mstate_global->__pyx_n_s_bloom_fpr
 #define __pyx_kp_s_bm25_bm25_pyx __pyx_mstate_global->__pyx_kp_s_bm25_bm25_pyx
 #define __pyx_n_s_boost_factors __pyx_mstate_global->__pyx_n_s_boost_factors
 #define __pyx_n_s_boost_factors_2 __pyx_mstate_global->__pyx_n_s_boost_factors_2
@@ -4175,9 +4177,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_u_loc __pyx_mstate_global->__pyx_n_u_loc
 #define __pyx_n_s_lower __pyx_mstate_global->__pyx_n_s_lower
 #define __pyx_n_s_main __pyx_mstate_global->__pyx_n_s_main
-#define __pyx_n_s_max_df __pyx_mstate_global->__pyx_n_s_max_df
 #define __pyx_n_s_memory_map __pyx_mstate_global->__pyx_n_s_memory_map
-#define __pyx_n_s_min_df __pyx_mstate_global->__pyx_n_s_min_df
 #define __pyx_n_s_name __pyx_mstate_global->__pyx_n_s_name
 #define __pyx_n_u_name_2 __pyx_mstate_global->__pyx_n_u_name_2
 #define __pyx_n_u_ndarray __pyx_mstate_global->__pyx_n_u_ndarray
@@ -6097,14 +6097,14 @@ static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *_
  * 
  *     def __init__(             # <<<<<<<<<<<<<<
  *             self,
- *             int   min_df = 1,
+ *             float bloom_df_threshold = 0.01,
  */
 
 /* Python wrapper */
 static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
-  int __pyx_v_min_df;
-  float __pyx_v_max_df;
+  float __pyx_v_bloom_df_threshold;
+  float __pyx_v_bloom_fpr;
   float __pyx_v_k1;
   float __pyx_v_b;
   PyObject *__pyx_v_stopwords = 0;
@@ -6125,7 +6125,7 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
   #endif
   __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
   {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_min_df,&__pyx_n_s_max_df,&__pyx_n_s_k1,&__pyx_n_s_b,&__pyx_n_s_stopwords,&__pyx_n_s_num_partitions,0};
+    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_bloom_df_threshold,&__pyx_n_s_bloom_fpr,&__pyx_n_s_k1,&__pyx_n_s_b,&__pyx_n_s_stopwords,&__pyx_n_s_num_partitions,0};
     values[4] = __Pyx_Arg_NewRef_VARARGS(__pyx_k_);
     if (__pyx_kwds) {
       Py_ssize_t kw_args;
@@ -6149,14 +6149,14 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
       switch (__pyx_nargs) {
         case  0:
         if (kw_args > 0) {
-          PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_min_df);
+          PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_bloom_df_threshold);
           if (value) { values[0] = __Pyx_Arg_NewRef_VARARGS(value); kw_args--; }
           else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 104, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  1:
         if (kw_args > 0) {
-          PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_max_df);
+          PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_bloom_fpr);
           if (value) { values[1] = __Pyx_Arg_NewRef_VARARGS(value); kw_args--; }
           else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 104, __pyx_L3_error)
         }
@@ -6212,14 +6212,14 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
       }
     }
     if (values[0]) {
-      __pyx_v_min_df = __Pyx_PyInt_As_int(values[0]); if (unlikely((__pyx_v_min_df == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 106, __pyx_L3_error)
+      __pyx_v_bloom_df_threshold = __pyx_PyFloat_AsFloat(values[0]); if (unlikely((__pyx_v_bloom_df_threshold == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 106, __pyx_L3_error)
     } else {
-      __pyx_v_min_df = ((int)1);
+      __pyx_v_bloom_df_threshold = ((float)0.01);
     }
     if (values[1]) {
-      __pyx_v_max_df = __pyx_PyFloat_AsFloat(values[1]); if (unlikely((__pyx_v_max_df == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 107, __pyx_L3_error)
+      __pyx_v_bloom_fpr = __pyx_PyFloat_AsFloat(values[1]); if (unlikely((__pyx_v_bloom_fpr == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 107, __pyx_L3_error)
     } else {
-      __pyx_v_max_df = ((float)1.0);
+      __pyx_v_bloom_fpr = ((float)1e-8);
     }
     if (values[2]) {
       __pyx_v_k1 = __pyx_PyFloat_AsFloat(values[2]); if (unlikely((__pyx_v_k1 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 108, __pyx_L3_error)
@@ -6254,7 +6254,7 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25___init__(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_min_df, __pyx_v_max_df, __pyx_v_k1, __pyx_v_b, __pyx_v_stopwords, __pyx_v_num_partitions);
+  __pyx_r = __pyx_pf_10rapid_bm25_4BM25___init__(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_bloom_df_threshold, __pyx_v_bloom_fpr, __pyx_v_k1, __pyx_v_b, __pyx_v_stopwords, __pyx_v_num_partitions);
 
   /* function exit code */
   {
@@ -6267,7 +6267,7 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
   return __pyx_r;
 }
 
-static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, int __pyx_v_min_df, float __pyx_v_max_df, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions) {
+static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, float __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions) {
   PyObject *__pyx_v_stopword = NULL;
   int __pyx_r;
   __Pyx_RefNannyDeclarations
@@ -6289,24 +6289,24 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
   /* "bm25/bm25.pyx":113
  *             int   num_partitions = os.cpu_count()
  *             ):
- *         self.min_df = min_df             # <<<<<<<<<<<<<<
- *         self.max_df = max_df
+ *         self.bloom_df_threshold = bloom_df_threshold             # <<<<<<<<<<<<<<
+ *         self.bloom_fpr = bloom_fpr
  *         self.k1     = k1
  */
-  __pyx_v_self->min_df = __pyx_v_min_df;
+  __pyx_v_self->bloom_df_threshold = __pyx_v_bloom_df_threshold;
 
   /* "bm25/bm25.pyx":114
  *             ):
- *         self.min_df = min_df
- *         self.max_df = max_df             # <<<<<<<<<<<<<<
+ *         self.bloom_df_threshold = bloom_df_threshold
+ *         self.bloom_fpr = bloom_fpr             # <<<<<<<<<<<<<<
  *         self.k1     = k1
  *         self.b      = b
  */
-  __pyx_v_self->max_df = __pyx_v_max_df;
+  __pyx_v_self->bloom_fpr = __pyx_v_bloom_fpr;
 
   /* "bm25/bm25.pyx":115
- *         self.min_df = min_df
- *         self.max_df = max_df
+ *         self.bloom_df_threshold = bloom_df_threshold
+ *         self.bloom_fpr = bloom_fpr
  *         self.k1     = k1             # <<<<<<<<<<<<<<
  *         self.b      = b
  * 
@@ -6314,7 +6314,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
   __pyx_v_self->k1 = __pyx_v_k1;
 
   /* "bm25/bm25.pyx":116
- *         self.max_df = max_df
+ *         self.bloom_fpr = bloom_fpr
  *         self.k1     = k1
  *         self.b      = b             # <<<<<<<<<<<<<<
  * 
@@ -6562,7 +6562,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
  * 
  *     def __init__(             # <<<<<<<<<<<<<<
  *             self,
- *             int   min_df = 1,
+ *             float bloom_df_threshold = 0.01,
  */
 
   /* function exit code */
@@ -8987,9 +8987,9 @@ static void __pyx_f_10rapid_bm25_4BM25__init_lists(struct __pyx_obj_10rapid_bm25
  * 
  *         self.bm25 = new _BM25(             # <<<<<<<<<<<<<<
  *                 docs,
- *                 self.min_df,
+ *                 self.bloom_df_threshold,
  */
-  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->min_df, __pyx_v_self->max_df, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
+  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->bloom_df_threshold, __pyx_v_self->bloom_fpr, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
 
   /* "bm25/bm25.pyx":195
  * 
@@ -9462,9 +9462,9 @@ static void __pyx_f_10rapid_bm25_4BM25__init_dicts(struct __pyx_obj_10rapid_bm25
  * 
  *         self.bm25 = new _BM25(             # <<<<<<<<<<<<<<
  *                 docs,
- *                 self.min_df,
+ *                 self.bloom_df_threshold,
  */
-  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->min_df, __pyx_v_self->max_df, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
+  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->bloom_df_threshold, __pyx_v_self->bloom_fpr, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
 
   /* "bm25/bm25.pyx":219
  *                 )
@@ -9658,9 +9658,9 @@ static void __pyx_f_10rapid_bm25_4BM25__init_documents(struct __pyx_obj_10rapid_
  * 
  *         self.bm25 = new _BM25(             # <<<<<<<<<<<<<<
  *                 docs,
- *                 self.min_df,
+ *                 self.bloom_df_threshold,
  */
-  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->min_df, __pyx_v_self->max_df, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
+  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->bloom_df_threshold, __pyx_v_self->bloom_fpr, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
 
   /* "bm25/bm25.pyx":242
  *                 )
@@ -9757,7 +9757,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_with_file(struct __pyx_obj_10rapid_
  *         self.bm25 = new _BM25(
  *                 filename.encode("utf-8"),             # <<<<<<<<<<<<<<
  *                 self.search_cols,
- *                 self.min_df,
+ *                 self.bloom_df_threshold,
  */
   if (unlikely(__pyx_v_filename == Py_None)) {
     PyErr_Format(PyExc_AttributeError, "'NoneType' object has no attribute '%.30s'", "encode");
@@ -9775,7 +9775,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_with_file(struct __pyx_obj_10rapid_
  *                 filename.encode("utf-8"),
  *                 self.search_cols,
  */
-  __pyx_v_self->bm25 = new _BM25(__pyx_t_3, __pyx_v_self->search_cols, __pyx_v_self->min_df, __pyx_v_self->max_df, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
+  __pyx_v_self->bm25 = new _BM25(__pyx_t_3, __pyx_v_self->search_cols, __pyx_v_self->bloom_df_threshold, __pyx_v_self->bloom_fpr, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
 
   /* "bm25/bm25.pyx":261
  *                 )
@@ -10091,9 +10091,9 @@ static void __pyx_f_10rapid_bm25_4BM25__init_with_parquet(struct __pyx_obj_10rap
  * 
  *         self.bm25 = new _BM25(             # <<<<<<<<<<<<<<
  *                 docs,
- *                 self.min_df,
+ *                 self.bloom_df_threshold,
  */
-  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->min_df, __pyx_v_self->max_df, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
+  __pyx_v_self->bm25 = new _BM25(__pyx_v_docs, __pyx_v_self->bloom_df_threshold, __pyx_v_self->bloom_fpr, __pyx_v_self->k1, __pyx_v_self->b, __pyx_v_self->num_partitions, __pyx_v_self->stopwords);
 
   /* "bm25/bm25.pyx":305
  *                 self.stopwords
@@ -12422,6 +12422,8 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_arrow_table, __pyx_k_arrow_table, sizeof(__pyx_k_arrow_table), 0, 0, 1, 1},
     {&__pyx_n_s_asyncio_coroutines, __pyx_k_asyncio_coroutines, sizeof(__pyx_k_asyncio_coroutines), 0, 0, 1, 1},
     {&__pyx_n_s_b, __pyx_k_b, sizeof(__pyx_k_b), 0, 0, 1, 1},
+    {&__pyx_n_s_bloom_df_threshold, __pyx_k_bloom_df_threshold, sizeof(__pyx_k_bloom_df_threshold), 0, 0, 1, 1},
+    {&__pyx_n_s_bloom_fpr, __pyx_k_bloom_fpr, sizeof(__pyx_k_bloom_fpr), 0, 0, 1, 1},
     {&__pyx_kp_s_bm25_bm25_pyx, __pyx_k_bm25_bm25_pyx, sizeof(__pyx_k_bm25_bm25_pyx), 0, 0, 1, 0},
     {&__pyx_n_s_boost_factors, __pyx_k_boost_factors, sizeof(__pyx_k_boost_factors), 0, 0, 1, 1},
     {&__pyx_n_s_boost_factors_2, __pyx_k_boost_factors_2, sizeof(__pyx_k_boost_factors_2), 0, 0, 1, 1},
@@ -12479,9 +12481,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_u_loc, __pyx_k_loc, sizeof(__pyx_k_loc), 0, 1, 0, 1},
     {&__pyx_n_s_lower, __pyx_k_lower, sizeof(__pyx_k_lower), 0, 0, 1, 1},
     {&__pyx_n_s_main, __pyx_k_main, sizeof(__pyx_k_main), 0, 0, 1, 1},
-    {&__pyx_n_s_max_df, __pyx_k_max_df, sizeof(__pyx_k_max_df), 0, 0, 1, 1},
     {&__pyx_n_s_memory_map, __pyx_k_memory_map, sizeof(__pyx_k_memory_map), 0, 0, 1, 1},
-    {&__pyx_n_s_min_df, __pyx_k_min_df, sizeof(__pyx_k_min_df), 0, 0, 1, 1},
     {&__pyx_n_s_name, __pyx_k_name, sizeof(__pyx_k_name), 0, 0, 1, 1},
     {&__pyx_n_u_name_2, __pyx_k_name_2, sizeof(__pyx_k_name_2), 0, 1, 0, 1},
     {&__pyx_n_u_ndarray, __pyx_k_ndarray, sizeof(__pyx_k_ndarray), 0, 1, 0, 1},
@@ -13448,7 +13448,7 @@ if (!__Pyx_RefNanny) {
  *             stopwords = [],
  *             int   num_partitions = os.cpu_count()             # <<<<<<<<<<<<<<
  *             ):
- *         self.min_df = min_df
+ *         self.bloom_df_threshold = bloom_df_threshold
  */
   __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_os); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
