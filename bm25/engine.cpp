@@ -588,6 +588,7 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 			bloom_entry.topk_doc_ids.reserve(TOP_K);
 			for (uint16_t i = 0; i < TOP_K; ++i) {
 				bloom_entry.topk_doc_ids.push_back(row.doc_ids[idxs[i]]);
+				bloom_entry.topk_term_freqs.push_back(row.doc_ids[idxs[i]]);
 			}
 
 			II.inverted_index_compressed[idx].doc_ids.clear();
@@ -1905,7 +1906,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 			for (uint64_t i = 0; i < min_df; ++i) {
 
 				uint64_t doc_id  = bloom_entry.topk_doc_ids[i];
-				float tf 		 = 1;
+				float tf 		 = bloom_entry.topk_term_freqs[i];
 				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factors[min_df_col_idx];
 
 				doc_id += doc_offset;

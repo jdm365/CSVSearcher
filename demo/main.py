@@ -42,8 +42,8 @@ class SearchApp:
         self.bm25 = BM25(
                 ## min_df=1,
                 ## max_df=0.5,
-                num_partitions=1,
-                bloom_fpr=1e-4,
+                ## num_partitions=1,
+                bloom_fpr=1e-8,
                 ## b=0.4,
                 ## k1=1.5
                 )
@@ -88,7 +88,7 @@ class SearchApp:
         vals = self.bm25.get_topk_docs(
                 query, 
                 k=1000,
-                boost_factors=[8, 1]
+                boost_factors=[2, 1]
                )
         print(f"Query took {perf_counter() - init:.4f} seconds")
 
