@@ -1602,7 +1602,7 @@ struct __pyx_obj_10rapid_bm25_BM25 {
   struct __pyx_vtabstruct_10rapid_bm25_BM25 *__pyx_vtab;
   _BM25 *bm25;
   float bloom_df_threshold;
-  float bloom_fpr;
+  double bloom_fpr;
   PyObject *filename;
   PyObject *db_dir;
   float k1;
@@ -2858,7 +2858,7 @@ static PyObject *__pyx_pf_10rapid_bm25_2is_pandas_series(CYTHON_UNUSED PyObject 
 static PyObject *__pyx_pf_10rapid_bm25_4is_polars_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_6is_polars_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
-static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, float __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions); /* proto */
+static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, double __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_4BM25_2index_file(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_search_cols); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto */
 static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir); /* proto */
@@ -6097,14 +6097,14 @@ static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *_
  * 
  *     def __init__(             # <<<<<<<<<<<<<<
  *             self,
- *             float bloom_df_threshold = 0.01,
+ *             float  bloom_df_threshold = 0.01,
  */
 
 /* Python wrapper */
 static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   float __pyx_v_bloom_df_threshold;
-  float __pyx_v_bloom_fpr;
+  double __pyx_v_bloom_fpr;
   float __pyx_v_k1;
   float __pyx_v_b;
   PyObject *__pyx_v_stopwords = 0;
@@ -6217,9 +6217,9 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
       __pyx_v_bloom_df_threshold = ((float)0.01);
     }
     if (values[1]) {
-      __pyx_v_bloom_fpr = __pyx_PyFloat_AsFloat(values[1]); if (unlikely((__pyx_v_bloom_fpr == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 107, __pyx_L3_error)
+      __pyx_v_bloom_fpr = __pyx_PyFloat_AsDouble(values[1]); if (unlikely((__pyx_v_bloom_fpr == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 107, __pyx_L3_error)
     } else {
-      __pyx_v_bloom_fpr = ((float)1e-8);
+      __pyx_v_bloom_fpr = ((double)1e-8);
     }
     if (values[2]) {
       __pyx_v_k1 = __pyx_PyFloat_AsFloat(values[2]); if (unlikely((__pyx_v_k1 == (float)-1) && PyErr_Occurred())) __PYX_ERR(0, 108, __pyx_L3_error)
@@ -6267,7 +6267,7 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
   return __pyx_r;
 }
 
-static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, float __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions) {
+static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, double __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions) {
   PyObject *__pyx_v_stopword = NULL;
   int __pyx_r;
   __Pyx_RefNannyDeclarations
@@ -6562,7 +6562,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
  * 
  *     def __init__(             # <<<<<<<<<<<<<<
  *             self,
- *             float bloom_df_threshold = 0.01,
+ *             float  bloom_df_threshold = 0.01,
  */
 
   /* function exit code */
@@ -13431,8 +13431,8 @@ if (!__Pyx_RefNanny) {
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
   /* "bm25/bm25.pyx":110
- *             float k1     = 1.2,
- *             float b      = 0.4,
+ *             float  k1     = 1.2,
+ *             float  b      = 0.4,
  *             stopwords = [],             # <<<<<<<<<<<<<<
  *             int   num_partitions = os.cpu_count()
  *             ):
@@ -13444,7 +13444,7 @@ if (!__Pyx_RefNanny) {
   __pyx_t_3 = 0;
 
   /* "bm25/bm25.pyx":111
- *             float b      = 0.4,
+ *             float  b      = 0.4,
  *             stopwords = [],
  *             int   num_partitions = os.cpu_count()             # <<<<<<<<<<<<<<
  *             ):

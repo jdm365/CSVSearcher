@@ -81,7 +81,7 @@ typedef struct BloomEntry {
 	std::vector<uint64_t> topk_doc_ids;
 } BloomEntry;
 
-BloomEntry init_bloom_entry(uint32_t num_docs, float fpr);
+BloomEntry init_bloom_entry(uint32_t num_docs, double fpr);
 
 typedef struct {
 	std::vector<uint8_t> doc_ids;
@@ -105,6 +105,9 @@ typedef struct {
 
 	uint64_t num_docs;
 	float    avg_doc_size;
+
+	// Debug reverse term mapping
+	std::vector<robin_hood::unordered_flat_map<uint32_t, std::string>> reverse_term_mapping;
 } BM25Partition;
 
 
@@ -115,7 +118,7 @@ class _BM25 {
 
 		uint64_t num_docs;
 		float    bloom_df_threshold;
-		float    bloom_fpr;
+		double   bloom_fpr;
 		float    k1;
 		float    b;
 		uint16_t num_partitions;
@@ -137,13 +140,14 @@ class _BM25 {
 		int init_cursor_row;
 		int terminal_height;
 
+
 		_BM25(
 				std::string filename,
 				std::vector<std::string> search_cols,
-				float bloom_df_threshold,
-				float bloom_fpr,
-				float k1,
-				float b,
+				float  bloom_df_threshold,
+				double bloom_fpr,
+				float  k1,
+				float  b,
 				uint16_t num_partitions,
 				const std::vector<std::string>& _stop_words = {}
 				);
@@ -192,10 +196,10 @@ class _BM25 {
 
 		_BM25(
 				std::vector<std::vector<std::string>>& documents,
-				float bloom_df_threshold,
-				float bloom_fpr,
-				float k1,
-				float b,
+				float  bloom_df_threshold,
+				double bloom_fpr,
+				float  k1,
+				float  b,
 				uint16_t num_partitions,
 				const std::vector<std::string>& _stop_words = {}
 				);
@@ -262,7 +266,7 @@ class _BM25 {
 				std::string& substr,
 				std::vector<std::vector<uint64_t>>& low_df_term_idxs,
 				std::vector<std::vector<uint64_t>>& high_df_term_idxs,
-				std::vector<BloomEntry>& bloom_filters,
+				std::vector<std::vector<BloomEntry>>& bloom_entries,
 				uint16_t partition_id
 				);
 		std::vector<BM25Result> _query_partition(

@@ -39,20 +39,20 @@ cdef extern from "engine.h":
         _BM25(
                 string filename,
                 vector[string] search_col,
-                float bloom_df_threshold,
-                float bloom_fpr,
-                float k1,
-                float b,
+                float  bloom_df_threshold,
+                double bloom_fpr,
+                float  k1,
+                float  b,
                 uint16_t num_partitions,
                 const vector[string]& stopwords
                 ) nogil
         _BM25(string db_dir) nogil
         _BM25(
                 vector[vector[string]]& documents,
-                float bloom_df_threshold,
-                float bloom_fpr,
-                float k1,
-                float b,
+                float  bloom_df_threshold,
+                double bloom_fpr,
+                float  k1,
+                float  b,
                 uint16_t num_partitions,
                 const vector[string]& stopwords
                 ) nogil
@@ -90,7 +90,7 @@ def is_numpy_array(obj):
 cdef class BM25:
     cdef _BM25* bm25
     cdef float  bloom_df_threshold
-    cdef float  bloom_fpr
+    cdef double bloom_fpr
     cdef str    filename 
     cdef str    db_dir
     cdef float  k1 
@@ -103,10 +103,10 @@ cdef class BM25:
 
     def __init__(
             self, 
-            float bloom_df_threshold = 0.01,
-            float bloom_fpr = 1e-8,
-            float k1     = 1.2,
-            float b      = 0.4,
+            float  bloom_df_threshold = 0.01,
+            double bloom_fpr = 1e-8,
+            float  k1     = 1.2,
+            float  b      = 0.4,
             stopwords = [],
             int   num_partitions = os.cpu_count()
             ):

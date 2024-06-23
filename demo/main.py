@@ -40,11 +40,12 @@ class SearchApp:
             ) -> None:
         self.filename = filename
         self.bm25 = BM25(
-                min_df=1,
+                ## min_df=1,
                 ## max_df=0.5,
-                ## num_partitions=1,
+                num_partitions=1,
+                bloom_fpr=1e-4,
                 ## b=0.4,
-                k1=1.5
+                ## k1=1.5
                 )
         self.save_dir = filename.split('/')[-1].replace('.csv', '_db')
         try:
@@ -54,7 +55,7 @@ class SearchApp:
             print(f"Error loading BM25 index: {e}")
 
             self.bm25.index_file(filename, search_cols)
-            self.bm25.save(db_dir=self.save_dir)
+            ## self.bm25.save(db_dir=self.save_dir)
             print(f"Saved BM25 index to {self.save_dir}")
 
         self.search_cols = search_cols
@@ -86,8 +87,8 @@ class SearchApp:
         init = perf_counter()
         vals = self.bm25.get_topk_docs(
                 query, 
-                k=100,
-                boost_factors=[2, 1]
+                k=1000,
+                boost_factors=[8, 1]
                )
         print(f"Query took {perf_counter() - init:.4f} seconds")
 

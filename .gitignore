@@ -11,6 +11,7 @@ gen_compile_commands/
 *.json
 *.parquet
 mb_db/
+bm25_model/
 
 # C extensions
 *.so
