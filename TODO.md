@@ -1,6 +1,0 @@
-- Try to only have to decode top-k doc_ids from inverted index. Will likely need to resort and rethink things.
-- Implement index merging.
-- Publish to pypi.
-- Consider allowing ngram tokenization.
-- Make tests more robust.
-- Find heuristics to speed up queries for high df terms.
