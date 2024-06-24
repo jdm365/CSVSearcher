@@ -7,7 +7,8 @@
 #include <mutex>
 
 #include "robin_hood.h"
-#include "bloom/filter.hpp"
+// #include "bloom/filter.hpp"
+#include "bloom.h"
 
 
 #define DEBUG 0
@@ -77,7 +78,8 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value);
 
 
 typedef struct BloomEntry {
-	Bloom::Filter bloom_filter;
+	// Bloom::Filter bloom_filter;
+	BloomFilter bloom_filter;
 	std::vector<uint64_t> topk_doc_ids;
 	std::vector<float> topk_term_freqs;
 } BloomEntry;

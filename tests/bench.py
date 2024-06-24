@@ -1,4 +1,4 @@
-from rapid_bm25 import BM25
+from bloom25 import BM25
 import pandas as pd
 import polars as pl
 import numpy as np

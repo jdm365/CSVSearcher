@@ -1,5 +1,5 @@
 from rank_bm25 import BM25Okapi
-from rapid_bm25 import BM25
+from bloom25 import BM25
 import pandas as pd
 import numpy as np
 from tqdm import tqdm

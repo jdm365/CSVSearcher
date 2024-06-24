@@ -6,7 +6,7 @@ import csv
 from time import perf_counter
 import os
 
-from rapid_bm25 import BM25
+from bloom25 import BM25
 
 app = Flask(__name__)
 CORS(app)
@@ -26,7 +26,7 @@ def search():
 def columns():
     column_names = search_app.get_column_names()
     ## Move search_col to the front
-    for col in reversed(search_app.search_cols):
+    for col in reversed(list(search_app.search_cols) + ['score']):
         column_names.remove(col)
         column_names.insert(0, col)
     return jsonify({'columns': column_names})
@@ -40,6 +40,7 @@ class SearchApp:
             ) -> None:
         self.filename = filename
         self.bm25 = BM25(
+                stopwords='english',
                 ## min_df=1,
                 ## max_df=0.5,
                 ## num_partitions=1,

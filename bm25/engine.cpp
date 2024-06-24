@@ -29,23 +29,13 @@
 #include "robin_hood.h"
 #include "vbyte_encoding.h"
 #include "serialize.h"
-#include "bloom/filter.hpp"
+#include "bloom.h"
 
-static inline void get_optimal_params(
-		uint64_t num_docs,
-		double fpr,
-		uint64_t &num_hashes,
-		uint64_t &num_bits
-		) {
-	const double optimal_hash_count = -log2(fpr);
-	num_hashes = round(optimal_hash_count);
-	num_bits   = ceil((num_docs * log(fpr)) / log(1 / pow(2, log(2))));
-}
+
 
 BloomEntry init_bloom_entry(uint32_t num_docs, double fpr) {
 	uint64_t num_hashes, num_bits;
-	get_optimal_params(num_docs, fpr, num_hashes, num_bits);
-	Bloom::Filter bf(num_bits, num_hashes);
+	BloomFilter bf = init_bloom_filter(num_docs, fpr);
 
 	if (DEBUG) {
 		printf("Num docs: %u\n", num_docs);
@@ -57,7 +47,8 @@ BloomEntry init_bloom_entry(uint32_t num_docs, double fpr) {
 
 	BloomEntry bloom_entry = {
 		.bloom_filter = bf,
-		.topk_doc_ids = std::vector<uint64_t>()
+		.topk_doc_ids = std::vector<uint64_t>(),
+		.topk_term_freqs = std::vector<float>()
 	};
 	return bloom_entry;
 }
@@ -576,7 +567,9 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 
 			// partial sort TOP_K term_freqs descending. Get idxs
 			std::vector<uint32_t> idxs(row.term_freqs.size());
-			std::iota(idxs.begin(), idxs.end(), 0);
+			for (uint32_t i = 0; i < row.term_freqs.size(); ++i) {
+				idxs[i] = i;
+			}
 			std::partial_sort(
 					idxs.begin(), 
 					idxs.begin() + TOP_K, 
@@ -595,7 +588,7 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 			II.inverted_index_compressed[idx].term_freqs.clear();
 
 			for (const uint64_t doc_id : row.doc_ids) {
-				bloom_entry.bloom_filter.put(doc_id);
+				bloom_put(bloom_entry.bloom_filter, doc_id);
 			}
 
 			II.bloom_filters.insert({idx, bloom_entry});
@@ -1474,7 +1467,7 @@ _BM25::_BM25(
 			unique_terms_found += IP.unique_term_mapping[col_idx].size();
 			total_bloom_filters += IP.II[col_idx].bloom_filters.size();
 			for (const auto& bf : index_partitions[i].II[col_idx].bloom_filters) {
-				bloom_filters_size += bf.second.bloom_filter.size() / 8;
+				bloom_filters_size += bf.second.bloom_filter.num_bits / 8;
 			}
 		}
 		total_size += part_size;
@@ -1933,7 +1926,8 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 
 					for (auto& [doc_id, score] : doc_scores) {
 
-						if (bloom_entry.bloom_filter.query(doc_id)) {
+						// if (bloom_entry.bloom_filter.query(doc_id)) {
+						if (bloom_query(bloom_entry.bloom_filter, doc_id)) {
 							score += _compute_bm25(
 									doc_id, 
 									1.0f,
@@ -1956,7 +1950,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 
 					for (auto& [doc_id, score] : doc_scores) {
 
-						if (bloom_entry.bloom_filter.query((uint64_t)doc_id)) {
+						if (bloom_query(bloom_entry.bloom_filter, doc_id)) {
 							score += _compute_bm25(
 									doc_id, 
 									1.0f,

@@ -20,19 +20,19 @@
             "-L/usr/local/lib"
         ],
         "include_dirs": [
-            "bm25",
-            "bm25/bloom"
+            "bm25"
         ],
         "language": "c++",
-        "name": "rapid_bm25",
+        "name": "bloom25",
         "sources": [
             "bm25/bm25.pyx",
             "bm25/engine.cpp",
             "bm25/vbyte_encoding.cpp",
-            "bm25/serialize.cpp"
+            "bm25/serialize.cpp",
+            "bm25/bloom.cpp"
         ]
     },
-    "module_name": "rapid_bm25"
+    "module_name": "bloom25"
 }
 END: Cython Metadata */
 
@@ -1264,8 +1264,8 @@ static CYTHON_INLINE float __PYX_NAN() {
     #define __PYX_EXTERN_C extern "C++"
 #endif
 
-#define __PYX_HAVE__rapid_bm25
-#define __PYX_HAVE_API__rapid_bm25
+#define __PYX_HAVE__bloom25
+#define __PYX_HAVE_API__bloom25
 /* Early includes */
 #include <stdint.h>
 #include "ios"
@@ -1558,9 +1558,9 @@ static const char *__pyx_f[] = {
 /* #### Code section: type_declarations ### */
 
 /*--- Type declarations ---*/
-struct __pyx_obj_10rapid_bm25_BM25;
-struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices;
-struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet;
+struct __pyx_obj_7bloom25_BM25;
+struct __pyx_opt_args_7bloom25_4BM25_get_topk_indices;
+struct __pyx_opt_args_7bloom25_4BM25__get_topk_docs_parquet;
 
 /* "bm25/bm25.pyx":307
  *         print(f"Reading parquet file took {perf_counter() - init:.2f} seconds")
@@ -1569,7 +1569,7 @@ struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet;
  *             self,
  *             str query,
  */
-struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices {
+struct __pyx_opt_args_7bloom25_4BM25_get_topk_indices {
   int __pyx_n;
   int query_max_df;
   int k;
@@ -1583,7 +1583,7 @@ struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices {
  *             self,
  *             str query,
  */
-struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet {
+struct __pyx_opt_args_7bloom25_4BM25__get_topk_docs_parquet {
   int __pyx_n;
   int k;
   int query_max_df;
@@ -1597,9 +1597,9 @@ struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet {
  *     cdef _BM25* bm25
  *     cdef float  bloom_df_threshold
  */
-struct __pyx_obj_10rapid_bm25_BM25 {
+struct __pyx_obj_7bloom25_BM25 {
   PyObject_HEAD
-  struct __pyx_vtabstruct_10rapid_bm25_BM25 *__pyx_vtab;
+  struct __pyx_vtabstruct_7bloom25_BM25 *__pyx_vtab;
   _BM25 *bm25;
   float bloom_df_threshold;
   double bloom_fpr;
@@ -1615,16 +1615,16 @@ struct __pyx_obj_10rapid_bm25_BM25 {
 
 
 
-struct __pyx_vtabstruct_10rapid_bm25_BM25 {
-  void (*_init_lists)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *);
-  void (*_init_dicts)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *);
-  void (*_init_documents)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *);
-  void (*_init_with_file)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, std::vector<std::string> );
-  void (*_init_with_parquet)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, PyObject *);
-  PyObject *(*get_topk_indices)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, int __pyx_skip_dispatch, struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices *__pyx_optional_args);
-  PyObject *(*_get_topk_docs_parquet)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet *__pyx_optional_args);
+struct __pyx_vtabstruct_7bloom25_BM25 {
+  void (*_init_lists)(struct __pyx_obj_7bloom25_BM25 *, PyObject *);
+  void (*_init_dicts)(struct __pyx_obj_7bloom25_BM25 *, PyObject *);
+  void (*_init_documents)(struct __pyx_obj_7bloom25_BM25 *, PyObject *);
+  void (*_init_with_file)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, std::vector<std::string> );
+  void (*_init_with_parquet)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, PyObject *);
+  PyObject *(*get_topk_indices)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, int __pyx_skip_dispatch, struct __pyx_opt_args_7bloom25_4BM25_get_topk_indices *__pyx_optional_args);
+  PyObject *(*_get_topk_docs_parquet)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, struct __pyx_opt_args_7bloom25_4BM25__get_topk_docs_parquet *__pyx_optional_args);
 };
-static struct __pyx_vtabstruct_10rapid_bm25_BM25 *__pyx_vtabptr_10rapid_bm25_BM25;
+static struct __pyx_vtabstruct_7bloom25_BM25 *__pyx_vtabptr_7bloom25_BM25;
 /* #### Code section: utility_code_proto ### */
 
 /* --- Runtime support code (head) --- */
@@ -2520,13 +2520,13 @@ static int __Pyx_check_binary_version(unsigned long ct_version, unsigned long rt
 static int __Pyx_InitStrings(__Pyx_StringTabEntry *t);
 
 /* #### Code section: module_declarations ### */
-static void __pyx_f_10rapid_bm25_4BM25__init_lists(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto*/
-static void __pyx_f_10rapid_bm25_4BM25__init_dicts(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto*/
-static void __pyx_f_10rapid_bm25_4BM25__init_documents(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto*/
-static void __pyx_f_10rapid_bm25_4BM25__init_with_file(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, CYTHON_UNUSED std::vector<std::string>  __pyx_v_search_cols); /* proto*/
-static void __pyx_f_10rapid_bm25_4BM25__init_with_parquet(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_text_col); /* proto*/
-static PyObject *__pyx_f_10rapid_bm25_4BM25_get_topk_indices(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_skip_dispatch, struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices *__pyx_optional_args); /* proto*/
-static PyObject *__pyx_f_10rapid_bm25_4BM25__get_topk_docs_parquet(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet *__pyx_optional_args); /* proto*/
+static void __pyx_f_7bloom25_4BM25__init_lists(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto*/
+static void __pyx_f_7bloom25_4BM25__init_dicts(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto*/
+static void __pyx_f_7bloom25_4BM25__init_documents(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto*/
+static void __pyx_f_7bloom25_4BM25__init_with_file(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, CYTHON_UNUSED std::vector<std::string>  __pyx_v_search_cols); /* proto*/
+static void __pyx_f_7bloom25_4BM25__init_with_parquet(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_text_col); /* proto*/
+static PyObject *__pyx_f_7bloom25_4BM25_get_topk_indices(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_skip_dispatch, struct __pyx_opt_args_7bloom25_4BM25_get_topk_indices *__pyx_optional_args); /* proto*/
+static PyObject *__pyx_f_7bloom25_4BM25__get_topk_docs_parquet(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, struct __pyx_opt_args_7bloom25_4BM25__get_topk_docs_parquet *__pyx_optional_args); /* proto*/
 
 /* Module declarations from "cython" */
 
@@ -2544,9 +2544,9 @@ static PyObject *__pyx_f_10rapid_bm25_4BM25__get_topk_docs_parquet(struct __pyx_
 
 /* Module declarations from "libcpp" */
 
-/* Module declarations from "rapid_bm25" */
-static std::vector<std::string>  __pyx_v_10rapid_bm25_ENGLISH_STOPWORDS;
-static int __pyx_v_10rapid_bm25_INT_MAX;
+/* Module declarations from "bloom25" */
+static std::vector<std::string>  __pyx_v_7bloom25_ENGLISH_STOPWORDS;
+static int __pyx_v_7bloom25_INT_MAX;
 static std::string __pyx_convert_string_from_py_6libcpp_6string_std__in_string(PyObject *); /*proto*/
 static std::vector<std::string>  __pyx_convert_vector_from_py_std_3a__3a_string(PyObject *); /*proto*/
 static CYTHON_INLINE PyObject *__pyx_convert_PyObject_string_to_py_6libcpp_6string_std__in_string(std::string const &); /*proto*/
@@ -2560,11 +2560,11 @@ static PyObject *__pyx_convert_vector_to_py_std_3a__3a_pair_3c_std_3a__3a_string
 static PyObject *__pyx_convert_vector_to_py_std_3a__3a_vector_3c_std_3a__3a_pair_3c_std_3a__3a_string_2c_std_3a__3a_string_3e____3e___(std::vector<std::vector<std::pair<std::string,std::string> > >  const &); /*proto*/
 /* #### Code section: typeinfo ### */
 /* #### Code section: before_global_var ### */
-#define __Pyx_MODULE_NAME "rapid_bm25"
-extern int __pyx_module_is_main_rapid_bm25;
-int __pyx_module_is_main_rapid_bm25 = 0;
+#define __Pyx_MODULE_NAME "bloom25"
+extern int __pyx_module_is_main_bloom25;
+int __pyx_module_is_main_bloom25 = 0;
 
-/* Implementation of "rapid_bm25" */
+/* Implementation of "bloom25" */
 /* #### Code section: global_var ### */
 static PyObject *__pyx_builtin_AssertionError;
 static PyObject *__pyx_builtin_ValueError;
@@ -2766,6 +2766,7 @@ static const char __pyx_k_FURTHER[] = "FURTHER";
 static const char __pyx_k_HERSELF[] = "HERSELF";
 static const char __pyx_k_HIMSELF[] = "HIMSELF";
 static const char __pyx_k_THROUGH[] = "THROUGH";
+static const char __pyx_k_bloom25[] = "bloom25";
 static const char __pyx_k_disable[] = "disable";
 static const char __pyx_k_english[] = "english";
 static const char __pyx_k_inplace[] = "inplace";
@@ -2807,7 +2808,6 @@ static const char __pyx_k_YOURSELVES[] = "YOURSELVES";
 static const char __pyx_k_index_file[] = "index_file";
 static const char __pyx_k_memory_map[] = "memory_map";
 static const char __pyx_k_pyx_vtable[] = "__pyx_vtable__";
-static const char __pyx_k_rapid_bm25[] = "rapid_bm25";
 static const char __pyx_k_MemoryError[] = "MemoryError";
 static const char __pyx_k_ParquetFile[] = "ParquetFile";
 static const char __pyx_k_arrow_table[] = "arrow_table";
@@ -2853,22 +2853,22 @@ static const char __pyx_k_Database_directory_does_not_exis[] = "Database directo
 static const char __pyx_k_Document_count_must_be_greater_t[] = "Document count must be greater than 0";
 static const char __pyx_k_self_bm25_cannot_be_converted_to[] = "self.bm25 cannot be converted to a Python object for pickling";
 /* #### Code section: decls ### */
-static PyObject *__pyx_pf_10rapid_bm25_is_pandas_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_2is_pandas_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4is_polars_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_6is_polars_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
-static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, double __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_2index_file(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_search_cols); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_8load(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir); /* proto */
+static PyObject *__pyx_pf_7bloom25_is_pandas_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
+static PyObject *__pyx_pf_7bloom25_2is_pandas_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
+static PyObject *__pyx_pf_7bloom25_4is_polars_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
+static PyObject *__pyx_pf_7bloom25_6is_polars_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
+static PyObject *__pyx_pf_7bloom25_8is_numpy_array(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj); /* proto */
+static int __pyx_pf_7bloom25_4BM25___init__(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, double __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions); /* proto */
+static PyObject *__pyx_pf_7bloom25_4BM25_2index_file(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_search_cols); /* proto */
+static PyObject *__pyx_pf_7bloom25_4BM25_4index_documents(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents); /* proto */
+static PyObject *__pyx_pf_7bloom25_4BM25_6save(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir); /* proto */
+static PyObject *__pyx_pf_7bloom25_4BM25_8load(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir); /* proto */
 static PyObject *__pyx_lambda_funcdef_lambda(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_x); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_10get_topk_indices(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_query_max_df, int __pyx_v_k, PyObject *__pyx_v_boost_factors); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_12get_topk_docs(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_k, int __pyx_v_query_max_df, PyObject *__pyx_v_boost_factors); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_14__reduce_cython__(CYTHON_UNUSED struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self); /* proto */
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_16__setstate_cython__(CYTHON_UNUSED struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
-static PyObject *__pyx_tp_new_10rapid_bm25_BM25(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
+static PyObject *__pyx_pf_7bloom25_4BM25_10get_topk_indices(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_query_max_df, int __pyx_v_k, PyObject *__pyx_v_boost_factors); /* proto */
+static PyObject *__pyx_pf_7bloom25_4BM25_12get_topk_docs(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_k, int __pyx_v_query_max_df, PyObject *__pyx_v_boost_factors); /* proto */
+static PyObject *__pyx_pf_7bloom25_4BM25_14__reduce_cython__(CYTHON_UNUSED struct __pyx_obj_7bloom25_BM25 *__pyx_v_self); /* proto */
+static PyObject *__pyx_pf_7bloom25_4BM25_16__setstate_cython__(CYTHON_UNUSED struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
+static PyObject *__pyx_tp_new_7bloom25_BM25(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static __Pyx_CachedCFunction __pyx_umethod_PyUnicode_Type_upper = {0, 0, 0, 0, 0};
 /* #### Code section: late_includes ### */
 /* #### Code section: module_state ### */
@@ -2914,9 +2914,9 @@ typedef struct {
   #if CYTHON_USE_MODULE_STATE
   #endif
   #if CYTHON_USE_MODULE_STATE
-  PyObject *__pyx_type_10rapid_bm25_BM25;
+  PyObject *__pyx_type_7bloom25_BM25;
   #endif
-  PyTypeObject *__pyx_ptype_10rapid_bm25_BM25;
+  PyTypeObject *__pyx_ptype_7bloom25_BM25;
   PyObject *__pyx_kp_u_2f;
   PyObject *__pyx_n_b_A;
   PyObject *__pyx_n_b_ABOUT;
@@ -3076,6 +3076,7 @@ typedef struct {
   PyObject *__pyx_n_s_arrow_table;
   PyObject *__pyx_n_s_asyncio_coroutines;
   PyObject *__pyx_n_s_b;
+  PyObject *__pyx_n_s_bloom25;
   PyObject *__pyx_n_s_bloom_df_threshold;
   PyObject *__pyx_n_s_bloom_fpr;
   PyObject *__pyx_kp_s_bm25_bm25_pyx;
@@ -3158,7 +3159,6 @@ typedef struct {
   PyObject *__pyx_n_s_query_max_df;
   PyObject *__pyx_n_u_r;
   PyObject *__pyx_n_s_range;
-  PyObject *__pyx_n_s_rapid_bm25;
   PyObject *__pyx_n_s_read;
   PyObject *__pyx_n_s_reduce;
   PyObject *__pyx_n_s_reduce_cython;
@@ -3271,8 +3271,8 @@ static int __pyx_m_clear(PyObject *m) {
   #ifdef __Pyx_FusedFunction_USED
   Py_CLEAR(clear_module_state->__pyx_FusedFunctionType);
   #endif
-  Py_CLEAR(clear_module_state->__pyx_ptype_10rapid_bm25_BM25);
-  Py_CLEAR(clear_module_state->__pyx_type_10rapid_bm25_BM25);
+  Py_CLEAR(clear_module_state->__pyx_ptype_7bloom25_BM25);
+  Py_CLEAR(clear_module_state->__pyx_type_7bloom25_BM25);
   Py_CLEAR(clear_module_state->__pyx_kp_u_2f);
   Py_CLEAR(clear_module_state->__pyx_n_b_A);
   Py_CLEAR(clear_module_state->__pyx_n_b_ABOUT);
@@ -3432,6 +3432,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_arrow_table);
   Py_CLEAR(clear_module_state->__pyx_n_s_asyncio_coroutines);
   Py_CLEAR(clear_module_state->__pyx_n_s_b);
+  Py_CLEAR(clear_module_state->__pyx_n_s_bloom25);
   Py_CLEAR(clear_module_state->__pyx_n_s_bloom_df_threshold);
   Py_CLEAR(clear_module_state->__pyx_n_s_bloom_fpr);
   Py_CLEAR(clear_module_state->__pyx_kp_s_bm25_bm25_pyx);
@@ -3514,7 +3515,6 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_query_max_df);
   Py_CLEAR(clear_module_state->__pyx_n_u_r);
   Py_CLEAR(clear_module_state->__pyx_n_s_range);
-  Py_CLEAR(clear_module_state->__pyx_n_s_rapid_bm25);
   Py_CLEAR(clear_module_state->__pyx_n_s_read);
   Py_CLEAR(clear_module_state->__pyx_n_s_reduce);
   Py_CLEAR(clear_module_state->__pyx_n_s_reduce_cython);
@@ -3601,8 +3601,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   #ifdef __Pyx_FusedFunction_USED
   Py_VISIT(traverse_module_state->__pyx_FusedFunctionType);
   #endif
-  Py_VISIT(traverse_module_state->__pyx_ptype_10rapid_bm25_BM25);
-  Py_VISIT(traverse_module_state->__pyx_type_10rapid_bm25_BM25);
+  Py_VISIT(traverse_module_state->__pyx_ptype_7bloom25_BM25);
+  Py_VISIT(traverse_module_state->__pyx_type_7bloom25_BM25);
   Py_VISIT(traverse_module_state->__pyx_kp_u_2f);
   Py_VISIT(traverse_module_state->__pyx_n_b_A);
   Py_VISIT(traverse_module_state->__pyx_n_b_ABOUT);
@@ -3762,6 +3762,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_arrow_table);
   Py_VISIT(traverse_module_state->__pyx_n_s_asyncio_coroutines);
   Py_VISIT(traverse_module_state->__pyx_n_s_b);
+  Py_VISIT(traverse_module_state->__pyx_n_s_bloom25);
   Py_VISIT(traverse_module_state->__pyx_n_s_bloom_df_threshold);
   Py_VISIT(traverse_module_state->__pyx_n_s_bloom_fpr);
   Py_VISIT(traverse_module_state->__pyx_kp_s_bm25_bm25_pyx);
@@ -3844,7 +3845,6 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_query_max_df);
   Py_VISIT(traverse_module_state->__pyx_n_u_r);
   Py_VISIT(traverse_module_state->__pyx_n_s_range);
-  Py_VISIT(traverse_module_state->__pyx_n_s_rapid_bm25);
   Py_VISIT(traverse_module_state->__pyx_n_s_read);
   Py_VISIT(traverse_module_state->__pyx_n_s_reduce);
   Py_VISIT(traverse_module_state->__pyx_n_s_reduce_cython);
@@ -3956,9 +3956,9 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #if CYTHON_USE_MODULE_STATE
 #endif
 #if CYTHON_USE_MODULE_STATE
-#define __pyx_type_10rapid_bm25_BM25 __pyx_mstate_global->__pyx_type_10rapid_bm25_BM25
+#define __pyx_type_7bloom25_BM25 __pyx_mstate_global->__pyx_type_7bloom25_BM25
 #endif
-#define __pyx_ptype_10rapid_bm25_BM25 __pyx_mstate_global->__pyx_ptype_10rapid_bm25_BM25
+#define __pyx_ptype_7bloom25_BM25 __pyx_mstate_global->__pyx_ptype_7bloom25_BM25
 #define __pyx_kp_u_2f __pyx_mstate_global->__pyx_kp_u_2f
 #define __pyx_n_b_A __pyx_mstate_global->__pyx_n_b_A
 #define __pyx_n_b_ABOUT __pyx_mstate_global->__pyx_n_b_ABOUT
@@ -4118,6 +4118,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_arrow_table __pyx_mstate_global->__pyx_n_s_arrow_table
 #define __pyx_n_s_asyncio_coroutines __pyx_mstate_global->__pyx_n_s_asyncio_coroutines
 #define __pyx_n_s_b __pyx_mstate_global->__pyx_n_s_b
+#define __pyx_n_s_bloom25 __pyx_mstate_global->__pyx_n_s_bloom25
 #define __pyx_n_s_bloom_df_threshold __pyx_mstate_global->__pyx_n_s_bloom_df_threshold
 #define __pyx_n_s_bloom_fpr __pyx_mstate_global->__pyx_n_s_bloom_fpr
 #define __pyx_kp_s_bm25_bm25_pyx __pyx_mstate_global->__pyx_kp_s_bm25_bm25_pyx
@@ -4200,7 +4201,6 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_query_max_df __pyx_mstate_global->__pyx_n_s_query_max_df
 #define __pyx_n_u_r __pyx_mstate_global->__pyx_n_u_r
 #define __pyx_n_s_range __pyx_mstate_global->__pyx_n_s_range
-#define __pyx_n_s_rapid_bm25 __pyx_mstate_global->__pyx_n_s_rapid_bm25
 #define __pyx_n_s_read __pyx_mstate_global->__pyx_n_s_read
 #define __pyx_n_s_reduce __pyx_mstate_global->__pyx_n_s_reduce
 #define __pyx_n_s_reduce_cython __pyx_mstate_global->__pyx_n_s_reduce_cython
@@ -5243,15 +5243,15 @@ static PyObject *__pyx_convert_vector_to_py_std_3a__3a_vector_3c_std_3a__3a_pair
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_1is_pandas_dataframe(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_7bloom25_1is_pandas_dataframe(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_1is_pandas_dataframe = {"is_pandas_dataframe", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_1is_pandas_dataframe, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_1is_pandas_dataframe(PyObject *__pyx_self, 
+static PyMethodDef __pyx_mdef_7bloom25_1is_pandas_dataframe = {"is_pandas_dataframe", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_1is_pandas_dataframe, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_1is_pandas_dataframe(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -5321,11 +5321,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.is_pandas_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_pandas_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_is_pandas_dataframe(__pyx_self, __pyx_v_obj);
+  __pyx_r = __pyx_pf_7bloom25_is_pandas_dataframe(__pyx_self, __pyx_v_obj);
 
   /* function exit code */
   {
@@ -5338,7 +5338,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_is_pandas_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
+static PyObject *__pyx_pf_7bloom25_is_pandas_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -5403,7 +5403,7 @@ static PyObject *__pyx_pf_10rapid_bm25_is_pandas_dataframe(CYTHON_UNUSED PyObjec
   __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_AddTraceback("rapid_bm25.is_pandas_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_pandas_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XGIVEREF(__pyx_r);
@@ -5420,15 +5420,15 @@ static PyObject *__pyx_pf_10rapid_bm25_is_pandas_dataframe(CYTHON_UNUSED PyObjec
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_3is_pandas_series(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_7bloom25_3is_pandas_series(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_3is_pandas_series = {"is_pandas_series", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_3is_pandas_series, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_3is_pandas_series(PyObject *__pyx_self, 
+static PyMethodDef __pyx_mdef_7bloom25_3is_pandas_series = {"is_pandas_series", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_3is_pandas_series, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_3is_pandas_series(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -5498,11 +5498,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.is_pandas_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_pandas_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_2is_pandas_series(__pyx_self, __pyx_v_obj);
+  __pyx_r = __pyx_pf_7bloom25_2is_pandas_series(__pyx_self, __pyx_v_obj);
 
   /* function exit code */
   {
@@ -5515,7 +5515,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_2is_pandas_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
+static PyObject *__pyx_pf_7bloom25_2is_pandas_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -5580,7 +5580,7 @@ static PyObject *__pyx_pf_10rapid_bm25_2is_pandas_series(CYTHON_UNUSED PyObject 
   __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_AddTraceback("rapid_bm25.is_pandas_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_pandas_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XGIVEREF(__pyx_r);
@@ -5597,15 +5597,15 @@ static PyObject *__pyx_pf_10rapid_bm25_2is_pandas_series(CYTHON_UNUSED PyObject 
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_5is_polars_dataframe(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_7bloom25_5is_polars_dataframe(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_5is_polars_dataframe = {"is_polars_dataframe", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_5is_polars_dataframe, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_5is_polars_dataframe(PyObject *__pyx_self, 
+static PyMethodDef __pyx_mdef_7bloom25_5is_polars_dataframe = {"is_polars_dataframe", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_5is_polars_dataframe, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_5is_polars_dataframe(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -5675,11 +5675,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.is_polars_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_polars_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_4is_polars_dataframe(__pyx_self, __pyx_v_obj);
+  __pyx_r = __pyx_pf_7bloom25_4is_polars_dataframe(__pyx_self, __pyx_v_obj);
 
   /* function exit code */
   {
@@ -5692,7 +5692,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4is_polars_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
+static PyObject *__pyx_pf_7bloom25_4is_polars_dataframe(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -5757,7 +5757,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4is_polars_dataframe(CYTHON_UNUSED PyObje
   __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_AddTraceback("rapid_bm25.is_polars_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_polars_dataframe", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XGIVEREF(__pyx_r);
@@ -5774,15 +5774,15 @@ static PyObject *__pyx_pf_10rapid_bm25_4is_polars_dataframe(CYTHON_UNUSED PyObje
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_7is_polars_series(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_7bloom25_7is_polars_series(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_7is_polars_series = {"is_polars_series", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_7is_polars_series, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_7is_polars_series(PyObject *__pyx_self, 
+static PyMethodDef __pyx_mdef_7bloom25_7is_polars_series = {"is_polars_series", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_7is_polars_series, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_7is_polars_series(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -5852,11 +5852,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.is_polars_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_polars_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_6is_polars_series(__pyx_self, __pyx_v_obj);
+  __pyx_r = __pyx_pf_7bloom25_6is_polars_series(__pyx_self, __pyx_v_obj);
 
   /* function exit code */
   {
@@ -5869,7 +5869,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_6is_polars_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
+static PyObject *__pyx_pf_7bloom25_6is_polars_series(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -5934,7 +5934,7 @@ static PyObject *__pyx_pf_10rapid_bm25_6is_polars_series(CYTHON_UNUSED PyObject 
   __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_AddTraceback("rapid_bm25.is_polars_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_polars_series", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XGIVEREF(__pyx_r);
@@ -5951,15 +5951,15 @@ static PyObject *__pyx_pf_10rapid_bm25_6is_polars_series(CYTHON_UNUSED PyObject 
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_9is_numpy_array(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_7bloom25_9is_numpy_array(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_9is_numpy_array = {"is_numpy_array", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_9is_numpy_array, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_9is_numpy_array(PyObject *__pyx_self, 
+static PyMethodDef __pyx_mdef_7bloom25_9is_numpy_array = {"is_numpy_array", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_9is_numpy_array, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_9is_numpy_array(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -6029,11 +6029,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.is_numpy_array", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_numpy_array", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_8is_numpy_array(__pyx_self, __pyx_v_obj);
+  __pyx_r = __pyx_pf_7bloom25_8is_numpy_array(__pyx_self, __pyx_v_obj);
 
   /* function exit code */
   {
@@ -6046,7 +6046,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
+static PyObject *__pyx_pf_7bloom25_8is_numpy_array(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_obj) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -6084,7 +6084,7 @@ static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *_
   __pyx_L1_error:;
   __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_AddTraceback("rapid_bm25.is_numpy_array", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.is_numpy_array", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XGIVEREF(__pyx_r);
@@ -6101,8 +6101,8 @@ static PyObject *__pyx_pf_10rapid_bm25_8is_numpy_array(CYTHON_UNUSED PyObject *_
  */
 
 /* Python wrapper */
-static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
+static int __pyx_pw_7bloom25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
+static int __pyx_pw_7bloom25_4BM25_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   float __pyx_v_bloom_df_threshold;
   double __pyx_v_bloom_fpr;
   float __pyx_v_k1;
@@ -6250,11 +6250,11 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
       __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25___init__(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_bloom_df_threshold, __pyx_v_bloom_fpr, __pyx_v_k1, __pyx_v_b, __pyx_v_stopwords, __pyx_v_num_partitions);
+  __pyx_r = __pyx_pf_7bloom25_4BM25___init__(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v_bloom_df_threshold, __pyx_v_bloom_fpr, __pyx_v_k1, __pyx_v_b, __pyx_v_stopwords, __pyx_v_num_partitions);
 
   /* function exit code */
   {
@@ -6267,7 +6267,7 @@ static int __pyx_pw_10rapid_bm25_4BM25_1__init__(PyObject *__pyx_v_self, PyObjec
   return __pyx_r;
 }
 
-static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, double __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions) {
+static int __pyx_pf_7bloom25_4BM25___init__(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, float __pyx_v_bloom_df_threshold, double __pyx_v_bloom_fpr, float __pyx_v_k1, float __pyx_v_b, PyObject *__pyx_v_stopwords, int __pyx_v_num_partitions) {
   PyObject *__pyx_v_stopword = NULL;
   int __pyx_r;
   __Pyx_RefNannyDeclarations
@@ -6405,7 +6405,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
  *         else:
  *             for stopword in stopwords:
  */
-    __pyx_v_self->stopwords = __pyx_v_10rapid_bm25_ENGLISH_STOPWORDS;
+    __pyx_v_self->stopwords = __pyx_v_7bloom25_ENGLISH_STOPWORDS;
 
     /* "bm25/bm25.pyx":123
  *         self.num_partitions = num_partitions
@@ -6574,7 +6574,7 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
   __Pyx_XDECREF(__pyx_t_4);
   __Pyx_XDECREF(__pyx_t_8);
   __Pyx_XDECREF(__pyx_t_9);
-  __Pyx_AddTraceback("rapid_bm25.BM25.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = -1;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_stopword);
@@ -6591,15 +6591,15 @@ static int __pyx_pf_10rapid_bm25_4BM25___init__(struct __pyx_obj_10rapid_bm25_BM
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_3index_file(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_3index_file(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_3index_file = {"index_file", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_3index_file, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_3index_file(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_3index_file = {"index_file", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_3index_file, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_3index_file(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -6684,13 +6684,13 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.index_file", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.index_file", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_filename), (&PyUnicode_Type), 1, "filename", 1))) __PYX_ERR(0, 130, __pyx_L1_error)
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_search_cols), (&PyList_Type), 1, "search_cols", 1))) __PYX_ERR(0, 130, __pyx_L1_error)
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_2index_file(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_filename, __pyx_v_search_cols);
+  __pyx_r = __pyx_pf_7bloom25_4BM25_2index_file(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v_filename, __pyx_v_search_cols);
 
   /* function exit code */
   goto __pyx_L0;
@@ -6707,7 +6707,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_2index_file(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_search_cols) {
+static PyObject *__pyx_pf_7bloom25_4BM25_2index_file(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_search_cols) {
   PyObject *__pyx_v_text_col = NULL;
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
@@ -6849,7 +6849,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_2index_file(struct __pyx_obj_10rapi
  * 
  * 
  */
-  ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_with_file(__pyx_v_self, __pyx_v_filename, __pyx_v_self->search_cols); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 135, __pyx_L1_error)
+  ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_with_file(__pyx_v_self, __pyx_v_filename, __pyx_v_self->search_cols); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 135, __pyx_L1_error)
 
   /* "bm25/bm25.pyx":130
  * 
@@ -6868,7 +6868,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_2index_file(struct __pyx_obj_10rapi
   __Pyx_XDECREF(__pyx_t_4);
   __Pyx_XDECREF(__pyx_t_5);
   __Pyx_XDECREF(__pyx_t_6);
-  __Pyx_AddTraceback("rapid_bm25.BM25.index_file", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.index_file", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_text_col);
@@ -6886,15 +6886,15 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_2index_file(struct __pyx_obj_10rapi
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_5index_documents(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_5index_documents(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_5index_documents = {"index_documents", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_5index_documents, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_5index_documents(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_5index_documents = {"index_documents", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_5index_documents, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_5index_documents(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -6964,11 +6964,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.index_documents", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.index_documents", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_4index_documents(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_documents);
+  __pyx_r = __pyx_pf_7bloom25_4BM25_4index_documents(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v_documents);
 
   /* function exit code */
   {
@@ -6981,7 +6981,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
+static PyObject *__pyx_pf_7bloom25_4BM25_4index_documents(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   Py_ssize_t __pyx_t_1;
@@ -7062,7 +7062,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
  *             self._init_dicts(documents)
  */
     if (!(likely(PyList_CheckExact(__pyx_v_documents))||((__pyx_v_documents) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_v_documents))) __PYX_ERR(0, 144, __pyx_L1_error)
-    ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_lists(__pyx_v_self, ((PyObject*)__pyx_v_documents)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 144, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_lists(__pyx_v_self, ((PyObject*)__pyx_v_documents)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 144, __pyx_L1_error)
 
     /* "bm25/bm25.pyx":143
  *         self.filename = "in_memory"
@@ -7095,7 +7095,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
  *             self._init_documents(documents)
  */
     if (!(likely(PyList_CheckExact(__pyx_v_documents))||((__pyx_v_documents) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_v_documents))) __PYX_ERR(0, 146, __pyx_L1_error)
-    ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_dicts(__pyx_v_self, ((PyObject*)__pyx_v_documents)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 146, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_dicts(__pyx_v_self, ((PyObject*)__pyx_v_documents)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 146, __pyx_L1_error)
 
     /* "bm25/bm25.pyx":145
  *         if isinstance(documents[0], tuple) or isinstance(documents[0], list):
@@ -7128,7 +7128,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
  *             documents.fillna('', inplace=True)
  */
     if (!(likely(PyList_CheckExact(__pyx_v_documents))||((__pyx_v_documents) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_v_documents))) __PYX_ERR(0, 148, __pyx_L1_error)
-    ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_documents(__pyx_v_self, ((PyObject*)__pyx_v_documents)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 148, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_documents(__pyx_v_self, ((PyObject*)__pyx_v_documents)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 148, __pyx_L1_error)
 
     /* "bm25/bm25.pyx":147
  *         elif isinstance(documents[0], dict):
@@ -7228,7 +7228,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     }
     if (!(likely(PyList_CheckExact(__pyx_t_6))||((__pyx_t_6) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_t_6))) __PYX_ERR(0, 151, __pyx_L1_error)
-    ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_lists(__pyx_v_self, ((PyObject*)__pyx_t_6)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_lists(__pyx_v_self, ((PyObject*)__pyx_t_6)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
 
     /* "bm25/bm25.pyx":149
@@ -7326,7 +7326,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     }
     if (!(likely(PyList_CheckExact(__pyx_t_5))||((__pyx_t_5) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_t_5))) __PYX_ERR(0, 154, __pyx_L1_error)
-    ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_documents(__pyx_v_self, ((PyObject*)__pyx_t_5)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 154, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_documents(__pyx_v_self, ((PyObject*)__pyx_t_5)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 154, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
     /* "bm25/bm25.pyx":152
@@ -7406,7 +7406,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     }
     if (!(likely(PyList_CheckExact(__pyx_t_5))||((__pyx_t_5) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_t_5))) __PYX_ERR(0, 156, __pyx_L1_error)
-    ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_lists(__pyx_v_self, ((PyObject*)__pyx_t_5)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 156, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_lists(__pyx_v_self, ((PyObject*)__pyx_t_5)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 156, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
     /* "bm25/bm25.pyx":155
@@ -7523,7 +7523,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
       __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
     }
     if (!(likely(PyList_CheckExact(__pyx_t_5))||((__pyx_t_5) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_t_5))) __PYX_ERR(0, 159, __pyx_L1_error)
-    ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_documents(__pyx_v_self, ((PyObject*)__pyx_t_5)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 159, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_init_documents(__pyx_v_self, ((PyObject*)__pyx_t_5)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 159, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
     /* "bm25/bm25.pyx":157
@@ -7567,7 +7567,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_5);
   __Pyx_XDECREF(__pyx_t_6);
-  __Pyx_AddTraceback("rapid_bm25.BM25.index_documents", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.index_documents", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_documents);
@@ -7585,15 +7585,15 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_4index_documents(struct __pyx_obj_1
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_7save(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_7save(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_7save = {"save", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_7save, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_7save(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_7save = {"save", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_7save, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_7save(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -7663,11 +7663,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_6save(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_db_dir);
+  __pyx_r = __pyx_pf_7bloom25_4BM25_6save(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v_db_dir);
 
   /* function exit code */
   {
@@ -7680,7 +7680,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir) {
+static PyObject *__pyx_pf_7bloom25_4BM25_6save(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir) {
   PyObject *__pyx_v_last_modified = NULL;
   PyObject *__pyx_v_f = NULL;
   PyObject *__pyx_r = NULL;
@@ -7938,7 +7938,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25
         __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
         /*except:*/ {
-          __Pyx_AddTraceback("rapid_bm25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
+          __Pyx_AddTraceback("bloom25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
           if (__Pyx_GetException(&__pyx_t_3, &__pyx_t_1, &__pyx_t_2) < 0) __PYX_ERR(0, 173, __pyx_L9_except_error)
           __Pyx_XGOTREF(__pyx_t_3);
           __Pyx_XGOTREF(__pyx_t_1);
@@ -8142,7 +8142,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25
         __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
         /*except:*/ {
-          __Pyx_AddTraceback("rapid_bm25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
+          __Pyx_AddTraceback("bloom25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
           if (__Pyx_GetException(&__pyx_t_3, &__pyx_t_2, &__pyx_t_1) < 0) __PYX_ERR(0, 177, __pyx_L23_except_error)
           __Pyx_XGOTREF(__pyx_t_3);
           __Pyx_XGOTREF(__pyx_t_2);
@@ -8221,7 +8221,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_7);
-  __Pyx_AddTraceback("rapid_bm25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.save", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_last_modified);
@@ -8240,15 +8240,15 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_6save(struct __pyx_obj_10rapid_bm25
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_9load(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_9load(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_9load = {"load", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_9load, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_9load(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_9load = {"load", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_9load, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_9load(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -8318,11 +8318,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.load", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.load", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_8load(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_db_dir);
+  __pyx_r = __pyx_pf_7bloom25_4BM25_8load(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v_db_dir);
 
   /* function exit code */
   {
@@ -8335,7 +8335,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_8load(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir) {
+static PyObject *__pyx_pf_7bloom25_4BM25_8load(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_db_dir) {
   PyObject *__pyx_v_f = NULL;
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
@@ -8583,7 +8583,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_8load(struct __pyx_obj_10rapid_bm25
         __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
         /*except:*/ {
-          __Pyx_AddTraceback("rapid_bm25.BM25.load", __pyx_clineno, __pyx_lineno, __pyx_filename);
+          __Pyx_AddTraceback("bloom25.BM25.load", __pyx_clineno, __pyx_lineno, __pyx_filename);
           if (__Pyx_GetException(&__pyx_t_3, &__pyx_t_1, &__pyx_t_2) < 0) __PYX_ERR(0, 188, __pyx_L10_except_error)
           __Pyx_XGOTREF(__pyx_t_3);
           __Pyx_XGOTREF(__pyx_t_1);
@@ -8689,7 +8689,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_8load(struct __pyx_obj_10rapid_bm25
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_8);
-  __Pyx_AddTraceback("rapid_bm25.BM25.load", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.load", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_f);
@@ -8706,7 +8706,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_8load(struct __pyx_obj_10rapid_bm25
  * 
  */
 
-static void __pyx_f_10rapid_bm25_4BM25__init_lists(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
+static void __pyx_f_7bloom25_4BM25__init_lists(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
   CYTHON_UNUSED PyObject *__pyx_v_init = NULL;
   std::vector<std::vector<std::string> >  __pyx_v_docs;
   PyObject *__pyx_v_doc = 0;
@@ -9007,7 +9007,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_lists(struct __pyx_obj_10rapid_bm25
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_11);
   __Pyx_XDECREF(__pyx_t_12);
-  __Pyx_AddTraceback("rapid_bm25.BM25._init_lists", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._init_lists", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_init);
   __Pyx_XDECREF(__pyx_v_doc);
@@ -9024,15 +9024,15 @@ static void __pyx_f_10rapid_bm25_4BM25__init_lists(struct __pyx_obj_10rapid_bm25
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_11_init_dicts_lambda(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_11_init_dicts_lambda(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_11_init_dicts_lambda = {"lambda", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_11_init_dicts_lambda, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_11_init_dicts_lambda(PyObject *__pyx_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_11_init_dicts_lambda = {"lambda", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_11_init_dicts_lambda, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_11_init_dicts_lambda(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -9102,7 +9102,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25._init_dicts.lambda", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._init_dicts.lambda", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
@@ -9137,7 +9137,7 @@ static PyObject *__pyx_lambda_funcdef_lambda(CYTHON_UNUSED PyObject *__pyx_self,
   /* function exit code */
   __pyx_L1_error:;
   __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_AddTraceback("rapid_bm25.BM25._init_dicts.lambda", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._init_dicts.lambda", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XGIVEREF(__pyx_r);
@@ -9153,7 +9153,7 @@ static PyObject *__pyx_lambda_funcdef_lambda(CYTHON_UNUSED PyObject *__pyx_self,
  * 
  */
 
-static void __pyx_f_10rapid_bm25_4BM25__init_dicts(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
+static void __pyx_f_7bloom25_4BM25__init_dicts(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
   CYTHON_UNUSED PyObject *__pyx_v_init = NULL;
   std::vector<std::vector<std::string> >  __pyx_v_docs;
   PyObject *__pyx_v_doc = 0;
@@ -9317,7 +9317,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_dicts(struct __pyx_obj_10rapid_bm25
     __pyx_t_3 = 0;
     __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 228, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_9 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_11_init_dicts_lambda, 0, __pyx_n_s_BM25__init_dicts_locals_lambda, NULL, __pyx_n_s_rapid_bm25, __pyx_d, NULL); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 228, __pyx_L1_error)
+    __pyx_t_9 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_11_init_dicts_lambda, 0, __pyx_n_s_BM25__init_dicts_locals_lambda, NULL, __pyx_n_s_bloom25, __pyx_d, NULL); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 228, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_9);
     if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_key, __pyx_t_9) < 0) __PYX_ERR(0, 228, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
@@ -9482,7 +9482,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_dicts(struct __pyx_obj_10rapid_bm25
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_9);
   __Pyx_XDECREF(__pyx_t_12);
-  __Pyx_AddTraceback("rapid_bm25.BM25._init_dicts", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._init_dicts", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_init);
   __Pyx_XDECREF(__pyx_v_doc);
@@ -9498,7 +9498,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_dicts(struct __pyx_obj_10rapid_bm25
  * 
  */
 
-static void __pyx_f_10rapid_bm25_4BM25__init_documents(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
+static void __pyx_f_7bloom25_4BM25__init_documents(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_documents) {
   CYTHON_UNUSED PyObject *__pyx_v_init = NULL;
   std::vector<std::vector<std::string> >  __pyx_v_docs;
   PyObject *__pyx_v_doc = 0;
@@ -9677,7 +9677,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_documents(struct __pyx_obj_10rapid_
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_7);
-  __Pyx_AddTraceback("rapid_bm25.BM25._init_documents", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._init_documents", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_init);
   __Pyx_XDECREF(__pyx_v_doc);
@@ -9692,7 +9692,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_documents(struct __pyx_obj_10rapid_
  *             self.is_parquet = True
  */
 
-static void __pyx_f_10rapid_bm25_4BM25__init_with_file(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, CYTHON_UNUSED std::vector<std::string>  __pyx_v_search_cols) {
+static void __pyx_f_7bloom25_4BM25__init_with_file(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, CYTHON_UNUSED std::vector<std::string>  __pyx_v_search_cols) {
   __Pyx_RefNannyDeclarations
   int __pyx_t_1;
   PyObject *__pyx_t_2 = NULL;
@@ -9789,7 +9789,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_with_file(struct __pyx_obj_10rapid_
   goto __pyx_L0;
   __pyx_L1_error:;
   __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_AddTraceback("rapid_bm25.BM25._init_with_file", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._init_with_file", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
   __Pyx_RefNannyFinishContext();
 }
@@ -9802,7 +9802,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_with_file(struct __pyx_obj_10rapid_
  * 
  */
 
-static void __pyx_f_10rapid_bm25_4BM25__init_with_parquet(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_text_col) {
+static void __pyx_f_7bloom25_4BM25__init_with_parquet(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_filename, PyObject *__pyx_v_text_col) {
   PyObject *__pyx_v_pq = NULL;
   PyObject *__pyx_v_init = NULL;
   PyObject *__pyx_v_pydocs = 0;
@@ -10173,7 +10173,7 @@ static void __pyx_f_10rapid_bm25_4BM25__init_with_parquet(struct __pyx_obj_10rap
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_5);
   __Pyx_XDECREF(__pyx_t_6);
-  __Pyx_AddTraceback("rapid_bm25.BM25._init_with_parquet", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._init_with_parquet", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_pq);
   __Pyx_XDECREF(__pyx_v_init);
@@ -10189,14 +10189,14 @@ static void __pyx_f_10rapid_bm25_4BM25__init_with_parquet(struct __pyx_obj_10rap
  *             str query,
  */
 
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_11get_topk_indices(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_11get_topk_indices(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyObject *__pyx_f_10rapid_bm25_4BM25_get_topk_indices(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_skip_dispatch, struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices *__pyx_optional_args) {
+static PyObject *__pyx_f_7bloom25_4BM25_get_topk_indices(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_skip_dispatch, struct __pyx_opt_args_7bloom25_4BM25_get_topk_indices *__pyx_optional_args) {
   int __pyx_v_query_max_df = __pyx_k__9;
   int __pyx_v_k = ((int)10);
   PyObject *__pyx_v_boost_factors = __pyx_k__10;
@@ -10248,7 +10248,7 @@ static PyObject *__pyx_f_10rapid_bm25_4BM25_get_topk_indices(struct __pyx_obj_10
       #endif
       __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_get_topk_indices); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 307, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
-      if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_10rapid_bm25_4BM25_11get_topk_indices)) {
+      if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_7bloom25_4BM25_11get_topk_indices)) {
         __Pyx_XDECREF(__pyx_r);
         __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_query_max_df); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 307, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_3);
@@ -10610,7 +10610,7 @@ static PyObject *__pyx_f_10rapid_bm25_4BM25_get_topk_indices(struct __pyx_obj_10
   __Pyx_XDECREF(__pyx_t_4);
   __Pyx_XDECREF(__pyx_t_5);
   __Pyx_XDECREF(__pyx_t_6);
-  __Pyx_AddTraceback("rapid_bm25.BM25.get_topk_indices", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.get_topk_indices", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = 0;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_factor);
@@ -10622,15 +10622,15 @@ static PyObject *__pyx_f_10rapid_bm25_4BM25_get_topk_indices(struct __pyx_obj_10
 }
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_11get_topk_indices(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_11get_topk_indices(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_11get_topk_indices = {"get_topk_indices", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_11get_topk_indices, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_11get_topk_indices(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_11get_topk_indices = {"get_topk_indices", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_11get_topk_indices, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_11get_topk_indices(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -10750,13 +10750,13 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.get_topk_indices", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.get_topk_indices", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_query), (&PyUnicode_Type), 1, "query", 1))) __PYX_ERR(0, 309, __pyx_L1_error)
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_boost_factors), (&PyList_Type), 1, "boost_factors", 1))) __PYX_ERR(0, 312, __pyx_L1_error)
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_10get_topk_indices(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_query, __pyx_v_query_max_df, __pyx_v_k, __pyx_v_boost_factors);
+  __pyx_r = __pyx_pf_7bloom25_4BM25_10get_topk_indices(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v_query, __pyx_v_query_max_df, __pyx_v_k, __pyx_v_boost_factors);
 
   /* function exit code */
   goto __pyx_L0;
@@ -10773,11 +10773,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_10get_topk_indices(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_query_max_df, int __pyx_v_k, PyObject *__pyx_v_boost_factors) {
+static PyObject *__pyx_pf_7bloom25_4BM25_10get_topk_indices(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_query_max_df, int __pyx_v_k, PyObject *__pyx_v_boost_factors) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
-  struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices __pyx_t_2;
+  struct __pyx_opt_args_7bloom25_4BM25_get_topk_indices __pyx_t_2;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -10787,7 +10787,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_10get_topk_indices(struct __pyx_obj
   __pyx_t_2.query_max_df = __pyx_v_query_max_df;
   __pyx_t_2.k = __pyx_v_k;
   __pyx_t_2.boost_factors = __pyx_v_boost_factors;
-  __pyx_t_1 = __pyx_vtabptr_10rapid_bm25_BM25->get_topk_indices(__pyx_v_self, __pyx_v_query, 1, &__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 307, __pyx_L1_error)
+  __pyx_t_1 = __pyx_vtabptr_7bloom25_BM25->get_topk_indices(__pyx_v_self, __pyx_v_query, 1, &__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 307, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -10796,7 +10796,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_10get_topk_indices(struct __pyx_obj
   /* function exit code */
   __pyx_L1_error:;
   __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_AddTraceback("rapid_bm25.BM25.get_topk_indices", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.get_topk_indices", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XGIVEREF(__pyx_r);
@@ -10812,7 +10812,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_10get_topk_indices(struct __pyx_obj
  *             str query,
  */
 
-static PyObject *__pyx_f_10rapid_bm25_4BM25__get_topk_docs_parquet(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet *__pyx_optional_args) {
+static PyObject *__pyx_f_7bloom25_4BM25__get_topk_docs_parquet(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, struct __pyx_opt_args_7bloom25_4BM25__get_topk_docs_parquet *__pyx_optional_args) {
   int __pyx_v_k = ((int)10);
   int __pyx_v_query_max_df = __pyx_k__11;
 
@@ -11271,7 +11271,7 @@ static PyObject *__pyx_f_10rapid_bm25_4BM25__get_topk_docs_parquet(struct __pyx_
   __Pyx_XDECREF(__pyx_t_4);
   __Pyx_XDECREF(__pyx_t_6);
   __Pyx_XDECREF(__pyx_t_12);
-  __Pyx_AddTraceback("rapid_bm25.BM25._get_topk_docs_parquet", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25._get_topk_docs_parquet", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = 0;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_factor);
@@ -11294,15 +11294,15 @@ static PyObject *__pyx_f_10rapid_bm25_4BM25__get_topk_docs_parquet(struct __pyx_
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_13get_topk_docs(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_13get_topk_docs(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_13get_topk_docs = {"get_topk_docs", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_13get_topk_docs, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_13get_topk_docs(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_13get_topk_docs = {"get_topk_docs", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_13get_topk_docs, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_13get_topk_docs(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -11430,13 +11430,13 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.get_topk_docs", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.get_topk_docs", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_query), (&PyUnicode_Type), 1, "query", 1))) __PYX_ERR(0, 381, __pyx_L1_error)
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_boost_factors), (&PyList_Type), 1, "boost_factors", 1))) __PYX_ERR(0, 384, __pyx_L1_error)
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_12get_topk_docs(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v_query, __pyx_v_k, __pyx_v_query_max_df, __pyx_v_boost_factors);
+  __pyx_r = __pyx_pf_7bloom25_4BM25_12get_topk_docs(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v_query, __pyx_v_k, __pyx_v_query_max_df, __pyx_v_boost_factors);
 
   /* "bm25/bm25.pyx":379
  * 
@@ -11461,7 +11461,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_12get_topk_docs(struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_k, int __pyx_v_query_max_df, PyObject *__pyx_v_boost_factors) {
+static PyObject *__pyx_pf_7bloom25_4BM25_12get_topk_docs(struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, PyObject *__pyx_v_query, int __pyx_v_k, int __pyx_v_query_max_df, PyObject *__pyx_v_boost_factors) {
   std::vector<float>  __pyx_v__boost_factors;
   PyObject *__pyx_v_factor = NULL;
   std::vector<std::vector<std::pair<std::string,std::string> > >  __pyx_v_results;
@@ -11474,7 +11474,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_12get_topk_docs(struct __pyx_obj_10
   __Pyx_RefNannyDeclarations
   int __pyx_t_1;
   PyObject *__pyx_t_2 = NULL;
-  struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet __pyx_t_3;
+  struct __pyx_opt_args_7bloom25_4BM25__get_topk_docs_parquet __pyx_t_3;
   Py_ssize_t __pyx_t_4;
   PyObject *__pyx_t_5 = NULL;
   float __pyx_t_6;
@@ -11514,7 +11514,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_12get_topk_docs(struct __pyx_obj_10
     __pyx_t_3.__pyx_n = 2;
     __pyx_t_3.k = __pyx_v_k;
     __pyx_t_3.query_max_df = __pyx_v_query_max_df;
-    __pyx_t_2 = ((struct __pyx_vtabstruct_10rapid_bm25_BM25 *)__pyx_v_self->__pyx_vtab)->_get_topk_docs_parquet(__pyx_v_self, __pyx_v_query, &__pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 387, __pyx_L1_error)
+    __pyx_t_2 = ((struct __pyx_vtabstruct_7bloom25_BM25 *)__pyx_v_self->__pyx_vtab)->_get_topk_docs_parquet(__pyx_v_self, __pyx_v_query, &__pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 387, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __pyx_r = __pyx_t_2;
     __pyx_t_2 = 0;
@@ -11865,7 +11865,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_12get_topk_docs(struct __pyx_obj_10
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_5);
   __Pyx_XDECREF(__pyx_t_7);
-  __Pyx_AddTraceback("rapid_bm25.BM25.get_topk_docs", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.get_topk_docs", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_factor);
@@ -11884,15 +11884,15 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_12get_topk_docs(struct __pyx_obj_10
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_15__reduce_cython__(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_15__reduce_cython__(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_15__reduce_cython__ = {"__reduce_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_15__reduce_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_15__reduce_cython__(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_15__reduce_cython__ = {"__reduce_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_15__reduce_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_15__reduce_cython__(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -11917,14 +11917,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   if (unlikely(__pyx_nargs > 0)) {
     __Pyx_RaiseArgtupleInvalid("__reduce_cython__", 1, 0, 0, __pyx_nargs); return NULL;}
   if (unlikely(__pyx_kwds) && __Pyx_NumKwargs_FASTCALL(__pyx_kwds) && unlikely(!__Pyx_CheckKeywordStrings(__pyx_kwds, "__reduce_cython__", 0))) return NULL;
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_14__reduce_cython__(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self));
+  __pyx_r = __pyx_pf_7bloom25_4BM25_14__reduce_cython__(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self));
 
   /* function exit code */
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_14__reduce_cython__(CYTHON_UNUSED struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self) {
+static PyObject *__pyx_pf_7bloom25_4BM25_14__reduce_cython__(CYTHON_UNUSED struct __pyx_obj_7bloom25_BM25 *__pyx_v_self) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   int __pyx_lineno = 0;
@@ -11949,7 +11949,7 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_14__reduce_cython__(CYTHON_UNUSED s
 
   /* function exit code */
   __pyx_L1_error:;
-  __Pyx_AddTraceback("rapid_bm25.BM25.__reduce_cython__", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.__reduce_cython__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
@@ -11964,15 +11964,15 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_14__reduce_cython__(CYTHON_UNUSED s
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_17__setstate_cython__(PyObject *__pyx_v_self, 
+static PyObject *__pyx_pw_7bloom25_4BM25_17__setstate_cython__(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-static PyMethodDef __pyx_mdef_10rapid_bm25_4BM25_17__setstate_cython__ = {"__setstate_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_17__setstate_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_10rapid_bm25_4BM25_17__setstate_cython__(PyObject *__pyx_v_self, 
+static PyMethodDef __pyx_mdef_7bloom25_4BM25_17__setstate_cython__ = {"__setstate_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_17__setstate_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_7bloom25_4BM25_17__setstate_cython__(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -12042,11 +12042,11 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("rapid_bm25.BM25.__setstate_cython__", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.__setstate_cython__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_10rapid_bm25_4BM25_16__setstate_cython__(((struct __pyx_obj_10rapid_bm25_BM25 *)__pyx_v_self), __pyx_v___pyx_state);
+  __pyx_r = __pyx_pf_7bloom25_4BM25_16__setstate_cython__(((struct __pyx_obj_7bloom25_BM25 *)__pyx_v_self), __pyx_v___pyx_state);
 
   /* function exit code */
   {
@@ -12059,7 +12059,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_10rapid_bm25_4BM25_16__setstate_cython__(CYTHON_UNUSED struct __pyx_obj_10rapid_bm25_BM25 *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state) {
+static PyObject *__pyx_pf_7bloom25_4BM25_16__setstate_cython__(CYTHON_UNUSED struct __pyx_obj_7bloom25_BM25 *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   int __pyx_lineno = 0;
@@ -12084,16 +12084,16 @@ static PyObject *__pyx_pf_10rapid_bm25_4BM25_16__setstate_cython__(CYTHON_UNUSED
 
   /* function exit code */
   __pyx_L1_error:;
-  __Pyx_AddTraceback("rapid_bm25.BM25.__setstate_cython__", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_AddTraceback("bloom25.BM25.__setstate_cython__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
-static struct __pyx_vtabstruct_10rapid_bm25_BM25 __pyx_vtable_10rapid_bm25_BM25;
+static struct __pyx_vtabstruct_7bloom25_BM25 __pyx_vtable_7bloom25_BM25;
 
-static PyObject *__pyx_tp_new_10rapid_bm25_BM25(PyTypeObject *t, CYTHON_UNUSED PyObject *a, CYTHON_UNUSED PyObject *k) {
-  struct __pyx_obj_10rapid_bm25_BM25 *p;
+static PyObject *__pyx_tp_new_7bloom25_BM25(PyTypeObject *t, CYTHON_UNUSED PyObject *a, CYTHON_UNUSED PyObject *k) {
+  struct __pyx_obj_7bloom25_BM25 *p;
   PyObject *o;
   #if CYTHON_COMPILING_IN_LIMITED_API
   allocfunc alloc_func = (allocfunc)PyType_GetSlot(t, Py_tp_alloc);
@@ -12106,8 +12106,8 @@ static PyObject *__pyx_tp_new_10rapid_bm25_BM25(PyTypeObject *t, CYTHON_UNUSED P
   }
   if (unlikely(!o)) return 0;
   #endif
-  p = ((struct __pyx_obj_10rapid_bm25_BM25 *)o);
-  p->__pyx_vtab = __pyx_vtabptr_10rapid_bm25_BM25;
+  p = ((struct __pyx_obj_7bloom25_BM25 *)o);
+  p->__pyx_vtab = __pyx_vtabptr_7bloom25_BM25;
   new((void*)&(p->stopwords)) std::vector<std::string> ();
   new((void*)&(p->search_cols)) std::vector<std::string> ();
   p->filename = ((PyObject*)Py_None); Py_INCREF(Py_None);
@@ -12115,11 +12115,11 @@ static PyObject *__pyx_tp_new_10rapid_bm25_BM25(PyTypeObject *t, CYTHON_UNUSED P
   return o;
 }
 
-static void __pyx_tp_dealloc_10rapid_bm25_BM25(PyObject *o) {
-  struct __pyx_obj_10rapid_bm25_BM25 *p = (struct __pyx_obj_10rapid_bm25_BM25 *)o;
+static void __pyx_tp_dealloc_7bloom25_BM25(PyObject *o) {
+  struct __pyx_obj_7bloom25_BM25 *p = (struct __pyx_obj_7bloom25_BM25 *)o;
   #if CYTHON_USE_TP_FINALIZE
   if (unlikely((PY_VERSION_HEX >= 0x03080000 || __Pyx_PyType_HasFeature(Py_TYPE(o), Py_TPFLAGS_HAVE_FINALIZE)) && __Pyx_PyObject_GetSlot(o, tp_finalize, destructor)) && (!PyType_IS_GC(Py_TYPE(o)) || !__Pyx_PyObject_GC_IsFinalized(o))) {
-    if (__Pyx_PyObject_GetSlot(o, tp_dealloc, destructor) == __pyx_tp_dealloc_10rapid_bm25_BM25) {
+    if (__Pyx_PyObject_GetSlot(o, tp_dealloc, destructor) == __pyx_tp_dealloc_7bloom25_BM25) {
       if (PyObject_CallFinalizerFromDealloc(o)) return;
     }
   }
@@ -12138,39 +12138,39 @@ static void __pyx_tp_dealloc_10rapid_bm25_BM25(PyObject *o) {
   #endif
 }
 
-static PyMethodDef __pyx_methods_10rapid_bm25_BM25[] = {
-  {"index_file", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_3index_file, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
-  {"index_documents", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_5index_documents, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
-  {"save", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_7save, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
-  {"load", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_9load, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
-  {"get_topk_docs", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_13get_topk_docs, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
-  {"__reduce_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_15__reduce_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
-  {"__setstate_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_10rapid_bm25_4BM25_17__setstate_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
+static PyMethodDef __pyx_methods_7bloom25_BM25[] = {
+  {"index_file", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_3index_file, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
+  {"index_documents", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_5index_documents, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
+  {"save", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_7save, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
+  {"load", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_9load, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
+  {"get_topk_docs", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_13get_topk_docs, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
+  {"__reduce_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_15__reduce_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
+  {"__setstate_cython__", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_7bloom25_4BM25_17__setstate_cython__, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0},
   {0, 0, 0, 0}
 };
 #if CYTHON_USE_TYPE_SPECS
-static PyType_Slot __pyx_type_10rapid_bm25_BM25_slots[] = {
-  {Py_tp_dealloc, (void *)__pyx_tp_dealloc_10rapid_bm25_BM25},
-  {Py_tp_methods, (void *)__pyx_methods_10rapid_bm25_BM25},
-  {Py_tp_init, (void *)__pyx_pw_10rapid_bm25_4BM25_1__init__},
-  {Py_tp_new, (void *)__pyx_tp_new_10rapid_bm25_BM25},
+static PyType_Slot __pyx_type_7bloom25_BM25_slots[] = {
+  {Py_tp_dealloc, (void *)__pyx_tp_dealloc_7bloom25_BM25},
+  {Py_tp_methods, (void *)__pyx_methods_7bloom25_BM25},
+  {Py_tp_init, (void *)__pyx_pw_7bloom25_4BM25_1__init__},
+  {Py_tp_new, (void *)__pyx_tp_new_7bloom25_BM25},
   {0, 0},
 };
-static PyType_Spec __pyx_type_10rapid_bm25_BM25_spec = {
-  "rapid_bm25.BM25",
-  sizeof(struct __pyx_obj_10rapid_bm25_BM25),
+static PyType_Spec __pyx_type_7bloom25_BM25_spec = {
+  "bloom25.BM25",
+  sizeof(struct __pyx_obj_7bloom25_BM25),
   0,
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE,
-  __pyx_type_10rapid_bm25_BM25_slots,
+  __pyx_type_7bloom25_BM25_slots,
 };
 #else
 
-static PyTypeObject __pyx_type_10rapid_bm25_BM25 = {
+static PyTypeObject __pyx_type_7bloom25_BM25 = {
   PyVarObject_HEAD_INIT(0, 0)
-  "rapid_bm25.""BM25", /*tp_name*/
-  sizeof(struct __pyx_obj_10rapid_bm25_BM25), /*tp_basicsize*/
+  "bloom25.""BM25", /*tp_name*/
+  sizeof(struct __pyx_obj_7bloom25_BM25), /*tp_basicsize*/
   0, /*tp_itemsize*/
-  __pyx_tp_dealloc_10rapid_bm25_BM25, /*tp_dealloc*/
+  __pyx_tp_dealloc_7bloom25_BM25, /*tp_dealloc*/
   #if PY_VERSION_HEX < 0x030800b4
   0, /*tp_print*/
   #endif
@@ -12203,7 +12203,7 @@ static PyTypeObject __pyx_type_10rapid_bm25_BM25 = {
   0, /*tp_weaklistoffset*/
   0, /*tp_iter*/
   0, /*tp_iternext*/
-  __pyx_methods_10rapid_bm25_BM25, /*tp_methods*/
+  __pyx_methods_7bloom25_BM25, /*tp_methods*/
   0, /*tp_members*/
   0, /*tp_getset*/
   0, /*tp_base*/
@@ -12213,9 +12213,9 @@ static PyTypeObject __pyx_type_10rapid_bm25_BM25 = {
   #if !CYTHON_USE_TYPE_SPECS
   0, /*tp_dictoffset*/
   #endif
-  __pyx_pw_10rapid_bm25_4BM25_1__init__, /*tp_init*/
+  __pyx_pw_7bloom25_4BM25_1__init__, /*tp_init*/
   0, /*tp_alloc*/
-  __pyx_tp_new_10rapid_bm25_BM25, /*tp_new*/
+  __pyx_tp_new_7bloom25_BM25, /*tp_new*/
   0, /*tp_free*/
   0, /*tp_is_gc*/
   0, /*tp_bases*/
@@ -12422,6 +12422,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_arrow_table, __pyx_k_arrow_table, sizeof(__pyx_k_arrow_table), 0, 0, 1, 1},
     {&__pyx_n_s_asyncio_coroutines, __pyx_k_asyncio_coroutines, sizeof(__pyx_k_asyncio_coroutines), 0, 0, 1, 1},
     {&__pyx_n_s_b, __pyx_k_b, sizeof(__pyx_k_b), 0, 0, 1, 1},
+    {&__pyx_n_s_bloom25, __pyx_k_bloom25, sizeof(__pyx_k_bloom25), 0, 0, 1, 1},
     {&__pyx_n_s_bloom_df_threshold, __pyx_k_bloom_df_threshold, sizeof(__pyx_k_bloom_df_threshold), 0, 0, 1, 1},
     {&__pyx_n_s_bloom_fpr, __pyx_k_bloom_fpr, sizeof(__pyx_k_bloom_fpr), 0, 0, 1, 1},
     {&__pyx_kp_s_bm25_bm25_pyx, __pyx_k_bm25_bm25_pyx, sizeof(__pyx_k_bm25_bm25_pyx), 0, 0, 1, 0},
@@ -12504,7 +12505,6 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_query_max_df, __pyx_k_query_max_df, sizeof(__pyx_k_query_max_df), 0, 0, 1, 1},
     {&__pyx_n_u_r, __pyx_k_r, sizeof(__pyx_k_r), 0, 1, 0, 1},
     {&__pyx_n_s_range, __pyx_k_range, sizeof(__pyx_k_range), 0, 0, 1, 1},
-    {&__pyx_n_s_rapid_bm25, __pyx_k_rapid_bm25, sizeof(__pyx_k_rapid_bm25), 0, 0, 1, 1},
     {&__pyx_n_s_read, __pyx_k_read, sizeof(__pyx_k_read), 0, 0, 1, 1},
     {&__pyx_n_s_reduce, __pyx_k_reduce, sizeof(__pyx_k_reduce), 0, 0, 1, 1},
     {&__pyx_n_s_reduce_cython, __pyx_k_reduce_cython, sizeof(__pyx_k_reduce_cython), 0, 0, 1, 1},
@@ -12832,40 +12832,40 @@ static int __Pyx_modinit_type_init_code(void) {
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__Pyx_modinit_type_init_code", 0);
   /*--- Type init code ---*/
-  __pyx_vtabptr_10rapid_bm25_BM25 = &__pyx_vtable_10rapid_bm25_BM25;
-  __pyx_vtable_10rapid_bm25_BM25._init_lists = (void (*)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *))__pyx_f_10rapid_bm25_4BM25__init_lists;
-  __pyx_vtable_10rapid_bm25_BM25._init_dicts = (void (*)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *))__pyx_f_10rapid_bm25_4BM25__init_dicts;
-  __pyx_vtable_10rapid_bm25_BM25._init_documents = (void (*)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *))__pyx_f_10rapid_bm25_4BM25__init_documents;
-  __pyx_vtable_10rapid_bm25_BM25._init_with_file = (void (*)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, std::vector<std::string> ))__pyx_f_10rapid_bm25_4BM25__init_with_file;
-  __pyx_vtable_10rapid_bm25_BM25._init_with_parquet = (void (*)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, PyObject *))__pyx_f_10rapid_bm25_4BM25__init_with_parquet;
-  __pyx_vtable_10rapid_bm25_BM25.get_topk_indices = (PyObject *(*)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, int __pyx_skip_dispatch, struct __pyx_opt_args_10rapid_bm25_4BM25_get_topk_indices *__pyx_optional_args))__pyx_f_10rapid_bm25_4BM25_get_topk_indices;
-  __pyx_vtable_10rapid_bm25_BM25._get_topk_docs_parquet = (PyObject *(*)(struct __pyx_obj_10rapid_bm25_BM25 *, PyObject *, struct __pyx_opt_args_10rapid_bm25_4BM25__get_topk_docs_parquet *__pyx_optional_args))__pyx_f_10rapid_bm25_4BM25__get_topk_docs_parquet;
+  __pyx_vtabptr_7bloom25_BM25 = &__pyx_vtable_7bloom25_BM25;
+  __pyx_vtable_7bloom25_BM25._init_lists = (void (*)(struct __pyx_obj_7bloom25_BM25 *, PyObject *))__pyx_f_7bloom25_4BM25__init_lists;
+  __pyx_vtable_7bloom25_BM25._init_dicts = (void (*)(struct __pyx_obj_7bloom25_BM25 *, PyObject *))__pyx_f_7bloom25_4BM25__init_dicts;
+  __pyx_vtable_7bloom25_BM25._init_documents = (void (*)(struct __pyx_obj_7bloom25_BM25 *, PyObject *))__pyx_f_7bloom25_4BM25__init_documents;
+  __pyx_vtable_7bloom25_BM25._init_with_file = (void (*)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, std::vector<std::string> ))__pyx_f_7bloom25_4BM25__init_with_file;
+  __pyx_vtable_7bloom25_BM25._init_with_parquet = (void (*)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, PyObject *))__pyx_f_7bloom25_4BM25__init_with_parquet;
+  __pyx_vtable_7bloom25_BM25.get_topk_indices = (PyObject *(*)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, int __pyx_skip_dispatch, struct __pyx_opt_args_7bloom25_4BM25_get_topk_indices *__pyx_optional_args))__pyx_f_7bloom25_4BM25_get_topk_indices;
+  __pyx_vtable_7bloom25_BM25._get_topk_docs_parquet = (PyObject *(*)(struct __pyx_obj_7bloom25_BM25 *, PyObject *, struct __pyx_opt_args_7bloom25_4BM25__get_topk_docs_parquet *__pyx_optional_args))__pyx_f_7bloom25_4BM25__get_topk_docs_parquet;
   #if CYTHON_USE_TYPE_SPECS
-  __pyx_ptype_10rapid_bm25_BM25 = (PyTypeObject *) __Pyx_PyType_FromModuleAndSpec(__pyx_m, &__pyx_type_10rapid_bm25_BM25_spec, NULL); if (unlikely(!__pyx_ptype_10rapid_bm25_BM25)) __PYX_ERR(0, 90, __pyx_L1_error)
-  if (__Pyx_fix_up_extension_type_from_spec(&__pyx_type_10rapid_bm25_BM25_spec, __pyx_ptype_10rapid_bm25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_ptype_7bloom25_BM25 = (PyTypeObject *) __Pyx_PyType_FromModuleAndSpec(__pyx_m, &__pyx_type_7bloom25_BM25_spec, NULL); if (unlikely(!__pyx_ptype_7bloom25_BM25)) __PYX_ERR(0, 90, __pyx_L1_error)
+  if (__Pyx_fix_up_extension_type_from_spec(&__pyx_type_7bloom25_BM25_spec, __pyx_ptype_7bloom25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
   #else
-  __pyx_ptype_10rapid_bm25_BM25 = &__pyx_type_10rapid_bm25_BM25;
+  __pyx_ptype_7bloom25_BM25 = &__pyx_type_7bloom25_BM25;
   #endif
   #if !CYTHON_COMPILING_IN_LIMITED_API
   #endif
   #if !CYTHON_USE_TYPE_SPECS
-  if (__Pyx_PyType_Ready(__pyx_ptype_10rapid_bm25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
+  if (__Pyx_PyType_Ready(__pyx_ptype_7bloom25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
   #endif
   #if PY_MAJOR_VERSION < 3
-  __pyx_ptype_10rapid_bm25_BM25->tp_print = 0;
+  __pyx_ptype_7bloom25_BM25->tp_print = 0;
   #endif
   #if !CYTHON_COMPILING_IN_LIMITED_API
-  if ((CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP) && likely(!__pyx_ptype_10rapid_bm25_BM25->tp_dictoffset && __pyx_ptype_10rapid_bm25_BM25->tp_getattro == PyObject_GenericGetAttr)) {
-    __pyx_ptype_10rapid_bm25_BM25->tp_getattro = __Pyx_PyObject_GenericGetAttr;
+  if ((CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP) && likely(!__pyx_ptype_7bloom25_BM25->tp_dictoffset && __pyx_ptype_7bloom25_BM25->tp_getattro == PyObject_GenericGetAttr)) {
+    __pyx_ptype_7bloom25_BM25->tp_getattro = __Pyx_PyObject_GenericGetAttr;
   }
   #endif
-  if (__Pyx_SetVtable(__pyx_ptype_10rapid_bm25_BM25, __pyx_vtabptr_10rapid_bm25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
+  if (__Pyx_SetVtable(__pyx_ptype_7bloom25_BM25, __pyx_vtabptr_7bloom25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
   #if !CYTHON_COMPILING_IN_LIMITED_API
-  if (__Pyx_MergeVtables(__pyx_ptype_10rapid_bm25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
+  if (__Pyx_MergeVtables(__pyx_ptype_7bloom25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
   #endif
-  if (PyObject_SetAttr(__pyx_m, __pyx_n_s_BM25, (PyObject *) __pyx_ptype_10rapid_bm25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
+  if (PyObject_SetAttr(__pyx_m, __pyx_n_s_BM25, (PyObject *) __pyx_ptype_7bloom25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
   #if !CYTHON_COMPILING_IN_LIMITED_API
-  if (__Pyx_setup_reduce((PyObject *) __pyx_ptype_10rapid_bm25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
+  if (__Pyx_setup_reduce((PyObject *) __pyx_ptype_7bloom25_BM25) < 0) __PYX_ERR(0, 90, __pyx_L1_error)
   #endif
   __Pyx_RefNannyFinishContext();
   return 0;
@@ -12902,10 +12902,10 @@ static int __Pyx_modinit_function_import_code(void) {
 #if PY_MAJOR_VERSION >= 3
 #if CYTHON_PEP489_MULTI_PHASE_INIT
 static PyObject* __pyx_pymod_create(PyObject *spec, PyModuleDef *def); /*proto*/
-static int __pyx_pymod_exec_rapid_bm25(PyObject* module); /*proto*/
+static int __pyx_pymod_exec_bloom25(PyObject* module); /*proto*/
 static PyModuleDef_Slot __pyx_moduledef_slots[] = {
   {Py_mod_create, (void*)__pyx_pymod_create},
-  {Py_mod_exec, (void*)__pyx_pymod_exec_rapid_bm25},
+  {Py_mod_exec, (void*)__pyx_pymod_exec_bloom25},
   {0, NULL}
 };
 #endif
@@ -12918,7 +12918,7 @@ namespace {
   #endif
   {
       PyModuleDef_HEAD_INIT,
-      "rapid_bm25",
+      "bloom25",
       0, /* m_doc */
     #if CYTHON_PEP489_MULTI_PHASE_INIT
       0, /* m_size */
@@ -12966,11 +12966,11 @@ namespace {
 
 
 #if PY_MAJOR_VERSION < 3
-__Pyx_PyMODINIT_FUNC initrapid_bm25(void) CYTHON_SMALL_CODE; /*proto*/
-__Pyx_PyMODINIT_FUNC initrapid_bm25(void)
+__Pyx_PyMODINIT_FUNC initbloom25(void) CYTHON_SMALL_CODE; /*proto*/
+__Pyx_PyMODINIT_FUNC initbloom25(void)
 #else
-__Pyx_PyMODINIT_FUNC PyInit_rapid_bm25(void) CYTHON_SMALL_CODE; /*proto*/
-__Pyx_PyMODINIT_FUNC PyInit_rapid_bm25(void)
+__Pyx_PyMODINIT_FUNC PyInit_bloom25(void) CYTHON_SMALL_CODE; /*proto*/
+__Pyx_PyMODINIT_FUNC PyInit_bloom25(void)
 #if CYTHON_PEP489_MULTI_PHASE_INIT
 {
   return PyModuleDef_Init(&__pyx_moduledef);
@@ -13051,7 +13051,7 @@ bad:
 }
 
 
-static CYTHON_SMALL_CODE int __pyx_pymod_exec_rapid_bm25(PyObject *__pyx_pyinit_module)
+static CYTHON_SMALL_CODE int __pyx_pymod_exec_bloom25(PyObject *__pyx_pyinit_module)
 #endif
 #endif
 {
@@ -13072,7 +13072,7 @@ static CYTHON_SMALL_CODE int __pyx_pymod_exec_rapid_bm25(PyObject *__pyx_pyinit_
   #if CYTHON_PEP489_MULTI_PHASE_INIT
   if (__pyx_m) {
     if (__pyx_m == __pyx_pyinit_module) return 0;
-    PyErr_SetString(PyExc_RuntimeError, "Module 'rapid_bm25' has already been imported. Re-initialisation is not supported.");
+    PyErr_SetString(PyExc_RuntimeError, "Module 'bloom25' has already been imported. Re-initialisation is not supported.");
     return -1;
   }
   #elif PY_MAJOR_VERSION >= 3
@@ -13084,13 +13084,13 @@ static CYTHON_SMALL_CODE int __pyx_pymod_exec_rapid_bm25(PyObject *__pyx_pyinit_
   Py_INCREF(__pyx_m);
   #else
   #if PY_MAJOR_VERSION < 3
-  __pyx_m = Py_InitModule4("rapid_bm25", __pyx_methods, 0, 0, PYTHON_API_VERSION); Py_XINCREF(__pyx_m);
+  __pyx_m = Py_InitModule4("bloom25", __pyx_methods, 0, 0, PYTHON_API_VERSION); Py_XINCREF(__pyx_m);
   if (unlikely(!__pyx_m)) __PYX_ERR(0, 1, __pyx_L1_error)
   #elif CYTHON_USE_MODULE_STATE
   __pyx_t_1 = PyModule_Create(&__pyx_moduledef); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1, __pyx_L1_error)
   {
     int add_module_result = PyState_AddModule(__pyx_t_1, &__pyx_moduledef);
-    __pyx_t_1 = 0; /* transfer ownership from __pyx_t_1 to "rapid_bm25" pseudovariable */
+    __pyx_t_1 = 0; /* transfer ownership from __pyx_t_1 to "bloom25" pseudovariable */
     if (unlikely((add_module_result < 0))) __PYX_ERR(0, 1, __pyx_L1_error)
     pystate_addmodule_run = 1;
   }
@@ -13114,7 +13114,7 @@ if (!__Pyx_RefNanny) {
       Py_FatalError("failed to import 'refnanny' module");
 }
 #endif
-  __Pyx_RefNannySetupContext("__Pyx_PyMODINIT_FUNC PyInit_rapid_bm25(void)", 0);
+  __Pyx_RefNannySetupContext("__Pyx_PyMODINIT_FUNC PyInit_bloom25(void)", 0);
   if (__Pyx_check_binary_version(__PYX_LIMITED_VERSION_HEX, __Pyx_get_runtime_version(), CYTHON_COMPILING_IN_LIMITED_API) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #ifdef __Pxy_PyFrame_Initialize_Offsets
   __Pxy_PyFrame_Initialize_Offsets();
@@ -13152,14 +13152,14 @@ if (!__Pyx_RefNanny) {
   #if PY_MAJOR_VERSION < 3 && (__PYX_DEFAULT_STRING_ENCODING_IS_ASCII || __PYX_DEFAULT_STRING_ENCODING_IS_DEFAULT)
   if (__Pyx_init_sys_getdefaultencoding_params() < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   #endif
-  if (__pyx_module_is_main_rapid_bm25) {
+  if (__pyx_module_is_main_bloom25) {
     if (PyObject_SetAttr(__pyx_m, __pyx_n_s_name, __pyx_n_s_main) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
   }
   #if PY_MAJOR_VERSION >= 3
   {
     PyObject *modules = PyImport_GetModuleDict(); if (unlikely(!modules)) __PYX_ERR(0, 1, __pyx_L1_error)
-    if (!PyDict_GetItemString(modules, "rapid_bm25")) {
-      if (unlikely((PyDict_SetItemString(modules, "rapid_bm25", __pyx_m) < 0))) __PYX_ERR(0, 1, __pyx_L1_error)
+    if (!PyDict_GetItemString(modules, "bloom25")) {
+      if (unlikely((PyDict_SetItemString(modules, "bloom25", __pyx_m) < 0))) __PYX_ERR(0, 1, __pyx_L1_error)
     }
   }
   #endif
@@ -13359,7 +13359,7 @@ if (!__Pyx_RefNanny) {
  */
   __pyx_t_4 = __pyx_convert_vector_from_py_std_3a__3a_string(__pyx_t_3); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 16, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_v_10rapid_bm25_ENGLISH_STOPWORDS = __PYX_STD_MOVE_IF_SUPPORTED(__pyx_t_4);
+  __pyx_v_7bloom25_ENGLISH_STOPWORDS = __PYX_STD_MOVE_IF_SUPPORTED(__pyx_t_4);
 
   /* "bm25/bm25.pyx":30
  * }
@@ -13368,7 +13368,7 @@ if (!__Pyx_RefNanny) {
  * 
  * cdef extern from "engine.h":
  */
-  __pyx_v_10rapid_bm25_INT_MAX = 0x7FFFFFFF;
+  __pyx_v_7bloom25_INT_MAX = 0x7FFFFFFF;
 
   /* "bm25/bm25.pyx":75
  * 
@@ -13377,7 +13377,7 @@ if (!__Pyx_RefNanny) {
  *     return type(obj).__name__ == 'DataFrame' and hasattr(obj, 'loc') and hasattr(obj, 'iloc')
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_1is_pandas_dataframe, 0, __pyx_n_s_is_pandas_dataframe, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__16)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 75, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_1is_pandas_dataframe, 0, __pyx_n_s_is_pandas_dataframe, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__16)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 75, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_is_pandas_dataframe, __pyx_t_3) < 0) __PYX_ERR(0, 75, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -13389,7 +13389,7 @@ if (!__Pyx_RefNanny) {
  *     return type(obj).__name__ == 'Series' and hasattr(obj, 'values') and hasattr(obj, 'index')
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_3is_pandas_series, 0, __pyx_n_s_is_pandas_series, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__17)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 78, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_3is_pandas_series, 0, __pyx_n_s_is_pandas_series, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__17)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 78, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_is_pandas_series, __pyx_t_3) < 0) __PYX_ERR(0, 78, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -13401,7 +13401,7 @@ if (!__Pyx_RefNanny) {
  *     return type(obj).__name__ == 'DataFrame' and hasattr(obj, 'select') and hasattr(obj, 'filter')
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_5is_polars_dataframe, 0, __pyx_n_s_is_polars_dataframe, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__18)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 81, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_5is_polars_dataframe, 0, __pyx_n_s_is_polars_dataframe, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__18)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 81, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_is_polars_dataframe, __pyx_t_3) < 0) __PYX_ERR(0, 81, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -13413,7 +13413,7 @@ if (!__Pyx_RefNanny) {
  *     return type(obj).__name__ == 'Series' and hasattr(obj, 'to_frame') and hasattr(obj, 'name')
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_7is_polars_series, 0, __pyx_n_s_is_polars_series, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__19)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 84, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_7is_polars_series, 0, __pyx_n_s_is_polars_series, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__19)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 84, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_is_polars_series, __pyx_t_3) < 0) __PYX_ERR(0, 84, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -13425,7 +13425,7 @@ if (!__Pyx_RefNanny) {
  *     return type(obj).__name__ == 'ndarray'
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_9is_numpy_array, 0, __pyx_n_s_is_numpy_array, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__20)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 87, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_9is_numpy_array, 0, __pyx_n_s_is_numpy_array, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__20)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 87, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_is_numpy_array, __pyx_t_3) < 0) __PYX_ERR(0, 87, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -13469,11 +13469,11 @@ if (!__Pyx_RefNanny) {
  *         self.filename = filename
  *         for text_col in search_cols:
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_3index_file, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_index_file, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__22)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 130, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_3index_file, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_index_file, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__22)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 130, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_10rapid_bm25_BM25, __pyx_n_s_index_file, __pyx_t_3) < 0) __PYX_ERR(0, 130, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_7bloom25_BM25, __pyx_n_s_index_file, __pyx_t_3) < 0) __PYX_ERR(0, 130, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  PyType_Modified(__pyx_ptype_10rapid_bm25_BM25);
+  PyType_Modified(__pyx_ptype_7bloom25_BM25);
 
   /* "bm25/bm25.pyx":138
  * 
@@ -13482,11 +13482,11 @@ if (!__Pyx_RefNanny) {
  *         assert len(documents) > 0, "Document count must be greater than 0"
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_5index_documents, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_index_documents, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__24)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 138, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_5index_documents, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_index_documents, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__24)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 138, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_10rapid_bm25_BM25, __pyx_n_s_index_documents, __pyx_t_3) < 0) __PYX_ERR(0, 138, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_7bloom25_BM25, __pyx_n_s_index_documents, __pyx_t_3) < 0) __PYX_ERR(0, 138, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  PyType_Modified(__pyx_ptype_10rapid_bm25_BM25);
+  PyType_Modified(__pyx_ptype_7bloom25_BM25);
 
   /* "bm25/bm25.pyx":164
  * 
@@ -13495,11 +13495,11 @@ if (!__Pyx_RefNanny) {
  *         self.db_dir = db_dir
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_7save, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_save, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__26)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 164, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_7save, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_save, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__26)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 164, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_10rapid_bm25_BM25, __pyx_n_s_save, __pyx_t_3) < 0) __PYX_ERR(0, 164, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_7bloom25_BM25, __pyx_n_s_save, __pyx_t_3) < 0) __PYX_ERR(0, 164, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  PyType_Modified(__pyx_ptype_10rapid_bm25_BM25);
+  PyType_Modified(__pyx_ptype_7bloom25_BM25);
 
   /* "bm25/bm25.pyx":181
  * 
@@ -13508,11 +13508,11 @@ if (!__Pyx_RefNanny) {
  *         self.db_dir = db_dir
  * 
  */
-  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_9load, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_load, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__28)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 181, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_9load, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_load, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__28)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 181, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_10rapid_bm25_BM25, __pyx_n_s_load, __pyx_t_3) < 0) __PYX_ERR(0, 181, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_7bloom25_BM25, __pyx_n_s_load, __pyx_t_3) < 0) __PYX_ERR(0, 181, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  PyType_Modified(__pyx_ptype_10rapid_bm25_BM25);
+  PyType_Modified(__pyx_ptype_7bloom25_BM25);
 
   /* "bm25/bm25.pyx":310
  *             self,
@@ -13521,7 +13521,7 @@ if (!__Pyx_RefNanny) {
  *             int k = 10,
  *             list boost_factors = []
  */
-  __pyx_k__9 = __pyx_v_10rapid_bm25_INT_MAX;
+  __pyx_k__9 = __pyx_v_7bloom25_INT_MAX;
 
   /* "bm25/bm25.pyx":312
  *             int query_max_df = INT_MAX,
@@ -13543,7 +13543,7 @@ if (!__Pyx_RefNanny) {
  *             int k = 10,
  *             list boost_factors = []
  */
-  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_10rapid_bm25_INT_MAX); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 310, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyInt_From_int(__pyx_v_7bloom25_INT_MAX); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 310, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
 
   /* "bm25/bm25.pyx":312
@@ -13574,13 +13574,13 @@ if (!__Pyx_RefNanny) {
   if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 2, __pyx_t_2)) __PYX_ERR(0, 307, __pyx_L1_error);
   __pyx_t_3 = 0;
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_11get_topk_indices, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_get_topk_indices, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 307, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_11get_topk_indices, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_get_topk_indices, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 307, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_2, __pyx_t_6);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_10rapid_bm25_BM25, __pyx_n_s_get_topk_indices, __pyx_t_2) < 0) __PYX_ERR(0, 307, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_7bloom25_BM25, __pyx_n_s_get_topk_indices, __pyx_t_2) < 0) __PYX_ERR(0, 307, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  PyType_Modified(__pyx_ptype_10rapid_bm25_BM25);
+  PyType_Modified(__pyx_ptype_7bloom25_BM25);
 
   /* "bm25/bm25.pyx":344
  *             str query,
@@ -13589,7 +13589,7 @@ if (!__Pyx_RefNanny) {
  *             list boost_factors = None
  *             ):
  */
-  __pyx_k__11 = __pyx_v_10rapid_bm25_INT_MAX;
+  __pyx_k__11 = __pyx_v_7bloom25_INT_MAX;
 
   /* "bm25/bm25.pyx":383
  *             str query,
@@ -13598,7 +13598,7 @@ if (!__Pyx_RefNanny) {
  *             list boost_factors = None
  *             ):
  */
-  __pyx_k__12 = __pyx_v_10rapid_bm25_INT_MAX;
+  __pyx_k__12 = __pyx_v_7bloom25_INT_MAX;
 
   /* "bm25/bm25.pyx":379
  * 
@@ -13607,7 +13607,7 @@ if (!__Pyx_RefNanny) {
  *             self,
  *             str query,
  */
-  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_10rapid_bm25_INT_MAX); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 383, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyInt_From_int(__pyx_v_7bloom25_INT_MAX); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 383, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
 
   /* "bm25/bm25.pyx":384
@@ -13636,20 +13636,20 @@ if (!__Pyx_RefNanny) {
  *             self,
  *             str query,
  */
-  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_13get_topk_docs, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_get_topk_docs, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__32)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 379, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_13get_topk_docs, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25_get_topk_docs, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__32)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 379, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_2, __pyx_t_6);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_10rapid_bm25_BM25, __pyx_n_s_get_topk_docs, __pyx_t_2) < 0) __PYX_ERR(0, 379, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_7bloom25_BM25, __pyx_n_s_get_topk_docs, __pyx_t_2) < 0) __PYX_ERR(0, 379, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  PyType_Modified(__pyx_ptype_10rapid_bm25_BM25);
+  PyType_Modified(__pyx_ptype_7bloom25_BM25);
 
   /* "(tree fragment)":1
  * def __reduce_cython__(self):             # <<<<<<<<<<<<<<
  *     raise TypeError, "self.bm25 cannot be converted to a Python object for pickling"
  * def __setstate_cython__(self, __pyx_state):
  */
-  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_15__reduce_cython__, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25___reduce_cython, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__34)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 1, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_15__reduce_cython__, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25___reduce_cython, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__34)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 1, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_reduce_cython, __pyx_t_2) < 0) __PYX_ERR(1, 1, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
@@ -13660,7 +13660,7 @@ if (!__Pyx_RefNanny) {
  * def __setstate_cython__(self, __pyx_state):             # <<<<<<<<<<<<<<
  *     raise TypeError, "self.bm25 cannot be converted to a Python object for pickling"
  */
-  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_10rapid_bm25_4BM25_17__setstate_cython__, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25___setstate_cython, NULL, __pyx_n_s_rapid_bm25, __pyx_d, ((PyObject *)__pyx_codeobj__36)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 3, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_CyFunction_New(&__pyx_mdef_7bloom25_4BM25_17__setstate_cython__, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_BM25___setstate_cython, NULL, __pyx_n_s_bloom25, __pyx_d, ((PyObject *)__pyx_codeobj__36)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 3, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_setstate_cython, __pyx_t_2) < 0) __PYX_ERR(1, 3, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
@@ -13684,7 +13684,7 @@ if (!__Pyx_RefNanny) {
   __Pyx_XDECREF(__pyx_t_6);
   if (__pyx_m) {
     if (__pyx_d && stringtab_initialized) {
-      __Pyx_AddTraceback("init rapid_bm25", __pyx_clineno, __pyx_lineno, __pyx_filename);
+      __Pyx_AddTraceback("init bloom25", __pyx_clineno, __pyx_lineno, __pyx_filename);
     }
     #if !CYTHON_USE_MODULE_STATE
     Py_CLEAR(__pyx_m);
@@ -13698,7 +13698,7 @@ if (!__Pyx_RefNanny) {
     }
     #endif
   } else if (!PyErr_Occurred()) {
-    PyErr_SetString(PyExc_ImportError, "init rapid_bm25");
+    PyErr_SetString(PyExc_ImportError, "init bloom25");
   }
   __pyx_L0:;
   __Pyx_RefNannyFinishContext();
