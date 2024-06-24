@@ -200,8 +200,7 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.c
     sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
-    ## model = BM25(max_df=0.1, stopwords='english')
-    model = BM25(stopwords='english', num_partitions=num_partitions)#, bloom_fpr=0.01)
+    model = BM25(stopwords='english', num_partitions=num_partitions, bloom_df_threshold=0.005)
     model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -259,7 +258,8 @@ def test_documents(csv_filename: str, search_cols: List[str]):
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
 
     ## test_okapi_bm25(CSV_FILENAME, search_cols='title')
