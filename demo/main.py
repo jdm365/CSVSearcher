@@ -40,7 +40,7 @@ class SearchApp:
             ) -> None:
         self.filename = filename
         self.bm25 = BM25(
-                stopwords='english',
+                ## stopwords='english',
                 ## min_df=1,
                 ## max_df=0.5,
                 ## num_partitions=1,

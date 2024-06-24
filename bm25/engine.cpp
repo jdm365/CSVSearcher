@@ -1926,7 +1926,6 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 
 					for (auto& [doc_id, score] : doc_scores) {
 
-						// if (bloom_entry.bloom_filter.query(doc_id)) {
 						if (bloom_query(bloom_entry.bloom_filter, doc_id)) {
 							score += _compute_bm25(
 									doc_id, 
@@ -1943,7 +1942,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 			for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 				for (uint16_t idx = 0; idx < high_df_term_idxs[col_idx].size(); ++idx) {
 					const uint64_t& term_idx = high_df_term_idxs[col_idx][idx];
-					BloomEntry& bloom_entry = bloom_entries[col_idx][idx];
+					BloomEntry& bloom_entry  = bloom_entries[col_idx][idx];
 
 					float df = IP.II[col_idx].doc_freqs[term_idx];
 					float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
