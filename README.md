@@ -1,5 +1,5 @@
-# bloom25
-BM25 algorithm written in c++ and exposed through cython.
+# BlooM25
+BM25 algorithm using bloom filters in inverted index to allow fast querying of high-df tokens.
 
 ## Install
 ```bash
@@ -26,8 +26,8 @@ B = 0.75
 ## Pass in filename directly. Loaded in c++ backend and enables getting topk
 ## records with memory mapped files.
 model = BM25(
-    min_df=1,
-    max_df=0.0001,
+    bloom_df_threshold=0.01,
+    bloom_fpr=1e-8,
     k1=K1,
     b=B
 )
@@ -44,20 +44,20 @@ K = 50
 ## and have limited impact on result ordering. If no documents
 ## are found with the given init_max_df, it is automatically increased 
 ## until results are found.
-INIT_MAX_DF = 5000
+QUERY_MAX_DF = 5000
 
 ## Returns topk records with "score" property in json (dict) format.
 top_k_records = model.get_topk_docs(
     query=QUERY,
     k=K,
-    init_max_df=INIT_MAX_DF
+    query_max_df=QUER_MAX_DF
 )
 
 ## Or use raw query to just get scores and indices.
 scores, indices = model.get_topk_indices(
     query=QUERY,
     k=K,
-    init_max_df=INIT_MAX_DF
+    query_max_df=QUERY_MAX_DF
 )
 
 ## Save and load
@@ -82,8 +82,8 @@ B = 0.75
 
 ## Documents constructor.
 model = BM25(
-    min_df=1,
-    max_df=0.0001,
+    bloom_df_threshold=0.01,
+    bloom_fpr=1e-8,
     k1=K1,
     b=B
 )
@@ -93,7 +93,7 @@ model.index_documents(
 
 QUERY = 'hello world'
 K = 50
-INIT_MAX_DF = 5000
+QUERY_MAX_DF = 5000
 
 ## NOTE: get_topk_docs is not available without a file to fetch the documents from
 ## therefore it is only supported with the file constructor.
@@ -101,7 +101,7 @@ INIT_MAX_DF = 5000
 scores, indices = model.get_topk_indices(
     query=QUERY,
     k=K,
-    init_max_df=INIT_MAX_DF
+    query_max_df=QUERY_MAX_DF
 )
 
 ## Save and load
