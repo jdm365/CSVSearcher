@@ -2005,16 +2005,15 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 }
 
 
-/*
 static inline uint64_t get_doc_id(
-		InvertedIndexElement* IIE,
+		StandardEntry& IIE,
 		uint32_t& current_idx,
 		uint64_t& prev_doc_id
 		) {
 	uint64_t doc_id;
 
 	current_idx += decompress_uint64_differential_single_bytes(
-			&(IIE->doc_ids[current_idx]),
+			&(IIE.doc_ids[current_idx]),
 			doc_id,
 			prev_doc_id
 			);
@@ -2029,7 +2028,7 @@ static inline std::pair<uint64_t, uint16_t> pop_replace_minheap(
 			std::pair<uint64_t, uint16_t>,
 			std::vector<std::pair<uint64_t, uint16_t>>,
 			_compare_64_16>& min_heap,
-		InvertedIndexElement** II_streams,
+		robin_hood::unordered_flat_map<uint16_t, StandardEntry*>& II_streams,
 		std::vector<uint32_t>& stream_idxs,
 		std::vector<uint64_t>& prev_doc_ids
 		) {
@@ -2037,7 +2036,7 @@ static inline std::pair<uint64_t, uint16_t> pop_replace_minheap(
 	std::pair<uint64_t, uint16_t> min = min_heap.top(); min_heap.pop();
 	uint16_t min_idx = min.second;
 
-	uint64_t doc_id = get_doc_id(II_streams[min_idx], stream_idxs[min_idx], prev_doc_ids[min_idx]);
+	uint64_t doc_id = get_doc_id(*II_streams[min_idx], stream_idxs[min_idx], prev_doc_ids[min_idx]);
 	if (stream_idxs[min_idx] < II_streams[min_idx]->doc_ids.size() - 1) {
 		min_heap.push(std::make_pair(doc_id, min_idx));
 	}
@@ -2078,17 +2077,23 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 	}
 	if (total_terms == 0) return std::vector<BM25Result>();
 
-	InvertedIndexElement** II_streams = (InvertedIndexElement**)malloc(total_terms * sizeof(InvertedIndexElement*));
+	robin_hood::unordered_flat_map<uint16_t, StandardEntry*> II_streams;
+	robin_hood::unordered_flat_map<uint16_t, BloomEntry*> bloom_entries;
 
 	std::vector<uint64_t> doc_freqs(total_terms, 0);
 	std::vector<float> idfs(total_terms, 0);
 	uint32_t cntr = 0;
 	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 		for (const uint64_t& term_idx : term_idxs[col_idx]) {
-			doc_freqs[cntr] = get_rle_u8_row_size(
-					IP.II[col_idx].inverted_index_compressed[term_idx].term_freqs
-					);
+			doc_freqs[cntr] = IP.II[col_idx].doc_freqs[term_idx];
 			idfs[cntr] = log((IP.num_docs - doc_freqs[cntr] + 0.5) / (doc_freqs[cntr] + 0.5));
+
+			auto it = IP.II[col_idx].bloom_filters.find(term_idx);
+			if (it != IP.II[col_idx].bloom_filters.end()) {
+				bloom_entries[cntr] = &it->second;
+				continue;
+			}
+
 			II_streams[cntr++] = &IP.II[col_idx].inverted_index_compressed[term_idx];
 		}
 	}
@@ -2111,11 +2116,11 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 
 	// Initialize min_heap with first doc_id from each term
 	for (uint32_t i = 0; i < total_terms; ++i) {
-		if (doc_freqs[i] == 0 || doc_freqs[i] > query_max_df || doc_freqs[i] > max_df) {
+		if (doc_freqs[i] == 0 || doc_freqs[i] > query_max_df) {
 			continue;
 		}
 
-		uint64_t doc_id = get_doc_id(II_streams[i], stream_idxs[i], prev_doc_ids[i]);
+		uint64_t doc_id = get_doc_id(*II_streams[i], stream_idxs[i], prev_doc_ids[i]);
 		min_heap.push(std::make_pair(doc_id, i));
 
 		// Initialize tf_counters
@@ -2128,7 +2133,13 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 
 	uint64_t global_prev_doc_id = 0;
 	while (1) {
-		std::pair<uint64_t, uint16_t> doc_id_idx_pair = pop_replace_minheap(min_heap, II_streams, stream_idxs, prev_doc_ids);
+		std::pair<uint64_t, uint16_t> doc_id_idx_pair = pop_replace_minheap(
+				min_heap, 
+				II_streams, 
+				stream_idxs, 
+				prev_doc_ids
+				);
+
 		if (min_heap.size() == 0) {
 			break;
 		}
@@ -2140,11 +2151,26 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 		float idf = idfs[min_idx];
 		float tf  = tf_counters[min_idx].first;
 
+		// TODO: Add handling for when StandardEntries are empty.
+
 		// Score
 		if (doc_id != global_prev_doc_id) {
 			// New doc_id.
 			// Add previous doc_id to top_k_docs
 			if (current_doc.doc_id != 0) {
+				// Score with bloom filters
+				for (const auto& [i, bloom_entry] : bloom_entries) {
+					if (bloom_query(bloom_entries[i]->bloom_filter, current_doc.doc_id)) {
+						current_doc.score += _compute_bm25(
+								current_doc.doc_id, 
+								1.0f,
+								idfs[i], 
+								partition_id
+								) * boost_factors[i / search_cols.size()];
+					}
+				}
+
+
 				top_k_docs.push(current_doc);
 				if (top_k_docs.size() > k) {
 					top_k_docs.pop();
@@ -2157,19 +2183,6 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 		} else {
 			// Same doc_id.
 			current_doc.score += _compute_bm25(doc_id, tf, idf, partition_id) * boost_factors[col_idx];
-			printf("Doc id: %lu\n", doc_id);
-			fflush(stdout);
-			printf("Min idx: %u\n", min_idx);
-			fflush(stdout);
-			printf("Col idx: %u\n", col_idx);
-			fflush(stdout);
-			printf("IDF: %f\n", idf);
-			fflush(stdout);
-			printf("TF: %f\n", tf);
-			fflush(stdout);
-			printf("Same doc_id: %lu\n", doc_id);
-			printf("Score: %f\n\n", current_doc.score);
-			fflush(stdout);
 		}
 
 		--tf_counters[min_idx].second;
@@ -2193,11 +2206,8 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 		--idx;
 	}
 
-	free(II_streams);
-
 	return result;
 }
-*/
 
 
 std::vector<BM25Result> _BM25::query(
@@ -2232,8 +2242,8 @@ std::vector<BM25Result> _BM25::query(
 		threads.push_back(std::thread(
 			[this, &query, k, query_max_df, i, &results, boost_factors] {
 				// results[i] = _query_partition(query, k, query_max_df, i, boost_factors);
-				// results[i] = _query_partition_streaming(query, k, query_max_df, i, boost_factors);
 				results[i] = _query_partition_bloom(query, k, query_max_df, i, boost_factors);
+				// results[i] = _query_partition_streaming(query, k, query_max_df, i, boost_factors);
 			}
 		));
 	}
