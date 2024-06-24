@@ -1,4 +1,4 @@
-# BlooM25
+# BlooM25 (In Development)
 BM25 algorithm using bloom filters in inverted index to allow fast querying of high-df tokens.
 
 ## Install
