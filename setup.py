@@ -3,8 +3,7 @@ from Cython.Build import cythonize
 from setuptools.extension import Extension
 import os
 
-## MODULE_NAME = "bm25"
-MODULE_NAME = "rapid_bm25"
+MODULE_NAME = "bloom25"
 
 ## Optionally choose compiler ##
 COMPILER_FLAGS = [
@@ -46,7 +45,7 @@ LINK_ARGS = [
 extensions = [
     Extension(
         MODULE_NAME,
-        sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp", "bm25/serialize.cpp"],
+        sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp", "bm25/serialize.cpp", "bm25/bloom.cpp"],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
         include_dirs=["bm25"],

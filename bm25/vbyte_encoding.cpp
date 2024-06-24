@@ -248,6 +248,48 @@ void compress_uint64_differential_single(
     data.push_back(diff);
 }
 
+uint8_t compress_uint64_differential_single_bytes(
+    std::vector<uint8_t>& data,
+    uint64_t new_uncompressed_id,
+	uint64_t prev_id
+	) {
+    uint64_t diff = new_uncompressed_id - prev_id;
+	uint8_t num_bytes = 0;
+
+    while (diff >= 128) {
+        data.push_back((diff & 127) | 128);
+        diff >>= 7;
+		++num_bytes;
+    }
+
+    // Push back the remaining diff value
+    data.push_back(diff);
+
+	return num_bytes;
+}
+
+uint8_t decompress_uint64_differential_single_bytes(
+		uint8_t* data,
+		uint64_t& new_uncompressed_id,
+		uint64_t prev_id
+		) {
+	uint64_t value = 0;
+	uint64_t shift = 0;
+	uint8_t byte;
+	uint8_t num_bytes = 0;
+
+	do {
+		byte = *data++;
+		value |= (byte & 127) << shift;
+		shift += 7;
+		++num_bytes;
+	} while (byte & 128);
+
+	new_uncompressed_id = value + prev_id;
+
+	return num_bytes;
+}
+
 void compress_uint64_differential(
 	std::vector<uint64_t>& data,
 	std::vector<uint8_t>&  compressed_buffer

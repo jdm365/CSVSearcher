@@ -6,7 +6,7 @@ import csv
 from time import perf_counter
 import os
 
-from rapid_bm25 import BM25
+from bloom25 import BM25
 
 app = Flask(__name__)
 CORS(app)
@@ -26,7 +26,7 @@ def search():
 def columns():
     column_names = search_app.get_column_names()
     ## Move search_col to the front
-    for col in reversed(search_app.search_cols):
+    for col in reversed(list(search_app.search_cols) + ['score']):
         column_names.remove(col)
         column_names.insert(0, col)
     return jsonify({'columns': column_names})
@@ -40,11 +40,13 @@ class SearchApp:
             ) -> None:
         self.filename = filename
         self.bm25 = BM25(
-                min_df=1,
+                ## stopwords='english',
+                ## min_df=1,
                 ## max_df=0.5,
                 ## num_partitions=1,
+                bloom_fpr=1e-8,
                 ## b=0.4,
-                k1=1.5
+                ## k1=1.5
                 )
         self.save_dir = filename.split('/')[-1].replace('.csv', '_db')
         try:
@@ -54,7 +56,7 @@ class SearchApp:
             print(f"Error loading BM25 index: {e}")
 
             self.bm25.index_file(filename, search_cols)
-            self.bm25.save(db_dir=self.save_dir)
+            ## self.bm25.save(db_dir=self.save_dir)
             print(f"Saved BM25 index to {self.save_dir}")
 
         self.search_cols = search_cols
@@ -86,7 +88,7 @@ class SearchApp:
         init = perf_counter()
         vals = self.bm25.get_topk_docs(
                 query, 
-                k=100,
+                k=1000,
                 boost_factors=[2, 1]
                )
         print(f"Query took {perf_counter() - init:.4f} seconds")

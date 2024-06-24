@@ -1,4 +1,4 @@
-# rapid_bm25
+# bloom25
 BM25 algorithm written in c++ and exposed through cython.
 
 ## Install
@@ -12,7 +12,7 @@ pip install .
 
 ### From File
 ```python
-from rapid_bm25 import BM25
+from bloom25 import BM25
 
 ## Current supported file types are csv and json.
 filename = 'data.csv'
@@ -68,7 +68,7 @@ model.load(db_dir=DB_DIR)
 
 ### From Documents
 ```python
-from rapid_bm25 import BM25
+from bloom25 import BM25
 
 ## Documents being an arraylike of strings to search.
 import pandas as pd

@@ -1,4 +1,4 @@
-from rapid_bm25 import BM25
+from bloom25 import BM25
 import pandas as pd
 import polars as pl
 import numpy as np
@@ -35,13 +35,13 @@ def test_retriv(csv_filename: str, search_cols: List[str]):
     from retriv import SparseRetriever
 
     df = pd.read_csv(csv_filename)
-    names = df[search_cols]
+    texts = df[search_cols].fillna('').agg(' '.join, axis=1)
 
     ## rename index id
     df['id'] = df.index.astype(str)
 
-    rand_idxs = np.random.choice(len(names), 1000, replace=False)
-    companies_sample = names.iloc[rand_idxs]
+    rand_idxs = np.random.choice(len(texts), 1000, replace=False)
+    companies_sample = texts.iloc[rand_idxs]
 
     init = perf_counter()
     model = SparseRetriever()
@@ -50,7 +50,7 @@ def test_retriv(csv_filename: str, search_cols: List[str]):
         show_progress=True,
         callback=lambda doc: {
             "id": doc['id'],
-            "text": doc[search_cols]
+            "text": ' '.join([doc[col] for col in search_cols])
         }
     )
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
@@ -160,6 +160,24 @@ def test_sklearn(csv_filename: str):
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 
 
+def test_bm25_parquet(filename: str, search_cols: List[str]):
+    df = pd.read_parquet(filename, columns=search_cols).iloc[:1000]
+    sample = df[search_cols].fillna('').astype(str).values
+
+    init = perf_counter()
+    model = BM25(max_df=50_000, stopwords=['netflix'])
+    model.index_file(filename=filename, search_cols=search_cols)
+    print(f"Time to index: {perf_counter() - init:.2f} seconds")
+
+    init = perf_counter()
+    for query in tqdm(sample, desc="Querying"):
+        _ = model.get_topk_docs(query, k=10)
+    time = perf_counter() - init
+
+    print(f"Queries per second: {1000 / time:.2f}")
+
+
+
 def test_bm25_json(json_filename: str, search_cols: List[str]):
     df = pd.read_json(json_filename, lines=True, nrows=1000)
     sample = df[search_cols[0]].values
@@ -177,13 +195,13 @@ def test_bm25_json(json_filename: str, search_cols: List[str]):
     print(f"Queries per second: {1000 / time:.2f}")
     
 
-def test_bm25_csv(csv_filename: str, search_cols: List[str]):
+def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.cpu_count()):
     df = pd.read_csv(csv_filename, usecols=search_cols, nrows=1000)
     sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
-    model = BM25(max_df=0.1, stopwords='english')
-    ## model = BM25(stopwords='english')
+    ## model = BM25(max_df=0.1, stopwords='english')
+    model = BM25(stopwords='english', num_partitions=num_partitions)#, bloom_fpr=0.01)
     model.index_file(filename=csv_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -193,34 +211,18 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str]):
     print(f"Time to save: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
-    model.load(db_dir='bm25_model')
+    ## model.load(db_dir='bm25_model')
     print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     lens = []
     init = perf_counter()
     for query in tqdm(sample, desc="Querying"):
-        results = model.get_topk_docs(query, k=100)
+        results = model.get_topk_docs(query, k=100)#, query_max_df=50_000)
         lens.append(len(results))
     time = perf_counter() - init
 
     print(f"Average number of hits: {np.mean(lens)}")
     print(f"Median number of hits:  {np.median(lens)}")
-
-    print(f"Queries per second: {1000 / time:.2f}")
-
-def test_bm25_parquet(filename: str, search_cols: List[str]):
-    df = pd.read_parquet(filename, columns=search_cols).iloc[:1000]
-    sample = df[search_cols].fillna('').astype(str).values
-
-    init = perf_counter()
-    model = BM25(max_df=50_000, stopwords=['netflix'])
-    model.index_file(filename=filename, search_cols=search_cols)
-    print(f"Time to index: {perf_counter() - init:.2f} seconds")
-
-    init = perf_counter()
-    for query in tqdm(sample, desc="Querying"):
-        _ = model.get_topk_docs(query, k=10)
-    time = perf_counter() - init
 
     print(f"Queries per second: {1000 / time:.2f}")
 
@@ -261,13 +263,12 @@ if __name__ == '__main__':
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
 
     ## test_okapi_bm25(CSV_FILENAME, search_cols='title')
-    ## test_retriv(CSV_FILENAME, search_cols='title')
+    ## test_retriv(CSV_FILENAME, search_cols=['title', 'artist'])
     ## test_duckdb(FILENAME)
     ## test_anserini(CSV_FILENAME, search_cols='title')
     ## test_sklearn(FILENAME)
-    ## test_bm25_csv(CSV_FILENAME, search_cols='text')
-    ## test_bm25_csv(CSV_FILENAME, search_cols='name')
     test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
-    test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
+    ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
+    ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
-    test_documents(CSV_FILENAME, search_cols=['title', 'artist'])
+    ## test_documents(CSV_FILENAME, search_cols=['title', 'artist'])

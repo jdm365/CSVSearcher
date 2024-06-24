@@ -7,11 +7,21 @@
 #include <mutex>
 
 #include "robin_hood.h"
+// #include "bloom/filter.hpp"
+#include "bloom.h"
 
 
 #define DEBUG 0
 
 #define SEED 42
+
+
+enum SupportedFileTypes {
+	CSV,
+	JSON,
+	IN_MEMORY
+};
+
 
 struct _compare {
 	inline bool operator()(const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
@@ -24,6 +34,15 @@ struct _compare_64 {
 		return a.second > b.second;
 	}
 };
+
+struct _compare_64_16 {
+	inline bool operator()(const std::pair<uint64_t, uint16_t>& a, const std::pair<uint64_t, uint16_t>& b) {
+		return a.second > b.second;
+	}
+};
+
+
+
 
 typedef struct {
 	uint64_t df;
@@ -43,11 +62,7 @@ struct _compare_bm25_result {
 	}
 };
 
-enum SupportedFileTypes {
-	CSV,
-	JSON,
-	IN_MEMORY
-};
+
 
 typedef struct {
 	uint16_t num_repeats;
@@ -60,31 +75,42 @@ bool check_rle_u8_row_size(const std::vector<RLEElement_u8>& rle_row, uint64_t m
 void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value);
 
 
+
+
+typedef struct BloomEntry {
+	// Bloom::Filter bloom_filter;
+	BloomFilter bloom_filter;
+	std::vector<uint64_t> topk_doc_ids;
+	std::vector<float> topk_term_freqs;
+} BloomEntry;
+
+BloomEntry init_bloom_entry(uint32_t num_docs, double fpr);
+
 typedef struct {
 	std::vector<uint8_t> doc_ids;
 	std::vector<RLEElement_u8> term_freqs;
-} InvertedIndexElement;
+} StandardEntry;
 
 typedef struct {
 	std::vector<uint64_t> prev_doc_ids;
-	std::vector<InvertedIndexElement> inverted_index_compressed;
+	std::vector<uint32_t> doc_freqs;
+	std::vector<StandardEntry> inverted_index_compressed;
+	robin_hood::unordered_flat_map<uint64_t, BloomEntry> bloom_filters;
 } InvertedIndex;
 
-inline IIRow get_II_row(
-		InvertedIndex* II, 
-		uint64_t term_idx,
-		uint32_t k
-		);
+inline IIRow get_II_row(InvertedIndex* II, uint64_t term_idx);
 
 typedef struct {
 	std::vector<InvertedIndex> II;
-	// robin_hood::unordered_flat_map<std::string, uint32_t> unique_term_mapping;
 	std::vector<robin_hood::unordered_flat_map<std::string, uint32_t>> unique_term_mapping;
 	std::vector<uint16_t> doc_sizes;
 	std::vector<uint64_t> line_offsets;
 
 	uint64_t num_docs;
 	float    avg_doc_size;
+
+	// Debug reverse term mapping
+	std::vector<robin_hood::unordered_flat_map<uint32_t, std::string>> reverse_term_mapping;
 } BM25Partition;
 
 
@@ -94,8 +120,8 @@ class _BM25 {
 		robin_hood::unordered_flat_set<std::string> stop_words;
 
 		uint64_t num_docs;
-		int      min_df;
-		float    max_df;
+		float    bloom_df_threshold;
+		double   bloom_fpr;
 		float    k1;
 		float    b;
 		uint16_t num_partitions;
@@ -117,13 +143,14 @@ class _BM25 {
 		int init_cursor_row;
 		int terminal_height;
 
+
 		_BM25(
 				std::string filename,
 				std::vector<std::string> search_cols,
-				int   min_df,
-				float max_df,
-				float k1,
-				float b,
+				float  bloom_df_threshold,
+				double bloom_fpr,
+				float  k1,
+				float  b,
 				uint16_t num_partitions,
 				const std::vector<std::string>& _stop_words = {}
 				);
@@ -172,10 +199,10 @@ class _BM25 {
 
 		_BM25(
 				std::vector<std::vector<std::string>>& documents,
-				int   min_df,
-				float max_df,
-				float k1,
-				float b,
+				float  bloom_df_threshold,
+				double bloom_fpr,
+				float  k1,
+				float  b,
 				uint16_t num_partitions,
 				const std::vector<std::string>& _stop_words = {}
 				);
@@ -206,6 +233,7 @@ class _BM25 {
 		void determine_partition_boundaries_csv();
 		void determine_partition_boundaries_json();
 
+		void write_bloom_filters(uint16_t partition_id);
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_in_memory(
@@ -224,6 +252,7 @@ class _BM25 {
 				uint64_t doc_id
 				);
 
+
 		float _compute_bm25(
 				uint64_t doc_id,
 				float tf,
@@ -236,7 +265,28 @@ class _BM25 {
 				std::vector<std::vector<uint64_t>>& term_idxs,
 				uint16_t partition_id
 				);
+		void add_query_term_bloom(
+				std::string& substr,
+				std::vector<std::vector<uint64_t>>& low_df_term_idxs,
+				std::vector<std::vector<uint64_t>>& high_df_term_idxs,
+				std::vector<std::vector<BloomEntry>>& bloom_entries,
+				uint16_t partition_id
+				);
 		std::vector<BM25Result> _query_partition(
+				std::string& query,
+				uint32_t top_k,
+				uint32_t query_max_df,
+				uint16_t partition_id,
+				std::vector<float> boost_factors
+				);
+		std::vector<BM25Result> _query_partition_bloom(
+				std::string& query,
+				uint32_t top_k,
+				uint32_t query_max_df,
+				uint16_t partition_id,
+				std::vector<float> boost_factors
+				);
+		std::vector<BM25Result> _query_partition_streaming(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df,

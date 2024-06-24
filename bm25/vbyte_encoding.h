@@ -50,6 +50,18 @@ void compress_uint64_differential_single(
 	uint64_t prev_id
 	);
 
+uint8_t compress_uint64_differential_single_bytes(
+	std::vector<uint8_t>& data,
+	uint64_t new_uncompressed_id,
+	uint64_t prev_id
+	);
+
+uint8_t decompress_uint64_differential_single_bytes(
+	uint8_t* data,
+	uint64_t& new_uncompressed_id,
+	uint64_t prev_id
+	);
+
 void compress_uint64_differential(
 	uint64_t* data,
 	uint8_t*  compressed_buffer, 
