@@ -33,25 +33,20 @@
 
 
 
-BloomEntry init_bloom_entry(uint32_t num_docs, double fpr) {
-	uint64_t num_hashes, num_bits;
-	BloomFilter bf = init_bloom_filter(num_docs, fpr);
+BloomEntry init_bloom_entry(
+		uint32_t num_docs, 
+		double fpr, 
+		robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values
+		) {
+	BloomEntry bloom_entry;
 
-	if (DEBUG) {
-		printf("Num docs: %u\n", num_docs);
-		printf("Num hashes: %lu\n", num_hashes);
-		printf("Num bits: %lu\n", num_bits);
-		printf("FPR: %f\n\n", fpr);
-		fflush(stdout);
+	for (const auto& term_freq : distinct_term_freq_values) {
+		BloomFilter bf = init_bloom_filter(num_docs, fpr);
+		bloom_entry.bloom_filters.insert({term_freq, bf});
 	}
-
-	BloomEntry bloom_entry = {
-		.bloom_filter = bf,
-		.topk_doc_ids = std::vector<uint64_t>(),
-		.topk_term_freqs = std::vector<float>()
-	};
 	return bloom_entry;
 }
+
 
 static inline bool is_valid_token(std::string& str) {
 	return (str.size() > 1 || isalnum(str[0]));
@@ -550,7 +545,7 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 	} else {
 		min_df_bloom = (uint32_t)bloom_df_threshold / (0.5f * num_partitions);
 	}
-	const uint16_t TOP_K = 100;
+	const uint16_t TOP_K = 1000;
 
 	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 		BM25Partition& IP = index_partitions[partition_id];
@@ -560,43 +555,45 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 			uint32_t df = II.doc_freqs[idx];
 			if (df < min_df_bloom) continue;
 
-			if (DEBUG) printf("Term: %s\n", IP.reverse_term_mapping[col_idx][idx].c_str());
-			BloomEntry bloom_entry = init_bloom_entry(df, bloom_fpr);
-
+			robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values;
 			IIRow row = get_II_row(&II, idx);
 
+			// Construct min heap to keep track of top k term frequencies and doc ids
+			std::priority_queue<
+				std::pair<uint16_t, uint64_t>, 
+				std::vector<std::pair<uint16_t, uint64_t>>, 
+				std::greater<std::pair<uint16_t, uint64_t>>> min_heap;
+
+			for (uint32_t i = 0; i < row.term_freqs.size(); ++i) {
+				min_heap.push({row.term_freqs[i], row.doc_ids[i]});
+				if (min_heap.size() > TOP_K) {
+					min_heap.pop();
+				}
+				distinct_term_freq_values.insert(row.term_freqs[i]);
+			}
+
+			BloomEntry bloom_entry = init_bloom_entry(
+					df, 
+					bloom_fpr, 
+					distinct_term_freq_values
+					);
+
 			// partial sort TOP_K term_freqs descending. Get idxs
-			if (row.term_freqs.size() >= TOP_K) {
-				std::vector<uint32_t> idxs(row.term_freqs.size());
-				for (uint32_t i = 0; i < row.term_freqs.size(); ++i) {
-					idxs[i] = i;
-				}
-				std::partial_sort(
-						idxs.begin(), 
-						idxs.begin() + TOP_K, 
-						idxs.end(), 
-						[&row](uint32_t i1, uint32_t i2) {
-							return row.term_freqs[i1] > row.term_freqs[i2];
-						}
-						);
-				bloom_entry.topk_doc_ids.reserve(TOP_K);
-				for (uint16_t i = 0; i < TOP_K; ++i) {
-					bloom_entry.topk_doc_ids.push_back(row.doc_ids[idxs[i]]);
-					bloom_entry.topk_term_freqs.push_back(row.doc_ids[idxs[i]]);
-				}
-			} else {
-				bloom_entry.topk_doc_ids.reserve(row.term_freqs.size());
-				for (uint16_t i = 0; i < row.term_freqs.size(); ++i) {
-					bloom_entry.topk_doc_ids.push_back(row.doc_ids[i]);
-					bloom_entry.topk_term_freqs.push_back(row.term_freqs[i]);
-				}
+			bloom_entry.topk_doc_ids.reserve(min_heap.size());
+			uint16_t num_topk = min_heap.size();
+			for (uint16_t i = 0; i < num_topk; ++i) {
+				bloom_entry.topk_doc_ids.push_back(min_heap.top().second);
+				bloom_entry.topk_term_freqs.push_back(min_heap.top().first);
+				min_heap.pop();
 			}
 
 			II.inverted_index_compressed[idx].doc_ids.clear();
 			II.inverted_index_compressed[idx].term_freqs.clear();
 
-			for (const uint64_t doc_id : row.doc_ids) {
-				bloom_put(bloom_entry.bloom_filter, doc_id);
+			for (uint32_t i = 0; i < row.doc_ids.size(); ++i) {
+				uint64_t doc_id    = row.doc_ids[i];
+				uint16_t term_freq = row.term_freqs[i];
+				bloom_put(bloom_entry.bloom_filters[term_freq], doc_id);
 			}
 
 			II.bloom_filters.insert({idx, bloom_entry});
@@ -1475,7 +1472,9 @@ _BM25::_BM25(
 			unique_terms_found += IP.unique_term_mapping[col_idx].size();
 			total_bloom_filters += IP.II[col_idx].bloom_filters.size();
 			for (const auto& bf : index_partitions[i].II[col_idx].bloom_filters) {
-				bloom_filters_size += bf.second.bloom_filter.num_bits / 8;
+				for (const auto& filter : bf.second.bloom_filters) {
+					bloom_filters_size += filter.second.num_bits / 8;
+				}
 			}
 		}
 		total_size += part_size;
@@ -1893,7 +1892,6 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 					uint32_t df = IP.II[col_idx].doc_freqs[term_idx];
 					if (df < min_df) {
 						min_df_col_idx = col_idx;
-						// min_df_term_idx = term_idx;
 						min_df_term_idx = cntr++;
 						min_df = df;
 					}
@@ -1934,14 +1932,15 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 					float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
 
 					for (auto& [doc_id, score] : doc_scores) {
-
-						if (bloom_query(bloom_entry.bloom_filter, doc_id)) {
-							score += _compute_bm25(
-									doc_id, 
-									1.0f,
-									idf, 
-									partition_id
-									) * boost_factors[col_idx];
+						for (const auto& [tf, bf] : bloom_entry.bloom_filters) {
+							if (bloom_query(bf, doc_id)) {
+								score += _compute_bm25(
+										doc_id, 
+										(float)tf,
+										idf, 
+										partition_id
+										) * boost_factors[col_idx];
+							}
 						}
 					}
 				}
@@ -1957,14 +1956,15 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 					float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
 
 					for (auto& [doc_id, score] : doc_scores) {
-
-						if (bloom_query(bloom_entry.bloom_filter, doc_id)) {
-							score += _compute_bm25(
-									doc_id, 
-									1.0f,
-									idf, 
-									partition_id
-									) * boost_factors[col_idx];
+						for (const auto& [tf, bf] : bloom_entry.bloom_filters) {
+							if (bloom_query(bf, doc_id)) {
+								score += _compute_bm25(
+										doc_id, 
+										(float)tf,
+										idf, 
+										partition_id
+										) * boost_factors[col_idx];
+							}
 						}
 					}
 				}
@@ -2062,6 +2062,9 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 		uint16_t partition_id,
 		std::vector<float> boost_factors
 		) {
+	printf("NOT IMPLEMENTED\n");
+	return std::vector<BM25Result>();
+
 	std::vector<std::vector<uint64_t>> term_idxs(search_cols.size());
 	BM25Partition& IP = index_partitions[partition_id];
 
@@ -2169,7 +2172,8 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 			if (current_doc.doc_id != 0) {
 				// Score with bloom filters
 				for (const auto& [i, bloom_entry] : bloom_entries) {
-					if (bloom_query(bloom_entries[i]->bloom_filter, current_doc.doc_id)) {
+					// TODO: Fix or remove.
+					if (bloom_query(bloom_entries[i]->bloom_filters[0], current_doc.doc_id)) {
 						current_doc.score += _compute_bm25(
 								current_doc.doc_id, 
 								1.0f,
