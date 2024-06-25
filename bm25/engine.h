@@ -47,7 +47,7 @@ struct _compare_64_16 {
 typedef struct {
 	uint64_t df;
 	std::vector<uint64_t> doc_ids;
-	std::vector<float> term_freqs;
+	std::vector<uint16_t> term_freqs;
 } IIRow;
 
 typedef struct {

@@ -258,7 +258,12 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value) {
 	}
 	else {
 		if (rle_row.back().value == value) {
-			++(rle_row.back().num_repeats);
+			if (rle_row.back().num_repeats == 65535) {
+				rle_row.push_back(init_rle_element_u8(value));
+			}
+			else {
+				++(rle_row.back().num_repeats);
+			}
 		}
 		else {
 			RLEElement_u8 rle = init_rle_element_u8(value);
@@ -485,9 +490,16 @@ IIRow get_II_row(
 	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
 		for (size_t j = 0; j < II->inverted_index_compressed[term_idx].term_freqs[i].num_repeats; ++j) {
 			row.term_freqs.push_back(
-					(float)II->inverted_index_compressed[term_idx].term_freqs[i].value
+					(uint16_t)II->inverted_index_compressed[term_idx].term_freqs[i].value
 					);
 		}
+	}
+
+	if (row.doc_ids.size() != row.term_freqs.size()) {
+		std::cerr << "Doc ids and term freqs size mismatch." << std::endl;
+		printf("Doc ids size: %lu\n", row.doc_ids.size());
+		printf("Term freqs size: %lu\n", row.term_freqs.size());
+		std::exit(1);
 	}
 
 	return row;
@@ -593,6 +605,10 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 			for (uint32_t i = 0; i < row.doc_ids.size(); ++i) {
 				uint64_t doc_id    = row.doc_ids[i];
 				uint16_t term_freq = row.term_freqs[i];
+				if (term_freq > 100) {
+					printf("Term freq: %d\n", term_freq);
+					fflush(stdout);
+				}
 				bloom_put(bloom_entry.bloom_filters[term_freq], doc_id);
 			}
 
