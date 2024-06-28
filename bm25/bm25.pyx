@@ -57,13 +57,19 @@ cdef extern from "engine.h":
                 const vector[string]& stopwords
                 ) nogil
         vector[BM25Result] query(
-                string& term, 
+                string& query, 
                 uint32_t top_k, 
                 uint32_t query_max_df,
                 vector[float] boost_factors
                 ) nogil
         vector[vector[pair[string, string]]] get_topk_internal(
-                string& term, 
+                string& query, 
+                uint32_t k, 
+                uint32_t query_max_df,
+                vector[float] boost_factors
+                ) nogil 
+        vector[vector[pair[string, string]]] get_topk_internal_multi(
+                vector[string]& queries, 
                 uint32_t k, 
                 uint32_t query_max_df,
                 vector[float] boost_factors
@@ -375,11 +381,10 @@ cdef class BM25:
 
         return rows
 
-
-    def get_topk_docs(
-            self, 
-            str query, 
-            int k = 10, 
+    cpdef _get_topk_docs(
+            self,
+            str query,
+            int k = 10,
             int query_max_df = INT_MAX,
             list boost_factors = None
             ):
@@ -419,3 +424,67 @@ cdef class BM25:
             output.append(_dict)
 
         return output
+
+    cpdef _get_topk_docs_multi(
+            self,
+            list query,
+            int k = 10,
+            int query_max_df = INT_MAX,
+            list boost_factors = None
+            ):
+        if self.is_parquet:
+            return self._get_topk_docs_parquet(query, k, query_max_df)
+
+        if boost_factors is None:
+            boost_factors = len(self.search_cols) * [1]
+
+        cdef vector[float] _boost_factors
+        _boost_factors.reserve(len(boost_factors))
+        for factor in boost_factors:
+            _boost_factors.push_back(factor)
+
+        cdef vector[vector[pair[string, string]]] results
+        cdef list output = []
+        cdef vector[string] _queries
+        for q in query:
+            _queries.push_back(q.upper().encode("utf-8"))
+
+        if self.filename == "in_memory":
+            raise RuntimeError("""
+                Cannot get topk docs when documents were provided instead of a filename
+            """)
+        else:
+            with nogil:
+                results = self.bm25.get_topk_internal_multi(
+                        _queries,
+                        k, 
+                        query_max_df,
+                        _boost_factors
+                        )
+
+        for idx in range(len(results)):
+            _dict = {}
+            for jdx in range(len(results[idx])):
+                _dict[results[idx][jdx].first.decode("utf-8")] = results[idx][jdx].second.decode("utf-8")
+
+            output.append(_dict)
+
+        return output
+
+    def get_topk_docs(
+            self, 
+            query, 
+            int k = 10, 
+            int query_max_df = INT_MAX,
+            list boost_factors = None
+            ):
+        if query is None:
+            return []
+        if isinstance(query, str):
+            query = query.upper()
+            return self._get_topk_docs(query, k, query_max_df, boost_factors)
+        elif isinstance(query, list):
+            return self._get_topk_docs_multi(query, k, query_max_df, boost_factors)
+        else:
+            raise ValueError("Query must be a string or a list of strings")
+

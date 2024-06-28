@@ -1704,6 +1704,41 @@ void _BM25::add_query_term_bloom(
 }
 
 
+void _BM25::add_query_term_bloom(
+		std::string& substr,
+		std::vector<std::vector<uint64_t>>& low_df_term_idxs,
+		std::vector<std::vector<uint64_t>>& high_df_term_idxs,
+		std::vector<std::vector<BloomEntry>>& bloom_entries,
+		uint16_t partition_id,
+		uint16_t col_idx
+		) {
+	BM25Partition& IP = index_partitions[partition_id];
+
+	robin_hood::unordered_map<std::string, uint32_t>& vocab = IP.unique_term_mapping[col_idx];
+
+	auto it = vocab.find(substr);
+	if (it == vocab.end()) {
+		substr.clear();
+		return;
+	}
+
+	if (stop_words.find(substr) != stop_words.end()) {
+		substr.clear();
+		return;
+	}
+
+	auto it2 = IP.II[col_idx].bloom_filters.find(it->second);
+	if (it2 == IP.II[col_idx].bloom_filters.end()) {
+		low_df_term_idxs[col_idx].push_back(it->second);
+	}
+	else {
+		high_df_term_idxs[col_idx].push_back(it->second);
+		bloom_entries[col_idx].push_back(it2->second);
+	}
+	substr.clear();
+}
+
+
 std::vector<BM25Result> _BM25::_query_partition(
 		std::string& query, 
 		uint32_t k,
@@ -2332,6 +2367,354 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
 	std::vector<BM25Result> top_k_docs = query(_query, top_k, query_max_df, boost_factors);
+	result.reserve(top_k_docs.size());
+
+	std::vector<std::pair<std::string, std::string>> row;
+	for (size_t i = 0; i < top_k_docs.size(); ++i) {
+		switch (file_type) {
+			case CSV:
+				row = get_csv_line(top_k_docs[i].doc_id, top_k_docs[i].partition_id);
+				break;
+			case JSON:
+				row = get_json_line(top_k_docs[i].doc_id, top_k_docs[i].partition_id);
+				break;
+			case IN_MEMORY:
+				std::cout << "Error: In-memory data not supported for this function." << std::endl;
+				std::exit(1);
+				break;
+			default:
+				std::cout << "Error: Incorrect file type" << std::endl;
+				std::exit(1);
+				break;
+		}
+		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].score)));
+		result.push_back(row);
+	}
+	return result;
+}
+
+std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
+		std::vector<std::string>& query,
+		uint32_t k,
+		uint32_t query_max_df,
+		uint16_t partition_id,
+		std::vector<float> boost_factors
+		) {
+	auto start = std::chrono::high_resolution_clock::now();
+
+	std::vector<std::vector<uint64_t>> low_df_term_idxs(search_cols.size());
+	std::vector<std::vector<uint64_t>> high_df_term_idxs(search_cols.size());
+	std::vector<std::vector<BloomEntry>> bloom_entries(search_cols.size());
+
+	BM25Partition& IP = index_partitions[partition_id];
+
+	uint64_t doc_offset = (file_type == IN_MEMORY) ? partition_boundaries[partition_id] : 0;
+
+	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		std::string& q = query[col_idx];
+		std::string substr = "";
+
+		for (const char& c : q) {
+			if (c != ' ') {
+				substr += toupper(c);
+				continue;
+			}
+
+			add_query_term_bloom(
+					substr, 
+					low_df_term_idxs, 
+					high_df_term_idxs, 
+					bloom_entries,
+					partition_id,
+					col_idx
+					);	
+		}
+		if (!substr.empty()) {
+			add_query_term_bloom(
+					substr, 
+					low_df_term_idxs, 
+					high_df_term_idxs, 
+					bloom_entries,
+					partition_id,
+					col_idx
+					);	
+		}
+	}
+
+	uint16_t num_low_df_terms = 0;
+	uint16_t num_high_df_terms = 0;
+	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		num_low_df_terms  += low_df_term_idxs[col_idx].size();
+		num_high_df_terms += high_df_term_idxs[col_idx].size();
+	}
+	if (num_low_df_terms + num_high_df_terms == 0) return std::vector<BM25Result>();
+
+	// Score low_df terms first.
+	robin_hood::unordered_map<uint64_t, float> doc_scores;
+
+	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		for (const uint64_t& term_idx : low_df_term_idxs[col_idx]) {
+			float boost_factor = boost_factors[col_idx];
+
+			uint64_t df = IP.II[col_idx].doc_freqs[term_idx];
+
+			if (df == 0 || df > query_max_df) {
+				continue;
+			}
+
+			float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
+
+			IIRow row = get_II_row(&IP.II[col_idx], term_idx);
+			for (uint64_t i = 0; i < df; ++i) {
+
+				uint64_t doc_id  = row.doc_ids[i];
+				float tf 		 = row.term_freqs[i];
+				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factor;
+
+				doc_id += doc_offset;
+				if (doc_scores.find(doc_id) == doc_scores.end()) {
+					doc_scores[doc_id] = bm25_score;
+				}
+				else {
+					doc_scores[doc_id] += bm25_score;
+				}
+			}
+		}
+	}
+
+	// Now score high_df terms
+	if (num_high_df_terms > 0) {
+		if (doc_scores.size() == 0) {
+			// Sort high_df_term_idxs by df.
+			// Get top-k docs for lowest df term. Then use bloom scoring for the rest.
+			std::vector<uint32_t> df_values;
+			uint32_t min_df = UINT32_MAX;
+			uint16_t min_df_col_idx;
+			uint16_t min_df_term_idx;
+
+			for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+				uint16_t cntr = 0;
+				for (const uint64_t& term_idx : high_df_term_idxs[col_idx]) {
+					uint32_t df = IP.II[col_idx].doc_freqs[term_idx];
+					if (df < min_df) {
+						min_df_col_idx = col_idx;
+						min_df_term_idx = cntr++;
+						min_df = df;
+					}
+					df_values.push_back(
+								IP.II[col_idx].doc_freqs[term_idx]
+								);
+				}
+			}
+
+			// First score the term with the lowest df.
+			float idf = log((IP.num_docs - min_df + 0.5) / (min_df + 0.5));
+			BloomEntry& bloom_entry = bloom_entries[min_df_col_idx][min_df_term_idx];
+			for (uint64_t i = 0; i < bloom_entry.topk_doc_ids.size(); ++i) {
+				uint64_t doc_id  = bloom_entry.topk_doc_ids[i];
+				float tf 		 = bloom_entry.topk_term_freqs[i];
+				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factors[min_df_col_idx];
+
+				doc_id += doc_offset;
+				if (doc_scores.find(doc_id) == doc_scores.end()) {
+					doc_scores[doc_id] = bm25_score;
+				}
+				else {
+					doc_scores[doc_id] += bm25_score;
+				}
+			}
+
+			// Now score the rest using bloom filters.
+			for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+				for (uint16_t idx = 0; idx < high_df_term_idxs[col_idx].size(); ++idx) {
+					const uint64_t& term_idx = high_df_term_idxs[col_idx][idx];
+
+					if (col_idx == min_df_col_idx && term_idx == min_df_term_idx) {
+						continue;
+					}
+
+					BloomEntry& bloom_entry = bloom_entries[col_idx][idx];
+					float df = IP.II[col_idx].doc_freqs[term_idx];
+					float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
+
+					for (auto& [doc_id, score] : doc_scores) {
+						for (const auto& [tf, bf] : bloom_entry.bloom_filters) {
+							if (bloom_query(bf, doc_id)) {
+								score += _compute_bm25(
+										doc_id, 
+										(float)tf,
+										idf, 
+										partition_id
+										) * boost_factors[col_idx];
+							}
+						}
+					}
+				}
+			}
+		} else {
+
+			for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+				for (uint16_t idx = 0; idx < high_df_term_idxs[col_idx].size(); ++idx) {
+					const uint64_t& term_idx = high_df_term_idxs[col_idx][idx];
+					BloomEntry& bloom_entry  = bloom_entries[col_idx][idx];
+
+					float df = IP.II[col_idx].doc_freqs[term_idx];
+					float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
+
+					for (auto& [doc_id, score] : doc_scores) {
+						for (const auto& [tf, bf] : bloom_entry.bloom_filters) {
+							if (bloom_query(bf, doc_id)) {
+								score += _compute_bm25(
+										doc_id, 
+										(float)tf,
+										idf, 
+										partition_id
+										) * boost_factors[col_idx];
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (DEBUG) {
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+		std::cout << "Number of docs: " << doc_scores.size() << "   GATHER TIME: ";
+		std::cout << elapsed_ms.count() << "ms" << std::endl;
+		fflush(stdout);
+	}
+	
+	if (doc_scores.size() == 0) {
+		return std::vector<BM25Result>();
+	}
+
+	start = std::chrono::high_resolution_clock::now();
+	std::priority_queue<
+		BM25Result,
+		std::vector<BM25Result>,
+		_compare_bm25_result> top_k_docs;
+
+	for (const auto& pair : doc_scores) {
+		BM25Result result {
+			.doc_id = pair.first,
+			.score  = pair.second,
+			.partition_id = partition_id
+		};
+		top_k_docs.push(result);
+		if (top_k_docs.size() > k) {
+			top_k_docs.pop();
+		}
+	}
+
+	std::vector<BM25Result> result(top_k_docs.size());
+	int idx = top_k_docs.size() - 1;
+	while (!top_k_docs.empty()) {
+		result[idx] = top_k_docs.top();
+		top_k_docs.pop();
+		--idx;
+	}
+
+	return result;
+}
+
+
+std::vector<BM25Result> _BM25::query_multi(
+		std::vector<std::string>& query,
+		uint32_t k,
+		uint32_t query_max_df,
+		std::vector<float> boost_factors
+		) {
+	auto start = std::chrono::high_resolution_clock::now();
+
+	if (boost_factors.size() == 0) {
+		boost_factors.resize(search_cols.size());
+		memset(
+				&boost_factors[0],
+				1.0f,
+				search_cols.size() * sizeof(float)
+			  );
+	}
+
+	if (boost_factors.size() != search_cols.size()) {
+		std::cout << "Error: Boost factors must be the same size as the number of search fields." << std::endl;
+		std::cout << "Number of search fields: " << search_cols.size() << std::endl;
+		std::cout << "Number of boost factors: " << boost_factors.size() << std::endl;
+		std::exit(1);
+	}
+
+	std::vector<std::thread> threads;
+	std::vector<std::vector<BM25Result>> results(num_partitions);
+
+	// _query_partition on each thread
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		threads.push_back(std::thread(
+			[this, &query, k, query_max_df, i, &results, boost_factors] {
+				results[i] = _query_partition_bloom_multi(query, k, query_max_df, i, boost_factors);
+			}
+		));
+	}
+
+	for (auto& thread : threads) {
+		thread.join();
+	}
+
+	if (results.size() == 0) {
+		return std::vector<BM25Result>();
+	}
+
+	uint64_t total_matching_docs = 0;
+
+	// Join results. Keep global max heap of size k
+	std::priority_queue<
+		BM25Result,
+		std::vector<BM25Result>,
+		_compare_bm25_result> top_k_docs;
+
+	for (const auto& partition_results : results) {
+		total_matching_docs += partition_results.size();
+		for (const auto& pair : partition_results) {
+			top_k_docs.push(pair);
+			if (top_k_docs.size() > k) {
+				top_k_docs.pop();
+			}
+		}
+	}
+	
+	std::vector<BM25Result> result(top_k_docs.size());
+	int idx = top_k_docs.size() - 1;
+	while (!top_k_docs.empty()) {
+		result[idx] = top_k_docs.top();
+		top_k_docs.pop();
+		--idx;
+	}
+
+	if (DEBUG) {
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+		for (const auto& q : query) {
+			std::cout << "QUERY: " << q;
+		}
+		std::cout << std::endl;
+		std::cout << "Total matching docs: " << total_matching_docs << "    ";
+		std::cout << elapsed_ms.count() << "ms" << std::endl;
+		fflush(stdout);
+	}
+
+	return result;
+}
+
+
+std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal_multi(
+		std::vector<std::string>& _query,
+		uint32_t top_k,
+		uint32_t query_max_df,
+		std::vector<float> boost_factors
+		) {
+
+	std::vector<std::vector<std::pair<std::string, std::string>>> result;
+	std::vector<BM25Result> top_k_docs = query_multi(_query, top_k, query_max_df, boost_factors);
 	result.reserve(top_k_docs.size());
 
 	std::vector<std::pair<std::string, std::string>> row;

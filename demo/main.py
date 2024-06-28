@@ -14,9 +14,10 @@ CORS(app)
 
 @app.route('/search', methods=['GET'])
 def search():
-    query = request.args.get('query', '')
+    query_name   = request.args.get('name', '')
+    query_artist = request.args.get('artist', '')
     init = perf_counter()
-    results = search_app.get_search_results(query)
+    results = search_app.get_search_results([query_name, query_artist])
 
     time_taken_ms = int(1e3) * (perf_counter() - init)
     return jsonify({'results': results, 'time_taken_ms': time_taken_ms})
@@ -80,10 +81,10 @@ class SearchApp:
         cols = [x.lower() for x in columns if x.strip() != '']
         return cols
 
-    def get_search_results(self, query: str) -> list:
-        query = query.upper()
-        if len(query) == 0:
-            return []
+    def get_search_results(self, query: list) -> list:
+        ## if len(query) == 0:
+            ## return []
+        print(f"Query: {query}")
 
         init = perf_counter()
         vals = self.bm25.get_topk_docs(

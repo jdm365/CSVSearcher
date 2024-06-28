@@ -9,7 +9,8 @@
 </head>
 <body>
 
-<input type="text" id="search_box" placeholder="Type to search..." onkeyup="search()">
+<input type="text" id="search_box_name" placeholder="Type to search..." onkeyup="search()">
+<input type="text" id="search_box_artist" placeholder="Type to search..." onkeyup="search()">
 <div id="metadata"></div>
 
 <table width="100%">
@@ -70,8 +71,9 @@
 	});
 
 	function search() {
-		var query = document.getElementById('search_box').value;
-		fetch(`http://localhost:5000/search?query=${query}`)
+		var query_name   = document.getElementById('search_box_name').value;
+		var query_artist = document.getElementById('search_box_artist').value;
+		fetch(`http://localhost:5000/search?name=${query_name}&artist=${query_artist}`)
 			.then(response => response.json())
 			.then(data => updateGrid(data));
 	}
