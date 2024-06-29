@@ -34,13 +34,13 @@
 
 
 BloomEntry init_bloom_entry(
-		uint32_t num_docs, 
 		double fpr, 
-		robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values
+		robin_hood::unordered_flat_map<uint16_t, uint64_t>& tf_map 
 		) {
 	BloomEntry bloom_entry;
 
-	for (const auto& term_freq : distinct_term_freq_values) {
+	// for (const auto& term_freq : distinct_term_freq_values) {
+	for (const auto& [term_freq, num_docs] : tf_map) {
 		BloomFilter bf = init_bloom_filter(num_docs, fpr);
 		bloom_entry.bloom_filters.insert({term_freq, bf});
 	}
@@ -567,7 +567,8 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 			uint32_t df = II.doc_freqs[idx];
 			if (df < min_df_bloom) continue;
 
-			robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values;
+			// robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values;
+			robin_hood::unordered_flat_map<uint16_t, uint64_t> tf_map;
 			IIRow row = get_II_row(&II, idx);
 
 			// Construct min heap to keep track of top k term frequencies and doc ids
@@ -576,19 +577,21 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 				std::vector<std::pair<uint16_t, uint64_t>>, 
 				std::greater<std::pair<uint16_t, uint64_t>>> min_heap;
 
+
 			for (uint32_t i = 0; i < row.term_freqs.size(); ++i) {
 				min_heap.push({row.term_freqs[i], row.doc_ids[i]});
 				if (min_heap.size() > TOP_K) {
 					min_heap.pop();
 				}
-				distinct_term_freq_values.insert(row.term_freqs[i]);
+				// distinct_term_freq_values.insert(row.term_freqs[i]);
+				if (tf_map.find(row.term_freqs[i]) == tf_map.end()) {
+					tf_map.insert({row.term_freqs[i], 1});
+				} else {
+					++(tf_map[row.term_freqs[i]]);
+				}
 			}
 
-			BloomEntry bloom_entry = init_bloom_entry(
-					df, 
-					bloom_fpr, 
-					distinct_term_freq_values
-					);
+			BloomEntry bloom_entry = init_bloom_entry(bloom_fpr, tf_map);
 
 			// partial sort TOP_K term_freqs descending. Get idxs
 			bloom_entry.topk_doc_ids.reserve(min_heap.size());

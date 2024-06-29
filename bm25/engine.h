@@ -83,9 +83,8 @@ typedef struct BloomEntry {
 } BloomEntry;
 
 BloomEntry init_bloom_entry(
-		uint32_t num_docs, 
 		double fpr, 
-		robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values
+		robin_hood::unordered_flat_map<uint16_t, uint64_t>& tf_map 
 		);
 
 typedef struct {
