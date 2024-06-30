@@ -214,6 +214,7 @@ class _BM25 {
 				}
 			}
 		}
+		void init_terminal();
 		void proccess_csv_header();
 
 		void save_index_partition(std::string db_dir, uint16_t partition_id);
@@ -239,6 +240,7 @@ class _BM25 {
 				);
 
 		void determine_partition_boundaries_csv();
+		void determine_partition_boundaries_csv_rfc_4180();
 		void determine_partition_boundaries_json();
 
 		void write_bloom_filters(uint16_t partition_id);

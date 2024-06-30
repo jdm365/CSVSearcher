@@ -81,6 +81,69 @@ static inline ssize_t rfc4180_getline(char** lineptr, size_t* n, FILE* stream) {
     return len;
 }
 
+#define BUFFER_SIZE 4096
+
+ssize_t rfc4180_getline_batch(
+		char** lineptr, 
+		size_t* n, 
+		FILE* stream, 
+		char* buffer, 
+		size_t* buffer_size, 
+		size_t* buffer_pos
+		) {
+    if (lineptr == nullptr || n == nullptr || stream == nullptr) {
+        return -1;
+    }
+
+    size_t len = 0;
+    int in_quotes = 0;
+
+    if (*lineptr == nullptr) {
+        *n = 128;
+        *lineptr = (char *)malloc(*n);
+        if (*lineptr == nullptr) {
+            return -1;
+        }
+    }
+
+    while (true) {
+        if (*buffer_pos >= *buffer_size) {
+            *buffer_size = fread(buffer, 1, BUFFER_SIZE, stream);
+            if (*buffer_size == 0) {
+                break;
+            }
+            *buffer_pos = 0;
+        }
+
+        char c = buffer[*buffer_pos];
+        (*buffer_pos)++;
+
+        if (len + 1 >= *n) {
+            *n *= 2;
+            char *new_lineptr = (char *)realloc(*lineptr, *n);
+            if (new_lineptr == nullptr) {
+                return -1;
+            }
+            *lineptr = new_lineptr;
+        }
+
+        (*lineptr)[len++] = c;
+
+        if (c == '"') {
+            in_quotes = !in_quotes;
+        } else if (c == '\n' && !in_quotes) {
+            break;
+        }
+    }
+
+    if (len == 0) {
+        return -1;
+    }
+
+    (*lineptr)[len] = '\0';
+    return len;
+}
+
 BloomEntry init_bloom_entry(
 		double fpr, 
 		robin_hood::unordered_flat_map<uint16_t, uint64_t>& tf_map 
@@ -164,6 +227,23 @@ void get_terminal_size(int& rows, int& cols) {
 }
 
 
+void _BM25::init_terminal() {
+	bool is_terminal = isatty(fileno(stdout));
+
+	int col;
+	if (is_terminal) {
+		get_cursor_position(init_cursor_row, col);
+		get_terminal_size(terminal_height, col);
+
+		if (terminal_height - init_cursor_row < num_partitions + 1) {
+			// Scroll and reposition cursor
+			std::cout << "\x1b[" << num_partitions + 1 << "S";
+			init_cursor_row -= num_partitions + 1;
+		}
+	}
+}
+
+
 void _BM25::determine_partition_boundaries_csv() {
 	// First find number of bytes in file.
 	// Get avg chunk size in bytes.
@@ -219,6 +299,68 @@ void _BM25::determine_partition_boundaries_csv() {
 
 	// Reset file pointer to beginning
 	fseek(f, header_bytes, SEEK_SET);
+}
+
+
+void _BM25::determine_partition_boundaries_csv_rfc_4180() {
+    FILE* f = reference_file_handles[0];
+
+    struct stat sb;
+    if (fstat(fileno(f), &sb) == -1) {
+        std::cerr << "Error getting file size." << std::endl;
+        std::exit(1);
+    }
+
+    size_t file_size = sb.st_size;
+
+    size_t byte_offset = header_bytes;
+    fseek(f, byte_offset, SEEK_SET);
+
+    std::vector<uint64_t> line_offsets;
+    line_offsets.reserve(file_size / 64);
+
+    char* line = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    uint64_t cntr = 0;
+    char buffer[BUFFER_SIZE];
+    size_t buffer_size = 0;
+    size_t buffer_pos = 0;
+
+    while ((read = rfc4180_getline_batch(&line, &len, f, buffer, &buffer_size, &buffer_pos)) != -1) {
+        if (cntr++ % 1000 == 0) {
+            printf("%luK lines read\r", cntr / 1000);
+			fflush(stdout);
+        }
+        line_offsets.push_back(byte_offset);
+        byte_offset += read;
+    }
+
+    uint64_t num_lines  = line_offsets.size();
+    size_t   chunk_size = num_lines / num_partitions;
+
+    for (size_t i = 0; i < num_partitions; ++i) {
+        partition_boundaries.push_back(line_offsets[i * chunk_size]);
+
+        BM25Partition& IP = index_partitions[i];
+        IP.num_docs = chunk_size;
+        IP.line_offsets = std::vector<uint64_t>(
+                line_offsets.begin() + i * chunk_size, 
+                line_offsets.begin() + (i + 1) * chunk_size
+                );
+    }
+    partition_boundaries.push_back(line_offsets.back());
+
+    if (partition_boundaries.size() != num_partitions + 1) {
+        printf("Partition boundaries: %lu\n", partition_boundaries.size());
+        printf("Num partitions: %d\n", num_partitions);
+        std::cerr << "Error determining partition boundaries." << std::endl;
+        std::exit(1);
+    }
+
+    // Reset file pointer to beginning
+    fseek(f, header_bytes, SEEK_SET);
 }
 
 void _BM25::determine_partition_boundaries_json() {
@@ -519,7 +661,7 @@ uint32_t _BM25::process_doc_partition_rfc_4180(
 			}
 
 			if (doc[char_idx] == terminator) {
-				term += terminator;
+				// term += terminator;
 				++char_idx;
 				continue;
 			}
@@ -1156,34 +1298,6 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	FILE* f = reference_file_handles[partition_id];
 	BM25Partition& IP = index_partitions[partition_id];
 
-	// Quickly count number of lines in file
-	uint64_t num_lines = 0;
-	uint64_t total_bytes_read = 0;
-	char buf[1024 * 64];
-
-	if (fseek(f, start_byte, SEEK_SET) != 0) {
-		std::cerr << "Error seeking file." << std::endl;
-		std::exit(1);
-	}
-
-	while (total_bytes_read < (end_byte - start_byte)) {
-		size_t bytes_read = fread(buf, 1, sizeof(buf), f);
-		if (bytes_read == 0) {
-			break;
-		}
-
-		for (size_t i = 0; i < bytes_read; ++i) {
-			if (buf[i] == '\n') {
-				++num_lines;
-			}
-			if (++total_bytes_read >= (end_byte - start_byte)) {
-				break;
-			}
-		}
-	}
-
-	IP.num_docs = num_lines;
-
 	// Reset file pointer to beginning
 	if (fseek(f, start_byte, SEEK_SET) != 0) {
 		std::cerr << "Error seeking file." << std::endl;
@@ -1215,7 +1329,9 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 		}
 
 		if (!DEBUG) {
-			if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, num_lines, partition_id);
+			if (line_num % UPDATE_INTERVAL == 0) {
+				update_progress(line_num, IP.num_docs, partition_id);
+			}
 		}
 
 		IP.line_offsets.push_back(byte_offset);
@@ -1297,14 +1413,13 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 		}
 		++line_num;
 	}
-	if (!DEBUG) update_progress(line_num + 1, num_lines, partition_id);
+	if (!DEBUG) update_progress(line_num + 1, IP.num_docs, partition_id);
 
 	if (DEBUG) {
 		for (uint32_t col = 0; col < search_col_idxs.size(); ++col) {
 			std::cout << "Vocab size " << col << ": " << unique_terms_found[col] << std::endl;
 		}
 	}
-
 
 	IP.num_docs = IP.doc_sizes.size();
 
@@ -1313,7 +1428,7 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	for (const auto& size : IP.doc_sizes) {
 		avg_doc_size += (double)size;
 	}
-	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
+	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 }
 
 void _BM25::read_in_memory(
@@ -1370,19 +1485,37 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 	fseek(f, IP.line_offsets[line_num], SEEK_SET);
 	char* line = NULL;
 	size_t len = 0;
-	ssize_t read = getline(&line, &len, f);
+	ssize_t read = rfc4180_getline(&line, &len, f);
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
 	std::string cell;
-	bool in_quotes = false;
 	size_t col_idx = 0;
+	size_t i = 0;
 
-	for (size_t i = 0; i < (size_t)read - 1; ++i) {
+	while (i < (size_t)read - 1) {
+
 		if (line[i] == '"') {
-			in_quotes = !in_quotes;
+			// Scan to next unescaped quote
+			++i;
+			while (1) {
+				if (line[i] == '"') {
+					if (line[i + 1] == '"') {
+						cell += '"';
+						i += 2;
+						continue;
+					} 
+					else {
+						++i;
+						break;
+					}
+				}
+				cell += line[i];
+				++i;
+			}
 		}
-		else if (line[i] == ',' && !in_quotes) {
+
+		if (line[i] == ',') {
 			row.emplace_back(columns[col_idx], cell);
 			cell.clear();
 			++col_idx;
@@ -1390,6 +1523,7 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 		else {
 			cell += line[i];
 		}
+		++i;
 	}
 	row.emplace_back(columns[col_idx], cell);
 	return row;
@@ -1755,25 +1889,15 @@ _BM25::_BM25(
 	num_docs = 0;
 
 	progress_bars.resize(num_partitions);
-	bool is_terminal = isatty(fileno(stdout));
-
-	int col;
-	if (is_terminal) {
-		get_cursor_position(init_cursor_row, col);
-		get_terminal_size(terminal_height, col);
-
-		if (terminal_height - init_cursor_row < num_partitions + 1) {
-			// Scroll and reposition cursor
-			std::cout << "\x1b[" << num_partitions + 1 << "S";
-			init_cursor_row -= num_partitions + 1;
-		}
-	}
 
 	// Read file to get documents, line offsets, and columns
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
 
 		proccess_csv_header();
-		determine_partition_boundaries_csv();
+		// determine_partition_boundaries_csv();
+		determine_partition_boundaries_csv_rfc_4180();
+
+		init_terminal();
 
 		// Launch num_partitions threads to read csv file
 		for (uint16_t i = 0; i < num_partitions; ++i) {
