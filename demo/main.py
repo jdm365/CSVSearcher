@@ -44,7 +44,7 @@ class SearchApp:
                 ## stopwords='english',
                 ## min_df=1,
                 ## max_df=0.5,
-                ## num_partitions=1,
+                num_partitions=24,
                 bloom_fpr=1e-8,
                 ## b=0.4,
                 ## k1=1.5
@@ -99,16 +99,14 @@ class SearchApp:
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
-
     DATA_DIR = f"{CURRENT_DIR}/../tests"
-    FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
+    FILEPATH = os.path.join(DATA_DIR, 'mb_small.csv')
     SEARCH_COLS = ['title', 'artist']
-    ## SEARCH_COLS = ['title']
 
     ## DATA_DIR = f"{CURRENT_DIR}/.."
-    ## FILEPATH = os.path.join(DATA_DIR, 'nodes_export_subset.csv')
-    ## FILEPATH = os.path.join(DATA_DIR, 'tiny_nodes.csv')
-    ## SEARCH_COLS = ['er_name']
+    ## FILEPATH = os.path.join(DATA_DIR, 'wiki_articles.csv')
+    ## SEARCH_COLS = ['title', 'body']
+
 
     search_app = SearchApp(
             filename=FILEPATH,

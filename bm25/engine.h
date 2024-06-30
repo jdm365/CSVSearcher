@@ -7,7 +7,6 @@
 #include <mutex>
 
 #include "robin_hood.h"
-// #include "bloom/filter.hpp"
 #include "bloom.h"
 
 
@@ -230,6 +229,14 @@ class _BM25 {
 				uint16_t partition_id,
 				uint16_t col_idx
 				);
+		uint32_t process_doc_partition_rfc_4180(
+				const char* doc,
+				const char terminator,
+				uint64_t doc_id,
+				uint32_t& unique_terms_found,
+				uint16_t partition_id,
+				uint16_t col_idx
+				);
 
 		void determine_partition_boundaries_csv();
 		void determine_partition_boundaries_json();
@@ -237,6 +244,7 @@ class _BM25 {
 		void write_bloom_filters(uint16_t partition_id);
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
+		void read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_in_memory(
 				std::vector<std::vector<std::string>>& documents,
 				uint64_t start_idx, 
