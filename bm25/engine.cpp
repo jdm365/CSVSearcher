@@ -32,6 +32,8 @@
 #include "bloom.h"
 
 
+#define BUFFER_SIZE 65536
+
 
 static inline ssize_t rfc4180_getline(char** lineptr, size_t* n, FILE* stream) {
     if (lineptr == nullptr || n == nullptr || stream == nullptr) {
@@ -81,7 +83,6 @@ static inline ssize_t rfc4180_getline(char** lineptr, size_t* n, FILE* stream) {
     return len;
 }
 
-#define BUFFER_SIZE 4096
 
 ssize_t rfc4180_getline_batch(
 		char** lineptr, 
@@ -302,7 +303,7 @@ void _BM25::determine_partition_boundaries_csv() {
 }
 
 
-void _BM25::determine_partition_boundaries_csv_rfc_4180() {
+void _BM25::determine_partition_boundaries_csv_rfc_4180_old() {
     FILE* f = reference_file_handles[0];
 
     struct stat sb;
@@ -411,6 +412,87 @@ void _BM25::proccess_csv_header() {
 	header_bytes = read;
 	free(line);
 }
+
+void _BM25::determine_partition_boundaries_csv_rfc_4180() {
+    FILE* f = reference_file_handles[0];
+
+    struct stat sb;
+    if (fstat(fileno(f), &sb) == -1) {
+        std::cerr << "Error getting file size." << std::endl;
+        std::exit(1);
+    }
+
+    size_t file_size = sb.st_size;
+
+    size_t byte_offset = header_bytes;
+    fseek(f, byte_offset, SEEK_SET);
+
+    std::vector<uint64_t> line_offsets;
+    line_offsets.reserve(file_size / 64);
+
+	// Use mmap instead of rfc4180_getline_batch
+	char* file_data = (char*)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fileno(f), 0);
+	if (file_data == MAP_FAILED) {
+		std::cerr << "Error mapping file to memory." << std::endl;
+		std::exit(1);
+	}
+
+	uint64_t cntr = 0;
+    size_t file_pos = header_bytes;
+	while (file_pos < file_size - 1) {
+		if (file_data[file_pos] == '"') {
+			// Skip to next unescaped quote
+			++file_pos;
+
+			while (1) {
+
+				// Escape quote. Continue to next character.
+				if (file_data[file_pos] == '"' && file_data[file_pos + 1] == '"') {
+					file_pos += 2;
+					continue;
+				} else if (file_data[file_pos] == '"') {
+					++file_pos;
+					break;
+				} else {
+					++file_pos;
+				}
+			}
+		}
+		if (file_data[file_pos++] == '\n') {
+			line_offsets.push_back(file_pos);
+			if (cntr++ % 1000 == 0) {
+				printf("%luK lines read\r", cntr / 1000);
+				fflush(stdout);
+			}
+		}
+	}
+
+    uint64_t num_lines  = line_offsets.size();
+    size_t   chunk_size = num_lines / num_partitions;
+
+    for (size_t i = 0; i < num_partitions; ++i) {
+        partition_boundaries.push_back(line_offsets[i * chunk_size]);
+
+        BM25Partition& IP = index_partitions[i];
+        IP.num_docs = chunk_size;
+        IP.line_offsets = std::vector<uint64_t>(
+                line_offsets.begin() + i * chunk_size, 
+                line_offsets.begin() + (i + 1) * chunk_size
+                );
+    }
+    partition_boundaries.push_back(line_offsets.back());
+
+    if (partition_boundaries.size() != num_partitions + 1) {
+        printf("Partition boundaries: %lu\n", partition_boundaries.size());
+        printf("Num partitions: %d\n", num_partitions);
+        std::cerr << "Error determining partition boundaries." << std::endl;
+        std::exit(1);
+    }
+
+    // Reset file pointer to beginning
+    fseek(f, header_bytes, SEEK_SET);
+}
+
 
 inline RLEElement_u8 init_rle_element_u8(uint8_t value) {
 	RLEElement_u8 rle;

@@ -241,6 +241,7 @@ class _BM25 {
 
 		void determine_partition_boundaries_csv();
 		void determine_partition_boundaries_csv_rfc_4180();
+		void determine_partition_boundaries_csv_rfc_4180_old();
 		void determine_partition_boundaries_json();
 
 		void write_bloom_filters(uint16_t partition_id);
