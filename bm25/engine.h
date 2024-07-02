@@ -238,16 +238,24 @@ class _BM25 {
 				uint16_t partition_id,
 				uint16_t col_idx
 				);
+		void process_doc_partition_rfc_4180_mmap(
+				const char* file_data,
+				const char terminator,
+				uint64_t doc_id,
+				uint32_t& unique_terms_found,
+				uint16_t partition_id,
+				uint16_t col_idx,
+				uint64_t& byte_offset
+				);
 
 		void determine_partition_boundaries_csv();
 		void determine_partition_boundaries_csv_rfc_4180();
-		void determine_partition_boundaries_csv_rfc_4180_old();
 		void determine_partition_boundaries_json();
 
 		void write_bloom_filters(uint16_t partition_id);
 		void read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
-		void read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
+		void read_csv_rfc_4180_mmap(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id);
 		void read_in_memory(
 				std::vector<std::vector<std::string>>& documents,
 				uint64_t start_idx, 
@@ -263,7 +271,6 @@ class _BM25 {
 				const std::string& term,
 				uint64_t doc_id
 				);
-
 
 		float _compute_bm25(
 				uint64_t doc_id,

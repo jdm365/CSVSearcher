@@ -32,8 +32,19 @@
 #include "bloom.h"
 
 
-#define BUFFER_SIZE 65536
 
+BloomEntry init_bloom_entry(
+		double fpr, 
+		robin_hood::unordered_flat_map<uint16_t, uint64_t>& tf_map 
+		) {
+	BloomEntry bloom_entry;
+
+	for (const auto& [term_freq, num_docs] : tf_map) {
+		BloomFilter bf = init_bloom_filter(num_docs, fpr);
+		bloom_entry.bloom_filters.insert({term_freq, bf});
+	}
+	return bloom_entry;
+}
 
 static inline ssize_t rfc4180_getline(char** lineptr, size_t* n, FILE* stream) {
     if (lineptr == nullptr || n == nullptr || stream == nullptr) {
@@ -81,82 +92,6 @@ static inline ssize_t rfc4180_getline(char** lineptr, size_t* n, FILE* stream) {
 
     (*lineptr)[len] = '\0';
     return len;
-}
-
-
-ssize_t rfc4180_getline_batch(
-		char** lineptr, 
-		size_t* n, 
-		FILE* stream, 
-		char* buffer, 
-		size_t* buffer_size, 
-		size_t* buffer_pos
-		) {
-    if (lineptr == nullptr || n == nullptr || stream == nullptr) {
-        return -1;
-    }
-
-    size_t len = 0;
-    int in_quotes = 0;
-
-    if (*lineptr == nullptr) {
-        *n = 128;
-        *lineptr = (char *)malloc(*n);
-        if (*lineptr == nullptr) {
-            return -1;
-        }
-    }
-
-    while (true) {
-        if (*buffer_pos >= *buffer_size) {
-            *buffer_size = fread(buffer, 1, BUFFER_SIZE, stream);
-            if (*buffer_size == 0) {
-                break;
-            }
-            *buffer_pos = 0;
-        }
-
-        char c = buffer[*buffer_pos];
-        (*buffer_pos)++;
-
-        if (len + 1 >= *n) {
-            *n *= 2;
-            char *new_lineptr = (char *)realloc(*lineptr, *n);
-            if (new_lineptr == nullptr) {
-                return -1;
-            }
-            *lineptr = new_lineptr;
-        }
-
-        (*lineptr)[len++] = c;
-
-        if (c == '"') {
-            in_quotes = !in_quotes;
-        } else if (c == '\n' && !in_quotes) {
-            break;
-        }
-    }
-
-    if (len == 0) {
-        return -1;
-    }
-
-    (*lineptr)[len] = '\0';
-    return len;
-}
-
-BloomEntry init_bloom_entry(
-		double fpr, 
-		robin_hood::unordered_flat_map<uint16_t, uint64_t>& tf_map 
-		) {
-	BloomEntry bloom_entry;
-
-	// for (const auto& term_freq : distinct_term_freq_values) {
-	for (const auto& [term_freq, num_docs] : tf_map) {
-		BloomFilter bf = init_bloom_filter(num_docs, fpr);
-		bloom_entry.bloom_filters.insert({term_freq, bf});
-	}
-	return bloom_entry;
 }
 
 
@@ -302,68 +237,6 @@ void _BM25::determine_partition_boundaries_csv() {
 	fseek(f, header_bytes, SEEK_SET);
 }
 
-
-void _BM25::determine_partition_boundaries_csv_rfc_4180_old() {
-    FILE* f = reference_file_handles[0];
-
-    struct stat sb;
-    if (fstat(fileno(f), &sb) == -1) {
-        std::cerr << "Error getting file size." << std::endl;
-        std::exit(1);
-    }
-
-    size_t file_size = sb.st_size;
-
-    size_t byte_offset = header_bytes;
-    fseek(f, byte_offset, SEEK_SET);
-
-    std::vector<uint64_t> line_offsets;
-    line_offsets.reserve(file_size / 64);
-
-    char* line = NULL;
-    size_t len = 0;
-    ssize_t read;
-
-    uint64_t cntr = 0;
-    char buffer[BUFFER_SIZE];
-    size_t buffer_size = 0;
-    size_t buffer_pos = 0;
-
-    while ((read = rfc4180_getline_batch(&line, &len, f, buffer, &buffer_size, &buffer_pos)) != -1) {
-        if (cntr++ % 1000 == 0) {
-            printf("%luK lines read\r", cntr / 1000);
-			fflush(stdout);
-        }
-        line_offsets.push_back(byte_offset);
-        byte_offset += read;
-    }
-
-    uint64_t num_lines  = line_offsets.size();
-    size_t   chunk_size = num_lines / num_partitions;
-
-    for (size_t i = 0; i < num_partitions; ++i) {
-        partition_boundaries.push_back(line_offsets[i * chunk_size]);
-
-        BM25Partition& IP = index_partitions[i];
-        IP.num_docs = chunk_size;
-        IP.line_offsets = std::vector<uint64_t>(
-                line_offsets.begin() + i * chunk_size, 
-                line_offsets.begin() + (i + 1) * chunk_size
-                );
-    }
-    partition_boundaries.push_back(line_offsets.back());
-
-    if (partition_boundaries.size() != num_partitions + 1) {
-        printf("Partition boundaries: %lu\n", partition_boundaries.size());
-        printf("Num partitions: %d\n", num_partitions);
-        std::cerr << "Error determining partition boundaries." << std::endl;
-        std::exit(1);
-    }
-
-    // Reset file pointer to beginning
-    fseek(f, header_bytes, SEEK_SET);
-}
-
 void _BM25::determine_partition_boundaries_json() {
 	// Same as csv for now. Assuming newline delimited json.
 	determine_partition_boundaries_csv();
@@ -430,7 +303,7 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
     std::vector<uint64_t> line_offsets;
     line_offsets.reserve(file_size / 64);
 
-	// Use mmap instead of rfc4180_getline_batch
+	// Use mmap instead
 	char* file_data = (char*)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fileno(f), 0);
 	if (file_data == MAP_FAILED) {
 		std::cerr << "Error mapping file to memory." << std::endl;
@@ -849,6 +722,148 @@ uint32_t _BM25::process_doc_partition_rfc_4180(
 }
 
 
+void _BM25::process_doc_partition_rfc_4180_mmap(
+		const char* file_data,
+		const char terminator,
+		uint64_t doc_id,
+		uint32_t& unique_terms_found,
+		uint16_t partition_id,
+		uint16_t col_idx,
+		uint64_t& byte_offset
+		) {
+	BM25Partition& IP = index_partitions[partition_id];
+	InvertedIndex& II = IP.II[col_idx];
+
+	std::string term = "";
+
+	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+
+	// Split by commas not inside double quotes
+	uint64_t doc_size = 0;
+	while (true) {
+		if (doc_size > 131072) {
+			std::cout << "Search field not found on line: " << doc_id << std::endl;
+			std::cout << std::flush;
+			std::exit(1);
+		}
+
+		if (terminator == '"' && file_data[byte_offset] == '"') {
+			++byte_offset;
+			if (file_data[byte_offset] == ',' || file_data[byte_offset] == '\n') {
+				++byte_offset;
+				break;
+			}
+
+			if (file_data[byte_offset] == terminator) {
+				// Escaped quote. Continue.
+				++byte_offset;
+				continue;
+			}
+		}
+
+		if ((file_data[byte_offset] == terminator) && (terminator != '"')) {
+			++byte_offset;
+			break;
+		}
+
+		// Whitespace. Add term if not empty.
+		if (file_data[byte_offset] == ' ') {
+			if (term == "") {
+				++byte_offset;
+				continue;
+			} else {
+				if ((stop_words.find(term) != stop_words.end()) || !is_valid_token(term)) {
+					term.clear();
+					++byte_offset;
+					++doc_size;
+					continue;
+				}
+
+				auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+						term, 
+						unique_terms_found
+						);
+				if (add) {
+					// New term
+					terms_seen.insert({it->second, 1});
+					II.inverted_index_compressed.emplace_back();
+					II.prev_doc_ids.push_back(0);
+					II.doc_freqs.push_back(1);
+					++unique_terms_found;
+				}
+				else {
+					// Term already exists
+					if (terms_seen.find(it->second) == terms_seen.end()) {
+						terms_seen.insert({it->second, 1});
+						++(II.doc_freqs[it->second]);
+					}
+					else {
+						++(terms_seen[it->second]);
+					}
+				}
+
+				++doc_size;
+				term.clear();
+
+				++byte_offset;
+				continue;
+			}
+		}
+
+		term += toupper(file_data[byte_offset]);
+		++byte_offset;
+	}
+
+	if (term != "") {
+		if ((stop_words.find(term) == stop_words.end()) && is_valid_token(term)) {
+			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+					term, 
+					unique_terms_found
+					);
+
+			if (add) {
+				// New term
+				terms_seen.insert({it->second, 1});
+				II.inverted_index_compressed.emplace_back();
+				II.prev_doc_ids.push_back(0);
+				II.doc_freqs.push_back(1);
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert({it->second, 1});
+					++(II.doc_freqs[it->second]);
+				}
+				else {
+					++(terms_seen[it->second]);
+				}
+			}
+		}
+		++doc_size;
+	}
+
+	if (doc_id == IP.doc_sizes.size() - 1) {
+		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	}
+	else {
+		IP.doc_sizes.push_back((uint16_t)doc_size);
+	}
+
+	for (const auto& [term_idx, tf] : terms_seen) {
+		compress_uint64_differential_single(
+				II.inverted_index_compressed[term_idx].doc_ids,
+				doc_id,
+				II.prev_doc_ids[term_idx]
+				);
+		add_rle_element_u8(
+				II.inverted_index_compressed[term_idx].term_freqs, 
+				tf
+				);
+		II.prev_doc_ids[term_idx] = doc_id;
+	}
+}
+
 void _BM25::update_progress(int line_num, int num_lines, uint16_t partition_id) {
     const int bar_width = 121;
 
@@ -1030,10 +1045,6 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 			for (uint32_t i = 0; i < row.doc_ids.size(); ++i) {
 				uint64_t doc_id    = row.doc_ids[i];
 				uint16_t term_freq = row.term_freqs[i];
-				if (term_freq > 100) {
-					printf("Term freq: %d\n", term_freq);
-					fflush(stdout);
-				}
 				bloom_put(bloom_entry.bloom_filters[term_freq], doc_id);
 			}
 
@@ -1212,170 +1223,6 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
 }
 
-void _BM25::read_csv(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
-	FILE* f = reference_file_handles[partition_id];
-	BM25Partition& IP = index_partitions[partition_id];
-
-	// Quickly count number of lines in file
-	uint64_t num_lines = 0;
-	uint64_t total_bytes_read = 0;
-	char buf[1024 * 64];
-
-	if (fseek(f, start_byte, SEEK_SET) != 0) {
-		std::cerr << "Error seeking file." << std::endl;
-		std::exit(1);
-	}
-
-	while (total_bytes_read < (end_byte - start_byte)) {
-		size_t bytes_read = fread(buf, 1, sizeof(buf), f);
-		if (bytes_read == 0) {
-			break;
-		}
-
-		for (size_t i = 0; i < bytes_read; ++i) {
-			if (buf[i] == '\n') {
-				++num_lines;
-			}
-			if (++total_bytes_read >= (end_byte - start_byte)) {
-				break;
-			}
-		}
-	}
-
-	IP.num_docs = num_lines;
-
-	// Reset file pointer to beginning
-	if (fseek(f, start_byte, SEEK_SET) != 0) {
-		std::cerr << "Error seeking file." << std::endl;
-		std::exit(1);
-	}
-
-	// Read the file line by line
-	char*    line = NULL;
-	size_t   len = 0;
-	ssize_t  read;
-	uint64_t line_num = 0;
-	uint64_t byte_offset = start_byte;
-
-	// uint32_t unique_terms_found = 0;
-	std::vector<uint32_t> unique_terms_found(search_cols.size());
-
-	// Small string optimization limit on most platforms
-	std::string doc = "";
-	doc.reserve(22);
-
-	char end_delim = ',';
-
-	const int UPDATE_INTERVAL = 10000;
-	while ((read = getline(&line, &len, f)) != -1) {
-
-		if (byte_offset >= end_byte) {
-			break;
-		}
-
-		if (!DEBUG) {
-			if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, num_lines, partition_id);
-		}
-
-		IP.line_offsets.push_back(byte_offset);
-		byte_offset += read;
-
-		int char_idx = 0;
-		int col_idx  = 0;
-		uint16_t _search_col_idx = 0;
-		for (const auto& search_col_idx : search_col_idxs) {
-
-			if (search_col_idx == (int)columns.size() - 1) {
-				end_delim = '\n';
-			}
-			else {
-				end_delim = ',';
-			}
-
-			// Iterate of line chars until we get to relevant column.
-			while (col_idx != search_col_idx) {
-				if (line[char_idx] == '\\') {
-					char_idx += 2;
-					continue;
-				}
-
-				if (line[char_idx] == '\n') {
-					printf("Newline found before end.\n");
-					printf("Col idx: %d\n", col_idx);
-					printf("Line: %s", line);
-					exit(1);
-				}
-
-				if (line[char_idx] == '"') {
-					// Skip to next unescaped quote
-					++char_idx;
-
-					while (1) {
-						if (line[char_idx] == '"') {
-							if (line[char_idx + 1] == '"') {
-								char_idx += 2;
-								continue;
-							} 
-							else {
-								++char_idx;
-								break;
-							}
-						}
-						++char_idx;
-					}
-				}
-
-				if (line[char_idx] == ',') ++col_idx;
-				++char_idx;
-			}
-			++col_idx;
-
-			// Split by commas not inside double quotes
-			if (line[char_idx] == '"') {
-				++char_idx;
-				char_idx += process_doc_partition(
-					&line[char_idx],
-					'"',
-					line_num,
-					unique_terms_found[_search_col_idx],
-					partition_id,
-					_search_col_idx
-					); ++char_idx;
-				++_search_col_idx;
-				continue;
-			}
-
-			char_idx += process_doc_partition(
-				&line[char_idx], 
-				end_delim,
-				line_num, 
-				unique_terms_found[_search_col_idx], 
-				partition_id,
-				_search_col_idx
-				); ++char_idx;
-			++_search_col_idx;
-		}
-		++line_num;
-	}
-	if (!DEBUG) update_progress(line_num + 1, num_lines, partition_id);
-
-	if (DEBUG) {
-		for (uint32_t col = 0; col < search_col_idxs.size(); ++col) {
-			std::cout << "Vocab size " << col << ": " << unique_terms_found[col] << std::endl;
-		}
-	}
-
-
-	IP.num_docs = IP.doc_sizes.size();
-
-	// Calc avg_doc_size
-	double avg_doc_size = 0;
-	for (const auto& size : IP.doc_sizes) {
-		avg_doc_size += (double)size;
-	}
-	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
-}
-
 void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
 	FILE* f = reference_file_handles[partition_id];
 	BM25Partition& IP = index_partitions[partition_id];
@@ -1512,6 +1359,151 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	}
 	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 }
+
+
+void _BM25::read_csv_rfc_4180_mmap(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
+	FILE* f = reference_file_handles[partition_id];
+	BM25Partition& IP = index_partitions[partition_id];
+
+	// Reset file pointer to beginning
+	if (fseek(f, start_byte, SEEK_SET) != 0) {
+		std::cerr << "Error seeking file." << std::endl;
+		std::exit(1);
+	}
+
+	uint64_t byte_offset = start_byte;
+	uint64_t line_num = 0;
+
+	// Use mmap to read file
+	struct stat sb;
+	if (fstat(fileno(f), &sb) == -1) {
+		perror("fstat");
+		exit(1);
+	}
+
+	char* data = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fileno(f), 0);
+	if (data == MAP_FAILED) {
+		perror("mmap");
+		exit(1);
+	}
+
+	std::vector<uint32_t> unique_terms_found(search_cols.size());
+
+	// Small string optimization limit on most platforms
+	std::string doc = "";
+	doc.reserve(22);
+
+	char end_delim = ',';
+	uint16_t col_idx  = 0;
+	uint16_t _search_col_idx = 0;
+
+	const int UPDATE_INTERVAL = 10000;
+	while (byte_offset < end_byte) {
+
+		for (const auto& search_col_idx : search_col_idxs) {
+
+			if (search_col_idx == (int)columns.size() - 1) {
+				end_delim = '\n';
+			}
+			else {
+				end_delim = ',';
+			}
+
+			// Iterate of line chars until we get to relevant column.
+			while (col_idx != search_col_idx) {
+
+				if (data[byte_offset] == '"') {
+					// Skip to next unescaped quote
+					++byte_offset;
+
+					while (1) {
+						// Escape quote. Continue to next character.
+						if (data[byte_offset] == '"' && data[byte_offset + 1] == '"') {
+							byte_offset += 2;
+							continue;
+						} else if (data[byte_offset] == '"') {
+							++byte_offset;
+							break;
+						} else {
+							++byte_offset;
+						}
+					}
+				}
+
+				if (data[byte_offset] == ',') {
+					++col_idx;
+					++byte_offset;
+				} else if (data[byte_offset] == '\n') {
+					col_idx = 0;
+
+					++line_num;
+					if (!DEBUG) {
+						if (line_num % UPDATE_INTERVAL == 0) {
+							update_progress(line_num, IP.num_docs, partition_id);
+						}
+					}
+					IP.line_offsets.push_back(++byte_offset);
+				} else {
+					++byte_offset;
+				}
+			}
+			++col_idx;
+
+			// Split by commas not inside double quotes
+			if (data[byte_offset] == '"') {
+				++byte_offset;
+
+				process_doc_partition_rfc_4180_mmap(
+					data,
+					'"',
+					line_num,
+					unique_terms_found[_search_col_idx],
+					partition_id,
+					_search_col_idx,
+					byte_offset
+					);
+				_search_col_idx = (_search_col_idx + 1) % search_cols.size();
+				continue;
+			}
+
+			process_doc_partition_rfc_4180_mmap(
+				data,
+				end_delim,
+				line_num, 
+				unique_terms_found[_search_col_idx], 
+				partition_id,
+				_search_col_idx,
+				byte_offset
+				);
+			_search_col_idx = (_search_col_idx + 1) % search_cols.size();
+		}
+
+		++line_num;
+		if (!DEBUG) {
+			if (line_num % UPDATE_INTERVAL == 0) {
+				update_progress(line_num, IP.num_docs, partition_id);
+			}
+		}
+		IP.line_offsets.push_back(++byte_offset);
+	}
+	if (!DEBUG) update_progress(line_num + 1, IP.num_docs, partition_id);
+
+	if (DEBUG) {
+		for (uint32_t col = 0; col < search_col_idxs.size(); ++col) {
+			std::cout << "Vocab size " << col << ": " << unique_terms_found[col] << std::endl;
+		}
+	}
+
+	IP.num_docs = IP.doc_sizes.size();
+
+	// Calc avg_doc_size
+	double avg_doc_size = 0;
+	for (const auto& size : IP.doc_sizes) {
+		avg_doc_size += (double)size;
+	}
+	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
+}
+
 
 void _BM25::read_in_memory(
 		std::vector<std::vector<std::string>>& documents,
@@ -1986,6 +1978,7 @@ _BM25::_BM25(
 			threads.push_back(std::thread(
 				[this, i] {
 					read_csv_rfc_4180(partition_boundaries[i], partition_boundaries[i + 1], i);
+					// read_csv_rfc_4180_mmap(partition_boundaries[i], partition_boundaries[i + 1], i);
 					if (DEBUG) {
 						BM25Partition& IP = index_partitions[i];
 						IP.reverse_term_mapping.resize(this->search_cols.size());

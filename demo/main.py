@@ -106,7 +106,6 @@ if __name__ == '__main__':
     FILEPATH = os.path.join(DATA_DIR, 'wiki_articles.csv')
     SEARCH_COLS = ['title', 'body']
 
-
     search_app = SearchApp(
             filename=FILEPATH,
             search_cols=SEARCH_COLS
