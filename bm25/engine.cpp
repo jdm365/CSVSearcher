@@ -1494,6 +1494,12 @@ void _BM25::read_csv_rfc_4180_mmap(uint64_t start_byte, uint64_t end_byte, uint1
 		}
 	}
 
+	// Unmap file
+	if (munmap(data, sb.st_size) == -1) {
+		perror("munmap");
+		exit(1);
+	}
+
 	IP.num_docs = IP.doc_sizes.size();
 
 	// Calc avg_doc_size
