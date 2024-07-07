@@ -231,12 +231,13 @@ def test_documents(csv_filename: str, search_cols: List[str]):
 
     companies_sample = names.sample(1000).to_series(0)
 
-    bm25 = BM25(max_df=50_000)
+    bm25 = BM25(stopwords='english', bloom_df_threshold=0.005)
 
     init = perf_counter()
     bm25.index_documents(documents=names)
     print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
 
+    init = perf_counter()
     for company in tqdm(companies_sample, desc="Querying"):
         bm25.get_topk_indices(company, k=10)
 
@@ -258,8 +259,8 @@ def test_documents(csv_filename: str, search_cols: List[str]):
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
 
     ## test_okapi_bm25(CSV_FILENAME, search_cols='title')
@@ -271,4 +272,4 @@ if __name__ == '__main__':
     ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
     ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
-    ## test_documents(CSV_FILENAME, search_cols=['title', 'artist'])
+    test_documents(CSV_FILENAME, search_cols=['title', 'artist'])
