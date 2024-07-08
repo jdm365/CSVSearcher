@@ -92,7 +92,10 @@ typedef struct {
 } StandardEntry;
 
 typedef struct {
+	// Construction artifact
 	std::vector<uint64_t> prev_doc_ids;
+
+	// Query time parameters
 	std::vector<uint32_t> doc_freqs;
 	std::vector<StandardEntry> inverted_index_compressed;
 	robin_hood::unordered_flat_map<uint64_t, BloomEntry> bloom_filters;
@@ -108,9 +111,6 @@ typedef struct {
 
 	uint64_t num_docs;
 	float    avg_doc_size;
-
-	// Debug reverse term mapping
-	std::vector<robin_hood::unordered_flat_map<uint32_t, std::string>> reverse_term_mapping;
 } BM25Partition;
 
 

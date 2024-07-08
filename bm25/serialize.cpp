@@ -6,6 +6,7 @@
 
 #include "serialize.h"
 #include "robin_hood.h"
+#include "bloom.h"
 
 
 
@@ -85,6 +86,25 @@ void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& f
     out_file.close();
 }
 
+void serialize_vector_float(const std::vector<float>& vec, const std::string& filename) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file when serializing u64 vector.\n";
+        return;
+    }
+
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(float));
+	}
+
+    out_file.close();
+}
+
 void serialize_vector_of_vectors_u8(
 		const std::vector<std::vector<uint8_t>>& vec, 
 		const std::string& filename
@@ -151,6 +171,16 @@ void serialize_inverted_index(
     }
 
     out_file.close();
+
+	// Serialize bloom filters.
+	uint16_t idx = 0;
+	for (const auto& bloom_pair : II.bloom_filters) {
+		const char* new_filename = (filename + "_bloom_" + std::string(idx)).c_str();
+
+		// TODO: Save doc_id.
+		serialize_bloom_entry(bloom_pair.second, new_filename);
+	}
+
 }
 
 void deserialize_inverted_index(
@@ -436,6 +466,26 @@ void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filen
     in_file.close();
 }
 
+void deserialize_vector_float(std::vector<float>& vec, const std::string& filename) {
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return;
+    }
+
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(float));
+    }
+
+    in_file.close();
+}
+
 void deserialize_vector_of_vectors_u8(
 		std::vector<std::vector<uint8_t>>& vec, 
 		const std::string& filename
@@ -663,3 +713,76 @@ void deserialize_vector_of_vectors_pair_u64_u16(
 
     in_file.close();
 }
+
+
+void serialize_bloom_entry(
+		const BloomEntry& bloom_entry,
+		const char* filename
+		) {
+	std::ofstream out_file(filename, std::ios::binary);
+    if (!out_file) {
+        std::cerr << "Error opening file for writing.\n";
+        return;
+    }
+
+    // Write the size of the map first
+    size_t map_size = bloom_entry.bloom_filters.size();
+    out_file.write(
+			reinterpret_cast<const char*>(&map_size), 
+			sizeof(map_size)
+			);
+
+	for (const auto& [tf, filter] : bloom_entry.bloom_filters) {
+        out_file.write(
+				reinterpret_cast<const char*>(&tf), 
+				sizeof(uint16_t)
+				);
+		uint64_t size = (filter.num_bits + 7) / 8;
+    	out_file.write(
+				reinterpret_cast<const char*>(&size), 
+				sizeof(uint64_t)
+				);
+		bloom_save(filter, filename);
+	}
+    out_file.close();
+
+	// Save topk doc_ids and tfs
+	serialize_vector_u64(bloom_entry.topk_doc_ids, filename);
+	serialize_vector_float(bloom_entry.topk_term_freqs, filename);
+}
+
+BloomEntry deserialize_bloom_entry(const char* filename) {
+	BloomEntry bloom_entry;
+
+	std::ifstream in_file(filename, std::ios::binary);
+    if (!in_file) {
+        std::cerr << "Error opening file for reading.\n";
+        return bloom_entry;
+    }
+
+	// Read the size of the map
+    size_t map_size;
+    in_file.read(
+			reinterpret_cast<char*>(&map_size), 
+			sizeof(map_size)
+			);
+
+    // Read each key-value pair and insert it into the map
+    for (size_t i = 0; i < map_size; ++i) {
+		uint16_t tf;
+        in_file.read(
+				reinterpret_cast<char*>(&tf), 
+				sizeof(uint16_t)
+				);
+
+		bloom_load(bloom_entry.bloom_filters[tf], filename);
+    }
+
+    in_file.close();
+
+	deserialize_vector_u64(bloom_entry.topk_doc_ids, filename);
+	deserialize_vector_float(bloom_entry.topk_term_freqs, filename);
+}
+
+
+// TODO: Fix saving and loading bloom filters. Need to read and write from offsets.
