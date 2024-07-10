@@ -10,7 +10,9 @@ void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& fil
 void serialize_vector_u16(const std::vector<uint16_t>& vec, const std::string& filename);
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename);
 void serialize_vector_u64(const std::vector<uint64_t>& vec, const std::string& filename);
+void serialize_vector_u64(const std::vector<uint64_t>& vec, std::ofstream& file);
 void serialize_vector_float(const std::vector<float>& vec, const std::string& filename);
+void serialize_vector_float(const std::vector<float>& vec, std::ofstream& file);
 void serialize_inverted_index(const InvertedIndex& II, const std::string& filename);
 void serialize_vector_of_vectors_u32(
 		const std::vector<std::vector<uint32_t>>& vec, 
@@ -46,7 +48,9 @@ void deserialize_vector_u8(std::vector<uint8_t>& vec, const std::string& filenam
 void deserialize_vector_u16(std::vector<uint16_t>& vec, const std::string& filename);
 void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename);
 void deserialize_vector_u64(std::vector<uint64_t>& vec, const std::string& filename);
+void deserialize_vector_u64(std::vector<uint64_t>& vec, std::ifstream& file);
 void deserialize_vector_float(std::vector<float>& vec, const std::string& filename);
+void deserialize_vector_float(std::vector<float>& vec, std::ifstream& file);
 void deserialize_inverted_index(InvertedIndex& II, const std::string& filename);
 void deserialize_vector_of_vectors_u32(
 		std::vector<std::vector<uint32_t>>& vec, 

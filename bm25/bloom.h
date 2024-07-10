@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <vector>
+#include <fstream>
 
 
 typedef struct {
@@ -28,3 +29,5 @@ bool bloom_query(const BloomFilter& filter, const uint64_t key);
 void bloom_clear(BloomFilter& filter);
 void bloom_save(const BloomFilter& filter, const char* filename);
 void bloom_load(BloomFilter& filter, const char* filename);
+void bloom_save(const BloomFilter& filter, std::ofstream& file);
+void bloom_load(BloomFilter& filter, std::ifstream& file);

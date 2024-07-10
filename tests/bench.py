@@ -210,7 +210,7 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.c
     print(f"Time to save: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
-    ## model.load(db_dir='bm25_model')
+    model.load(db_dir='bm25_model')
     print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     lens = []
@@ -259,8 +259,8 @@ def test_documents(csv_filename: str, search_cols: List[str]):
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
 
     ## test_okapi_bm25(CSV_FILENAME, search_cols='title')

@@ -105,6 +105,28 @@ void serialize_vector_float(const std::vector<float>& vec, const std::string& fi
     out_file.close();
 }
 
+void serialize_vector_u64(const std::vector<uint64_t>& vec, std::ofstream& out_file) {
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint64_t));
+	}
+}
+
+void serialize_vector_float(const std::vector<float>& vec, std::ofstream& out_file) {
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(float));
+	}
+}
+
 void serialize_vector_of_vectors_u8(
 		const std::vector<std::vector<uint8_t>>& vec, 
 		const std::string& filename
@@ -170,17 +192,19 @@ void serialize_inverted_index(
         }
     }
 
-    out_file.close();
-
 	// Serialize bloom filters.
-	uint16_t idx = 0;
-	for (const auto& bloom_pair : II.bloom_filters) {
-		const char* new_filename = (filename + "_bloom_" + std::string(idx)).c_str();
+	uint64_t size = II.bloom_filters.size();
+	out_file.write(reinterpret_cast<const char*>(&size), sizeof(uint64_t));
 
-		// TODO: Save doc_id.
-		serialize_bloom_entry(bloom_pair.second, new_filename);
+	uint16_t idx = 0;
+	for (const auto& [doc_id, entry] : II.bloom_filters) {
+		std::string new_filename = filename + "_bloom_" + std::to_string(idx++);
+
+		out_file.write(reinterpret_cast<const char*>(&doc_id), sizeof(uint64_t));
+		serialize_bloom_entry(entry, new_filename.c_str());
 	}
 
+    out_file.close();
 }
 
 void deserialize_inverted_index(
@@ -220,6 +244,20 @@ void deserialize_inverted_index(
             );
         }
     }
+
+	// Deserialize bloom filters.
+	uint64_t num_filters;
+	in_file.read(reinterpret_cast<char*>(&num_filters), sizeof(uint64_t));
+
+	for (uint64_t i = 0; i < num_filters; ++i) {
+		std::string new_filename = filename + "_bloom_" + std::to_string(i);
+
+		uint64_t doc_id;
+		in_file.read(reinterpret_cast<char*>(&doc_id), sizeof(uint64_t));
+		BloomEntry bloom_entry = deserialize_bloom_entry(new_filename.c_str());
+
+		II.bloom_filters[doc_id] = bloom_entry;
+	}
 
     in_file.close();
 }
@@ -486,6 +524,33 @@ void deserialize_vector_float(std::vector<float>& vec, const std::string& filena
     in_file.close();
 }
 
+void deserialize_vector_u64(std::vector<uint64_t>& vec, std::ifstream& in_file) {
+
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint64_t));
+    }
+}
+
+void deserialize_vector_float(std::vector<float>& vec, std::ifstream& in_file) {
+
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(float));
+    }
+}
+
+
 void deserialize_vector_of_vectors_u8(
 		std::vector<std::vector<uint8_t>>& vec, 
 		const std::string& filename
@@ -719,11 +784,16 @@ void serialize_bloom_entry(
 		const BloomEntry& bloom_entry,
 		const char* filename
 		) {
+
 	std::ofstream out_file(filename, std::ios::binary);
     if (!out_file) {
         std::cerr << "Error opening file for writing.\n";
         return;
     }
+
+	// Save topk doc_ids and tfs
+	serialize_vector_u64(bloom_entry.topk_doc_ids, out_file);
+	serialize_vector_float(bloom_entry.topk_term_freqs, out_file);
 
     // Write the size of the map first
     size_t map_size = bloom_entry.bloom_filters.size();
@@ -733,22 +803,14 @@ void serialize_bloom_entry(
 			);
 
 	for (const auto& [tf, filter] : bloom_entry.bloom_filters) {
-        out_file.write(
-				reinterpret_cast<const char*>(&tf), 
+		uint16_t tf16 = tf;
+		out_file.write(
+				reinterpret_cast<const char*>(&tf16), 
 				sizeof(uint16_t)
 				);
-		uint64_t size = (filter.num_bits + 7) / 8;
-    	out_file.write(
-				reinterpret_cast<const char*>(&size), 
-				sizeof(uint64_t)
-				);
-		bloom_save(filter, filename);
+		bloom_save(filter, out_file);
 	}
     out_file.close();
-
-	// Save topk doc_ids and tfs
-	serialize_vector_u64(bloom_entry.topk_doc_ids, filename);
-	serialize_vector_float(bloom_entry.topk_term_freqs, filename);
 }
 
 BloomEntry deserialize_bloom_entry(const char* filename) {
@@ -759,6 +821,9 @@ BloomEntry deserialize_bloom_entry(const char* filename) {
         std::cerr << "Error opening file for reading.\n";
         return bloom_entry;
     }
+
+	deserialize_vector_u64(bloom_entry.topk_doc_ids, in_file);
+	deserialize_vector_float(bloom_entry.topk_term_freqs, in_file);
 
 	// Read the size of the map
     size_t map_size;
@@ -775,14 +840,13 @@ BloomEntry deserialize_bloom_entry(const char* filename) {
 				sizeof(uint16_t)
 				);
 
-		bloom_load(bloom_entry.bloom_filters[tf], filename);
+		BloomFilter filter;
+		bloom_load(filter, in_file);
+
+		bloom_entry.bloom_filters[tf] = filter;
     }
 
     in_file.close();
 
-	deserialize_vector_u64(bloom_entry.topk_doc_ids, filename);
-	deserialize_vector_float(bloom_entry.topk_term_freqs, filename);
+	return bloom_entry;
 }
-
-
-// TODO: Fix saving and loading bloom filters. Need to read and write from offsets.

@@ -90,15 +90,66 @@ void bloom_clear(BloomFilter& filter) {
 void bloom_save(const BloomFilter& filter, const char* filename) {
     FILE* file = fopen(filename, "wb");
     if (file) {
-        fwrite(filter.bits, sizeof(uint8_t), (filter.num_bits + 7) / 8, file);
-        fclose(file);
+		// Write seeds
+		uint64_t num_seeds = filter.seeds.size();
+		fwrite(&num_seeds, sizeof(num_seeds), 1, file);
+		fwrite(filter.seeds.data(), sizeof(uint32_t), num_seeds, file);
+
+		// Write bits
+		fwrite(&filter.num_bits, sizeof(filter.num_bits), 1, file);
+		fwrite(filter.bits, sizeof(uint8_t), (filter.num_bits + 7) / 8, file);
+		fclose(file);
     }
 }
 
 void bloom_load(BloomFilter& filter, const char* filename) {
     FILE* file = fopen(filename, "rb");
     if (file) {
-        fread(filter.bits, sizeof(uint8_t), (filter.num_bits + 7) / 8, file);
-        fclose(file);
+		// Read seeds
+		uint64_t num_seeds;
+		fread(&num_seeds, sizeof(num_seeds), 1, file);
+		filter.seeds.resize(num_seeds);
+		fread(filter.seeds.data(), sizeof(uint32_t), num_seeds, file);
+
+		// Read bits
+		fread(&filter.num_bits, sizeof(filter.num_bits), 1, file);
+
+		filter.bits = (uint8_t*)calloc((filter.num_bits + 7) / 8, sizeof(uint8_t));
+		fread(filter.bits, sizeof(uint8_t), (filter.num_bits + 7) / 8, file);
     }
+}
+
+void bloom_save(const BloomFilter& filter, std::ofstream& file) {
+	// Write seeds
+	uint64_t num_seeds = filter.seeds.size();
+	file.write((char*)&num_seeds, sizeof(num_seeds));
+
+	file.write((char*)filter.seeds.data(), num_seeds * sizeof(uint32_t));
+
+	// Write bits
+	file.write((char*)&filter.num_bits, sizeof(filter.num_bits));
+	file.write((char*)filter.bits, (filter.num_bits + 7) / 8);
+}
+
+void bloom_load(BloomFilter& filter, std::ifstream& file) {
+	// Read seeds
+	uint64_t num_seeds;
+	file.read((char*)&num_seeds, sizeof(num_seeds));
+
+	if (num_seeds > 256) {
+		printf("Number of seeds is too large: %lu\n", num_seeds);
+		filter.seeds.clear();
+
+		std::exit(1);
+		return;
+	}
+
+	filter.seeds.resize(num_seeds);
+	file.read((char*)filter.seeds.data(), num_seeds * sizeof(uint32_t));
+
+	// Read bits
+	file.read((char*)&filter.num_bits, sizeof(filter.num_bits));
+
+	filter.bits = (uint8_t*)calloc((filter.num_bits + 7) / 8, sizeof(uint8_t));
+	file.read((char*)filter.bits, (filter.num_bits + 7) / 8);
 }
