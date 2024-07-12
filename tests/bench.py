@@ -178,12 +178,12 @@ def test_bm25_parquet(filename: str, search_cols: List[str]):
 
 
 
-def test_bm25_json(json_filename: str, search_cols: List[str]):
+def test_bm25_json(json_filename: str, search_cols: List[str], num_partitions=os.cpu_count()):
     df = pd.read_json(json_filename, lines=True, nrows=1000)
     sample = df[search_cols[0]].values
 
     init = perf_counter()
-    model = BM25(stopwords='english')
+    model = BM25(stopwords='english', num_partitions=num_partitions)
     model.index_file(filename=json_filename, search_cols=search_cols)
     print(f"Time to index: {perf_counter() - init:.2f} seconds")
 
@@ -259,8 +259,8 @@ def test_documents(csv_filename: str, search_cols: List[str]):
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
 
     ## test_okapi_bm25(CSV_FILENAME, search_cols='title')
@@ -268,8 +268,8 @@ if __name__ == '__main__':
     ## test_duckdb(FILENAME)
     ## test_anserini(CSV_FILENAME, search_cols='title')
     ## test_sklearn(FILENAME)
-    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
-    ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
-    ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'])
+    ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
+    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
+    test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
     test_documents(CSV_FILENAME, search_cols=['title', 'artist'])

@@ -94,6 +94,54 @@ static inline ssize_t rfc4180_getline(char** lineptr, size_t* n, FILE* stream) {
     return len;
 }
 
+static inline ssize_t json_getline(char** lineptr, size_t* n, FILE* stream) {
+    if (lineptr == nullptr || n == nullptr || stream == nullptr) {
+        return -1;
+    }
+
+    size_t len = 0;
+    int c;
+    int in_quotes = 0;
+
+    if (*lineptr == nullptr) {
+        *n = 128;
+        *lineptr = (char *)malloc(*n);
+        if (*lineptr == nullptr) {
+            return -1;
+        }
+    }
+
+    while ((c = fgetc(stream)) != EOF) {
+        if (len + 1 >= *n) {
+            *n *= 2;
+            char *new_lineptr = (char *)realloc(*lineptr, *n);
+            if (new_lineptr == nullptr) {
+                return -1;
+            }
+            *lineptr = new_lineptr;
+        }
+
+        (*lineptr)[len++] = c;
+
+        if (c == '"') {
+            in_quotes = !in_quotes;
+        } else if (c == '\n' && !in_quotes && (*lineptr)[len - 2] == '}') {
+            break;
+        }
+    }
+
+    if (ferror(stream)) {
+        return -1;
+    }
+
+    if (len == 0 && c == EOF) {
+        return -1;
+    }
+
+    (*lineptr)[len] = '\0';
+    return len;
+}
+
 
 static inline bool is_valid_token(std::string& str) {
 	return (str.size() > 1 || isalnum(str[0]));
@@ -238,8 +286,90 @@ void _BM25::determine_partition_boundaries_csv() {
 }
 
 void _BM25::determine_partition_boundaries_json() {
-	// Same as csv for now. Assuming newline delimited json.
-	determine_partition_boundaries_csv();
+    FILE* f = reference_file_handles[0];
+
+    struct stat sb;
+    if (fstat(fileno(f), &sb) == -1) {
+        std::cerr << "Error getting file size." << std::endl;
+        std::exit(1);
+    }
+
+    size_t file_size = sb.st_size;
+
+    size_t byte_offset = header_bytes;
+    fseek(f, byte_offset, SEEK_SET);
+
+    std::vector<uint64_t> line_offsets;
+    line_offsets.reserve(file_size / 64);
+
+	// Use mmap instead
+	char* file_data = (char*)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fileno(f), 0);
+	if (file_data == MAP_FAILED) {
+		std::cerr << "Error mapping file to memory." << std::endl;
+		std::exit(1);
+	}
+
+	uint64_t cntr = 0;
+    size_t file_pos = header_bytes;
+	while (file_pos < file_size - 1) {
+		if (file_data[file_pos++] == '\\') {
+			++file_pos;
+			continue;
+		}
+
+		// Skip to next unescaped quote
+		if (file_data[file_pos] == '"') {
+			++file_pos;
+
+			while (1) {
+
+				// Escape quote. Continue to next character.
+				if (file_data[file_pos] == '\\') {
+					file_pos += 2;
+					continue;
+				} else if (file_data[file_pos] == '"') {
+					++file_pos;
+					break;
+				} else {
+					++file_pos;
+				}
+			}
+		}
+
+		if (file_data[file_pos] == '}' && file_data[file_pos + 1] == '\n') {
+			file_pos += 2;
+			line_offsets.push_back(file_pos);
+			if (cntr++ % 1000 == 0) {
+				printf("%luK lines read\r", cntr / 1000);
+				fflush(stdout);
+			}
+		}
+	}
+
+    uint64_t num_lines  = line_offsets.size();
+    size_t   chunk_size = num_lines / num_partitions;
+
+    for (size_t i = 0; i < num_partitions; ++i) {
+        partition_boundaries.push_back(line_offsets[i * chunk_size]);
+
+        BM25Partition& IP = index_partitions[i];
+        IP.num_docs = chunk_size;
+        IP.line_offsets = std::vector<uint64_t>(
+                line_offsets.begin() + i * chunk_size, 
+                line_offsets.begin() + (i + 1) * chunk_size
+                );
+    }
+    partition_boundaries.push_back(line_offsets.back());
+
+    if (partition_boundaries.size() != num_partitions + 1) {
+        printf("Partition boundaries: %lu\n", partition_boundaries.size());
+        printf("Num partitions: %d\n", num_partitions);
+        std::cerr << "Error determining partition boundaries." << std::endl;
+        std::exit(1);
+    }
+
+    // Reset file pointer to beginning
+    fseek(f, header_bytes, SEEK_SET);
 }
 
 void _BM25::proccess_csv_header() {
@@ -571,6 +701,149 @@ uint32_t _BM25::process_doc_partition(
 	return char_idx;
 }
 
+uint32_t _BM25::process_doc_partition_json(
+		const char* doc,
+		const char terminator,
+		uint64_t doc_id,
+		uint32_t& unique_terms_found,
+		uint16_t partition_id,
+		uint16_t col_idx
+		) {
+	BM25Partition& IP = index_partitions[partition_id];
+	InvertedIndex& II = IP.II[col_idx];
+
+	uint32_t char_idx = 0;
+
+	std::string term = "";
+
+	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+
+	// Split by commas not inside double quotes
+	uint64_t doc_size = 0;
+	while (true) {
+		if (char_idx > 1048576) {
+			std::cout << "Search field not found on line: " << doc_id << std::endl;
+			std::cout << "Doc: " << doc << std::endl;
+			std::cout << std::flush;
+			std::exit(1);
+		}
+		if (doc[char_idx] == '\\') {
+			++char_idx;
+			term += toupper(doc[char_idx]);
+			++char_idx;
+			continue;
+		}
+
+		if (terminator == ',' && doc[char_idx] == ',') {
+			++char_idx;
+			break;
+		}
+
+		if (terminator == '"' && doc[char_idx] == '"') {
+			++char_idx;
+			if (doc[char_idx] == ',' || doc[char_idx] == '}') {
+				break;
+			}
+		}
+
+		if (doc[char_idx] == ' ' && term == "") {
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ') {
+			if ((stop_words.find(term) != stop_words.end()) || !is_valid_token(term)) {
+				term.clear();
+				++char_idx;
+				++doc_size;
+				continue;
+			}
+
+			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+					term, 
+					unique_terms_found
+					);
+			if (add) {
+				// New term
+				terms_seen.insert({it->second, 1});
+				II.inverted_index_compressed.emplace_back();
+				II.prev_doc_ids.push_back(0);
+				II.doc_freqs.push_back(1);
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert({it->second, 1});
+					++(II.doc_freqs[it->second]);
+				}
+				else {
+					++(terms_seen[it->second]);
+				}
+			}
+
+			++doc_size;
+			term.clear();
+
+			++char_idx;
+			continue;
+		}
+
+		term += toupper(doc[char_idx]);
+		++char_idx;
+	}
+
+	if (term != "") {
+		if ((stop_words.find(term) == stop_words.end()) && is_valid_token(term)) {
+			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+					term, 
+					unique_terms_found
+					);
+
+			if (add) {
+				// New term
+				terms_seen.insert({it->second, 1});
+				II.inverted_index_compressed.emplace_back();
+				II.prev_doc_ids.push_back(0);
+				II.doc_freqs.push_back(1);
+				++unique_terms_found;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert({it->second, 1});
+					++(II.doc_freqs[it->second]);
+				}
+				else {
+					++(terms_seen[it->second]);
+				}
+			}
+		}
+		++doc_size;
+	}
+
+	if (doc_id == IP.doc_sizes.size() - 1) {
+		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	}
+	else {
+		IP.doc_sizes.push_back((uint16_t)doc_size);
+	}
+
+	for (const auto& [term_idx, tf] : terms_seen) {
+		compress_uint64_differential_single(
+				II.inverted_index_compressed[term_idx].doc_ids,
+				doc_id,
+				II.prev_doc_ids[term_idx]
+				);
+		add_rle_element_u8(
+				II.inverted_index_compressed[term_idx].term_freqs, 
+				tf
+				);
+		II.prev_doc_ids[term_idx] = doc_id;
+	}
+
+	return char_idx;
+}
 
 uint32_t _BM25::process_doc_partition_rfc_4180(
 		const char* doc,
@@ -616,7 +889,6 @@ uint32_t _BM25::process_doc_partition_rfc_4180(
 			}
 
 			if (doc[char_idx] == terminator) {
-				// term += terminator;
 				++char_idx;
 				continue;
 			}
@@ -962,13 +1234,14 @@ static inline void scan_to_next_key(
 		const char* line, 
 		int& char_idx
 		) {
-	while (line[char_idx] != ',') {
-		if (line[char_idx] == '}') return;
 
+	while (line[char_idx] != ',') {
 		if (line[char_idx] == '\\') {
 			char_idx += 2;
 			continue;
 		}
+
+		if (line[char_idx] == '}') return;
 
 		if (line[char_idx] == '"') {
 			++char_idx;
@@ -1057,33 +1330,10 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	FILE* f = reference_file_handles[partition_id];
 	BM25Partition& IP = index_partitions[partition_id];
 
-	// Quickly count number of lines in file
-	uint64_t num_lines = 0;
-	uint64_t total_bytes_read = 0;
-	char buf[1024 * 64];
-
 	if (fseek(f, start_byte, SEEK_SET) != 0) {
 		std::cerr << "Error seeking file." << std::endl;
 		std::exit(1);
 	}
-
-	while (total_bytes_read < (end_byte - start_byte)) {
-		size_t bytes_read = fread(buf, 1, sizeof(buf), f);
-		if (bytes_read == 0) {
-			break;
-		}
-
-		for (size_t i = 0; i < bytes_read; ++i) {
-			if (buf[i] == '\n') {
-				++num_lines;
-			}
-			if (++total_bytes_read >= (end_byte - start_byte)) {
-				break;
-			}
-		}
-	}
-
-	IP.num_docs = num_lines;
 
 	// Reset file pointer to beginning
 	fseek(f, start_byte, SEEK_SET);
@@ -1095,11 +1345,10 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	uint64_t line_num = 0;
 	uint64_t byte_offset = start_byte;
 
-	// uint32_t unique_terms_found = 0;
 	std::vector<uint32_t> unique_terms_found(search_cols.size(), 0);
 
 	const int UPDATE_INTERVAL = 10000;
-	while ((read = getline(&line, &len, f)) != -1) {
+	while ((read = json_getline(&line, &len, f)) != -1) {
 
 		if (byte_offset >= end_byte) {
 			break;
@@ -1107,7 +1356,7 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 
 		if (!DEBUG) {
 			if (line_num % UPDATE_INTERVAL == 0) {
-				update_progress(line_num, num_lines, partition_id);
+				update_progress(line_num, IP.num_docs, partition_id);
 			}
 		}
 		if (strlen(line) == 0) {
@@ -1145,16 +1394,16 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 
 							if (line[char_idx] != '"') {
 								// Assume null. Must be string values.
-								scan_to_next_key(line, char_idx);
 								key.clear();
 								++search_col_idx;
+								scan_to_next_key(line, char_idx);
 								goto start;
 							}
 
 							// Iter over quote.
 							++char_idx;
 
-							char_idx += process_doc_partition(
+							char_idx += process_doc_partition_json(
 									&line[char_idx], 
 									'"', 
 									line_num, 
@@ -1181,8 +1430,9 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 					// Success. Break.
 					break;
 				}
-				else if (char_idx > 1048576) {
+				else if (char_idx > 1048576 || char_idx > (int)strlen(line)) {
 					std::cout << "Search field not found on line: " << line_num << std::endl;
+					std::cout << "Line: " << line << std::endl;
 					std::cout << std::flush;
 					std::exit(1);
 				}
@@ -1197,14 +1447,15 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 		}
 
 		if (!DEBUG) {
-			if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, num_lines, partition_id);
+			if (line_num % UPDATE_INTERVAL == 0) {
+				update_progress(line_num, IP.num_docs, partition_id);
+			}
 		}
 
 		++line_num;
 	}
 
-	if (!DEBUG) update_progress(line_num, num_lines, partition_id);
-
+	if (!DEBUG) update_progress(line_num, IP.num_docs, partition_id);
 	free(line);
 
 	if (DEBUG) {
@@ -1213,14 +1464,12 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 		}
 	}
 
-	IP.num_docs = num_lines;
-
 	// Calc avg_doc_size
 	double avg_doc_size = 0;
 	for (const auto& size : IP.doc_sizes) {
 		avg_doc_size += (double)size;
 	}
-	IP.avg_doc_size = (float)(avg_doc_size / num_lines);
+	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 }
 
 void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
@@ -1240,7 +1489,6 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	uint64_t line_num = 0;
 	uint64_t byte_offset = start_byte;
 
-	// uint32_t unique_terms_found = 0;
 	std::vector<uint32_t> unique_terms_found(search_cols.size());
 
 	// Small string optimization limit on most platforms
@@ -1250,7 +1498,6 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	char end_delim = ',';
 
 	const int UPDATE_INTERVAL = 10000;
-	// while ((read = getline(&line, &len, f)) != -1) {
 	while ((read = rfc4180_getline(&line, &len, f)) != -1) {
 
 		if (byte_offset >= end_byte) {
@@ -1990,7 +2237,6 @@ _BM25::_BM25(
 	if (filename.substr(filename.size() - 3, 3) == "csv") {
 
 		proccess_csv_header();
-		// determine_partition_boundaries_csv();
 		determine_partition_boundaries_csv_rfc_4180();
 
 		init_terminal();
@@ -2011,6 +2257,8 @@ _BM25::_BM25(
 	else if (filename.substr(filename.size() - 4, 4) == "json") {
 		header_bytes = 0;
 		determine_partition_boundaries_json();
+
+		init_terminal();
 
 		// Launch num_partitions threads to read json file
 		for (uint16_t i = 0; i < num_partitions; ++i) {

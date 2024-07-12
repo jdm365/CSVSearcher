@@ -230,6 +230,14 @@ class _BM25 {
 				uint16_t partition_id,
 				uint16_t col_idx
 				);
+		uint32_t process_doc_partition_json(
+				const char* doc,
+				const char terminator,
+				uint64_t doc_id,
+				uint32_t& unique_terms_found,
+				uint16_t partition_id,
+				uint16_t col_idx
+				);
 		uint32_t process_doc_partition_rfc_4180(
 				const char* doc,
 				const char terminator,
