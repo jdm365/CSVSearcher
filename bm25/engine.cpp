@@ -3108,7 +3108,6 @@ std::vector<BM25Result> _BM25::query(
 		uint32_t query_max_df,
 		std::vector<float> boost_factors
 		) {
-	auto start = std::chrono::high_resolution_clock::now();
 
 	if (boost_factors.size() == 0) {
 		boost_factors.resize(search_cols.size());
@@ -3150,6 +3149,8 @@ std::vector<BM25Result> _BM25::query(
 
 	uint64_t total_matching_docs = 0;
 
+	auto start = std::chrono::high_resolution_clock::now();
+
 	// Join results. Keep global max heap of size k
 	std::priority_queue<
 		BM25Result,
@@ -3174,14 +3175,11 @@ std::vector<BM25Result> _BM25::query(
 		--idx;
 	}
 
-	if (DEBUG) {
-		auto end = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
-		std::cout << "QUERY: " << query << std::endl;
-		std::cout << "Total matching docs: " << total_matching_docs << "    ";
-		std::cout << elapsed_ms.count() << "ms" << std::endl;
-		fflush(stdout);
-	}
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::micro> microseconds = end - start;
+
+	printf("Total docs scored: %lu\n", total_matching_docs);
+	printf("Scoring microseconds: %lu\n", (uint64_t)microseconds.count()); fflush(stdout);
 
 	return result;
 }
@@ -3193,9 +3191,16 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		std::vector<float> boost_factors
 		) {
 
+	auto start = std::chrono::high_resolution_clock::now();
+
 	std::vector<std::vector<std::pair<std::string, std::string>>> result;
 	std::vector<BM25Result> top_k_docs = query(_query, top_k, query_max_df, boost_factors);
 	result.reserve(top_k_docs.size());
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::micro> query_microseconds = end - start;
+
+
+	start = std::chrono::high_resolution_clock::now();
 
 	std::vector<std::pair<std::string, std::string>> row;
 	for (size_t i = 0; i < top_k_docs.size(); ++i) {
@@ -3218,6 +3223,10 @@ std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_in
 		row.push_back(std::make_pair("score", std::to_string(top_k_docs[i].score)));
 		result.push_back(row);
 	}
+	end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::micro> fetch_microseconds = end - start;
+	printf("Query time: %lu us\n", (uint64_t)query_microseconds.count());
+	printf("Fetch time: %lu us\n", (uint64_t)fetch_microseconds.count()); fflush(stdout);
 	return result;
 }
 

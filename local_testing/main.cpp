@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include <chrono>
 #include <vector>
 #include <string>
 
@@ -22,13 +23,21 @@ const std::vector<std::string> QUERIES = {
 
 
 int main() {
-	std::string FILENAME = "tests/mb.csv";
-	std::vector<std::string> SEARCH_COLS = {"title", "artist"};
+	// std::string FILENAME = "tests/mb_small.csv";
+	// std::vector<std::string> SEARCH_COLS = {"title", "artist"};
+
+	std::string FILENAME = "tests/wiki_articles.csv";
+	std::vector<std::string> SEARCH_COLS = {"title", "body"};
+
 	float BLOOM_DF_THRESHOLD = 0.005f;
 	double BLOOM_FPR = 0.000001;
 	float K1 = 1.2f;
 	float B = 0.75f;
 	uint16_t NUM_PARTITIONS = 24;
+
+	uint16_t TOP_K = 1000;
+
+	auto start = std::chrono::high_resolution_clock::now();
 
 	_BM25 bm25(
 		FILENAME,
@@ -40,15 +49,26 @@ int main() {
 		NUM_PARTITIONS
 	);
 
+	auto end = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+	printf("\nIndexing time: %ld ms\n", duration);
+
 	for (const std::string& query : QUERIES) {
 		std::string _query = {query};
+		start = std::chrono::high_resolution_clock::now();
 		std::vector<std::vector<std::pair<std::string, std::string>>> results = bm25.get_topk_internal(
 				_query,
-				10,
-				50000,
+				TOP_K,
+				5000000,
 				{2.0f, 1.0f}
 				);
+		end = std::chrono::high_resolution_clock::now();
+		duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+		printf("Total Query time: %ld us\n\n", duration);
+		printf("Number of results: %ld\n", results.size());
+		printf("--------------------------------\n");
 
+		/*
 		printf("Query: %s\n", query.c_str());
 		printf("--------------------------------\n");
 		for (const auto& result : results) {
@@ -68,6 +88,7 @@ int main() {
 			printf("\n");
 		}
 		printf("\n");
+		*/
 	}
 
 	return 0;
