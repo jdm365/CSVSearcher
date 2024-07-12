@@ -12,7 +12,8 @@
             "-Wall",
             "-Wextra",
             "-march=native",
-            "-ffast-math"
+            "-ffast-math",
+            "-g"
         ],
         "extra_link_args": [
             "-lc++",

@@ -107,15 +107,38 @@ void bloom_load(BloomFilter& filter, const char* filename) {
     if (file) {
 		// Read seeds
 		uint64_t num_seeds;
-		fread(&num_seeds, sizeof(num_seeds), 1, file);
+		size_t size = fread(&num_seeds, sizeof(num_seeds), 1, file);
+		if (size != 1) {
+			printf("Failed to read number of seeds\n");
+			filter.seeds.clear();
+			return;
+		}
+
 		filter.seeds.resize(num_seeds);
-		fread(filter.seeds.data(), sizeof(uint32_t), num_seeds, file);
+		size = fread(filter.seeds.data(), sizeof(uint32_t), num_seeds, file);
+		if (size != num_seeds) {
+			printf("Failed to read seeds\n");
+			filter.seeds.clear();
+			return;
+		}
 
 		// Read bits
-		fread(&filter.num_bits, sizeof(filter.num_bits), 1, file);
+		size = fread(&filter.num_bits, sizeof(filter.num_bits), 1, file);
+		if (size != 1) {
+			printf("Failed to read number of bits\n");
+			filter.num_bits = 0;
+			return;
+		}
 
 		filter.bits = (uint8_t*)calloc((filter.num_bits + 7) / 8, sizeof(uint8_t));
-		fread(filter.bits, sizeof(uint8_t), (filter.num_bits + 7) / 8, file);
+		size = fread(filter.bits, sizeof(uint8_t), (filter.num_bits + 7) / 8, file);
+		if (size != (filter.num_bits + 7) / 8) {
+			printf("Failed to read bits\n");
+			free(filter.bits);
+			filter.bits = nullptr;
+			filter.num_bits = 0;
+			return;
+		}
     }
 }
 

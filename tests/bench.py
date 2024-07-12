@@ -225,13 +225,13 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.c
 
     print(f"Queries per second: {1000 / time:.2f}")
 
-def test_documents(csv_filename: str, search_cols: List[str]):
+def test_documents(csv_filename: str, search_cols: List[str], num_partitions=os.cpu_count()):
     df = pl.read_csv(csv_filename)
     names = df.select(search_cols)
 
     companies_sample = names.sample(1000).to_series(0)
 
-    bm25 = BM25(stopwords='english', bloom_df_threshold=0.005)
+    bm25 = BM25(stopwords='english', bloom_df_threshold=0.005, num_partitions=num_partitions)
 
     init = perf_counter()
     bm25.index_documents(documents=names)
@@ -269,7 +269,7 @@ if __name__ == '__main__':
     ## test_anserini(CSV_FILENAME, search_cols='title')
     ## test_sklearn(FILENAME)
     ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'])
-    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
-    test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
+    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=24)
+    ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
-    test_documents(CSV_FILENAME, search_cols=['title', 'artist'])
+    test_documents(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=24)

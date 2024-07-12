@@ -14,9 +14,11 @@ mb_db/
 bm25_model/
 compile_commands.json
 mb_small.csv
+/bin/
 
 # C extensions
 *.so
+*.o
 
 # Distribution / packaging
 .Python

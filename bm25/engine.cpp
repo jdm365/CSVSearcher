@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <assert.h>
 
 #include <iostream>
 #include <vector>
@@ -274,12 +275,7 @@ void _BM25::determine_partition_boundaries_csv() {
 			continue;
 	}
 
-	if (partition_boundaries.size() != num_partitions + 1) {
-		printf("Partition boundaries: %lu\n", partition_boundaries.size());
-		printf("Num partitions: %d\n", num_partitions);
-		std::cerr << "Error determining partition boundaries." << std::endl;
-		std::exit(1);
-	}
+	assert((uint16_t)partition_boundaries.size() == num_partitions + 1);
 
 	// Reset file pointer to beginning
 	fseek(f, header_bytes, SEEK_SET);
@@ -361,12 +357,7 @@ void _BM25::determine_partition_boundaries_json() {
     }
     partition_boundaries.push_back(line_offsets.back());
 
-    if (partition_boundaries.size() != num_partitions + 1) {
-        printf("Partition boundaries: %lu\n", partition_boundaries.size());
-        printf("Num partitions: %d\n", num_partitions);
-        std::cerr << "Error determining partition boundaries." << std::endl;
-        std::exit(1);
-    }
+	assert((uint16_t)partition_boundaries.size() == num_partitions + 1);
 
     // Reset file pointer to beginning
     fseek(f, header_bytes, SEEK_SET);
@@ -485,12 +476,7 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
     }
     partition_boundaries.push_back(line_offsets.back());
 
-    if (partition_boundaries.size() != num_partitions + 1) {
-        printf("Partition boundaries: %lu\n", partition_boundaries.size());
-        printf("Num partitions: %d\n", num_partitions);
-        std::cerr << "Error determining partition boundaries." << std::endl;
-        std::exit(1);
-    }
+	assert((uint16_t)partition_boundaries.size() == num_partitions + 1);
 
     // Reset file pointer to beginning
     fseek(f, header_bytes, SEEK_SET);
@@ -1204,12 +1190,7 @@ IIRow get_II_row(
 		}
 	}
 
-	if (row.doc_ids.size() != row.term_freqs.size()) {
-		std::cerr << "Doc ids and term freqs size mismatch." << std::endl;
-		printf("Doc ids size: %lu\n", row.doc_ids.size());
-		printf("Term freqs size: %lu\n", row.term_freqs.size());
-		std::exit(1);
-	}
+	assert(row.doc_ids.size() == row.term_freqs.size());
 
 	return row;
 }
@@ -1409,10 +1390,11 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 									line_num, 
 									unique_terms_found[search_col_idx], 
 									partition_id,
-									search_col_idx++
+									search_col_idx
 									); ++char_idx;
 							scan_to_next_key(line, char_idx);
 							key.clear();
+							++search_col_idx;
 							goto start;
 						}
 					}
@@ -1782,7 +1764,8 @@ void _BM25::read_in_memory(
 
 		for (uint16_t col = 0; col < search_cols.size(); ++col) {
 			std::string& doc = documents[line_num][col];
-			process_doc_partition(
+			// process_doc_partition(
+			process_doc_partition_rfc_4180(
 				(doc + "\n").c_str(),
 				'\n',
 				cntr, 
@@ -1865,7 +1848,11 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 	fseek(f, IP.line_offsets[line_num], SEEK_SET);
 	char* line = NULL;
 	size_t len = 0;
-	getline(&line, &len, f);
+	ssize_t size = getline(&line, &len, f);
+	if (size == -1) {
+		std::cerr << "Error reading line." << std::endl;
+		std::exit(1);
+	}
 
 	// Create effective json by combining column names with values split by commas
 	std::vector<std::pair<std::string, std::string>> row;
@@ -1999,6 +1986,8 @@ void _BM25::load_index_partition(
 				db_dir + "/doc_freqs_" + std::to_string(partition_id) + "_" + std::to_string(col_idx)
 				);
 	}
+
+	IP.num_docs = IP.doc_sizes.size();
 }
 
 void _BM25::save_to_disk(const std::string& db_dir) {
@@ -2007,16 +1996,28 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 	if (access(db_dir.c_str(), F_OK) != -1) {
 		// Remove the directory if it exists
 		std::string command = "rm -r " + db_dir;
-		system(command.c_str());
+		int success = system(command.c_str());
+		if (success != 0) {
+			std::cerr << "Error removing directory.\n";
+			std::exit(1);
+		}
 
 		// Create the directory
 		command = "mkdir " + db_dir;
-		system(command.c_str());
+		success = system(command.c_str());
+		if (success != 0) {
+			std::cerr << "Error creating directory.\n";
+			std::exit(1);
+		}
 	}
 	else {
 		// Create the directory if it does not exist
 		std::string command = "mkdir " + db_dir;
-		system(command.c_str());
+		int success = system(command.c_str());
+		if (success != 0) {
+			std::cerr << "Error creating directory.\n";
+			std::exit(1);
+		}
 	}
 
 	// Join paths
@@ -2640,11 +2641,11 @@ std::vector<BM25Result> _BM25::_query_partition(
 		_compare_bm25_result> top_k_docs;
 
 	for (const auto& pair : doc_scores) {
-		BM25Result result {
-			.doc_id = pair.first,
-			.score  = pair.second,
-			.partition_id = partition_id
-		};
+		BM25Result result;
+		result.doc_id = pair.first;
+		result.score = pair.second;
+		result.partition_id = partition_id;
+
 		top_k_docs.push(result);
 		if (top_k_docs.size() > k) {
 			top_k_docs.pop();
@@ -2752,8 +2753,8 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 			// Get top-k docs for lowest df term. Then use bloom scoring for the rest.
 			std::vector<uint32_t> df_values;
 			uint32_t min_df = UINT32_MAX;
-			uint16_t min_df_col_idx;
-			uint16_t min_df_term_idx;
+			uint16_t min_df_col_idx  = UINT16_MAX;
+			uint16_t min_df_term_idx = UINT16_MAX;
 
 			for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 				uint16_t cntr = 0;
@@ -2769,6 +2770,9 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 								);
 				}
 			}
+
+			assert(min_df_col_idx  != UINT16_MAX);
+			assert(min_df_term_idx != UINT16_MAX);
 
 			// First score the term with the lowest df.
 			float idf = log((IP.num_docs - min_df + 0.5) / (min_df + 0.5));
@@ -2822,9 +2826,18 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 		} else {
 
 			for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+				assert(col_idx < high_df_term_idxs.size());
+				assert(col_idx < bloom_entries.size());
+				assert(boost_factors.size() == search_cols.size());
 				for (uint16_t idx = 0; idx < high_df_term_idxs[col_idx].size(); ++idx) {
+					assert(idx < high_df_term_idxs[col_idx].size());
+					assert(idx < bloom_entries[col_idx].size());
+
 					const uint64_t& term_idx = high_df_term_idxs[col_idx][idx];
 					BloomEntry& bloom_entry  = bloom_entries[col_idx][idx];
+
+					assert(col_idx < IP.II.size());
+					assert(term_idx < IP.II[col_idx].doc_freqs.size());
 
 					float df = IP.II[col_idx].doc_freqs[term_idx];
 					float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
@@ -2857,11 +2870,11 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 		_compare_bm25_result> top_k_docs;
 
 	for (const auto& pair : doc_scores) {
-		BM25Result result {
-			.doc_id = pair.first,
-			.score  = pair.second,
-			.partition_id = partition_id
-		};
+		BM25Result result;
+		result.doc_id = pair.first;
+		result.score = pair.second;
+		result.partition_id = partition_id;
+
 		top_k_docs.push(result);
 		if (top_k_docs.size() > k) {
 			top_k_docs.pop();
@@ -3304,8 +3317,8 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 			// Get top-k docs for lowest df term. Then use bloom scoring for the rest.
 			std::vector<uint32_t> df_values;
 			uint32_t min_df = UINT32_MAX;
-			uint16_t min_df_col_idx;
-			uint16_t min_df_term_idx;
+			uint16_t min_df_col_idx  = UINT16_MAX;
+			uint16_t min_df_term_idx = UINT16_MAX;
 
 			for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 				uint16_t cntr = 0;
@@ -3321,6 +3334,9 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 								);
 				}
 			}
+
+			assert(min_df_col_idx  != UINT16_MAX);
+			assert(min_df_term_idx != UINT16_MAX);
 
 			// First score the term with the lowest df.
 			float idf = log((IP.num_docs - min_df + 0.5) / (min_df + 0.5));
@@ -3412,11 +3428,11 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 		_compare_bm25_result> top_k_docs;
 
 	for (const auto& pair : doc_scores) {
-		BM25Result result {
-			.doc_id = pair.first,
-			.score  = pair.second,
-			.partition_id = partition_id
-		};
+		BM25Result result;
+		result.doc_id = pair.first;
+		result.score = pair.second;
+		result.partition_id = partition_id;
+
 		top_k_docs.push(result);
 		if (top_k_docs.size() > k) {
 			top_k_docs.pop();

@@ -13,6 +13,7 @@ COMPILER_FLAGS = [
     "-Wextra",
     "-march=native",
     "-ffast-math",
+    "-g",
 ]
 
 '''
