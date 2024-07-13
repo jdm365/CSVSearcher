@@ -48,6 +48,17 @@ void serialize_vector_u16(const std::vector<uint16_t>& vec, const std::string& f
     out_file.close();
 }
 
+void serialize_vector_u16(const std::vector<uint16_t>& vec, std::ofstream& out_file) {
+    // Write the size of the vector first
+    size_t size = vec.size();
+    out_file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+    // Write the vector elements
+	for (const auto& val : vec) {
+    	out_file.write(reinterpret_cast<const char*>(&val), sizeof(uint16_t));
+	}
+}
+
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename) {
 	std::ofstream out_file(filename, std::ios::binary);
     if (!out_file) {
@@ -192,6 +203,9 @@ void serialize_inverted_index(
         }
     }
 
+	serialize_vector_u16(II.doc_sizes, out_file);
+	out_file.write(reinterpret_cast<const char*>(&II.avg_doc_size), sizeof(float));
+
 	// Serialize bloom filters.
 	uint64_t size = II.bloom_filters.size();
 	out_file.write(reinterpret_cast<const char*>(&size), sizeof(uint64_t));
@@ -244,6 +258,9 @@ void deserialize_inverted_index(
             );
         }
     }
+
+	deserialize_vector_u16(II.doc_sizes, in_file);
+	in_file.read(reinterpret_cast<char*>(&II.avg_doc_size), sizeof(float));
 
 	// Deserialize bloom filters.
 	uint64_t num_filters;
@@ -462,6 +479,18 @@ void deserialize_vector_u16(std::vector<uint16_t>& vec, const std::string& filen
     }
 
     in_file.close();
+}
+
+void deserialize_vector_u16(std::vector<uint16_t>& vec, std::ifstream& in_file) {
+    // Read the size of the vector
+    size_t size;
+    in_file.read(reinterpret_cast<char*>(&size), sizeof(size));
+
+    // Resize the vector and read its elements
+    vec.resize(size);
+    if (size > 0) {
+        in_file.read(reinterpret_cast<char*>(&vec[0]), size * sizeof(uint16_t));
+    }
 }
 
 void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename) {

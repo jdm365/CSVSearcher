@@ -96,9 +96,12 @@ typedef struct {
 	std::vector<uint64_t> prev_doc_ids;
 
 	// Query time parameters
-	std::vector<uint32_t> doc_freqs;
-	std::vector<StandardEntry> inverted_index_compressed;
 	robin_hood::unordered_flat_map<uint64_t, BloomEntry> bloom_filters;
+	std::vector<StandardEntry> inverted_index_compressed;
+	std::vector<uint32_t> doc_freqs;
+
+	std::vector<uint16_t> doc_sizes;
+	float avg_doc_size;
 } InvertedIndex;
 
 inline IIRow get_II_row(InvertedIndex* II, uint64_t term_idx);
@@ -106,11 +109,9 @@ inline IIRow get_II_row(InvertedIndex* II, uint64_t term_idx);
 typedef struct {
 	std::vector<InvertedIndex> II;
 	std::vector<robin_hood::unordered_flat_map<std::string, uint32_t>> unique_term_mapping;
-	std::vector<uint16_t> doc_sizes;
 	std::vector<uint64_t> line_offsets;
 
 	uint64_t num_docs;
-	float    avg_doc_size;
 } BM25Partition;
 
 
@@ -157,44 +158,6 @@ class _BM25 {
 
 		_BM25(std::string db_dir) {
 			load_from_disk(db_dir);
-
-			// filename found in db_dir/filename.txt
-			std::string fn_file = db_dir + "/filename.txt";
-
-			// read fn_file contents into filename 
-			FILE* f = fopen(fn_file.c_str(), "r");
-			if (f == nullptr) {
-				std::cerr << "Error opening file: " << fn_file << std::endl;
-				exit(1);
-			}
-			char buf[1024];
-			fgets(buf, 1024, f);
-			fclose(f);
-			filename = std::string(buf);
-
-			if (filename == "in_memory") {
-				file_type = IN_MEMORY;
-			} else if (filename.find(".json") != std::string::npos) {
-				file_type = JSON;
-			} else if (filename.find(".csv") != std::string::npos) {
-				file_type = CSV;
-			} else {
-				std::cerr << "Error: file type not supported" << std::endl;
-				exit(1);
-			}
-
-			if (file_type == IN_MEMORY) {
-				return;
-			}
-			// Open the reference file
-			for (uint16_t i = 0; i < num_partitions; i++) {
-				FILE* ref_f = fopen(filename.c_str(), "r");
-				if (ref_f == nullptr) {
-					std::cerr << "Error opening file: " << filename << std::endl;
-					exit(1);
-				}
-				reference_file_handles.push_back(ref_f);
-			}
 		}
 
 		_BM25(
@@ -208,9 +171,9 @@ class _BM25 {
 				);
 
 		~_BM25() {
-			for (uint16_t i = 0; i < num_partitions; i++) {
-				if (reference_file_handles[i] != nullptr) {
-					fclose(reference_file_handles[i]);
+			for (auto& handle : reference_file_handles) {
+				if (handle != nullptr) {
+					fclose(handle);
 				}
 			}
 		}
@@ -291,6 +254,7 @@ class _BM25 {
 				uint64_t doc_id,
 				float tf,
 				float idf,
+				uint16_t col_idx,
 				uint16_t partition_id
 				);
 

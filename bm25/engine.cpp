@@ -664,11 +664,11 @@ uint32_t _BM25::process_doc_partition(
 		++doc_size;
 	}
 
-	if (doc_id == IP.doc_sizes.size() - 1) {
-		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	if (doc_id == IP.II[col_idx].doc_sizes.size() - 1) {
+		IP.II[col_idx].doc_sizes[doc_id] += (uint16_t)doc_size;
 	}
 	else {
-		IP.doc_sizes.push_back((uint16_t)doc_size);
+		IP.II[col_idx].doc_sizes.push_back((uint16_t)doc_size);
 	}
 
 	for (const auto& [term_idx, tf] : terms_seen) {
@@ -808,11 +808,11 @@ uint32_t _BM25::process_doc_partition_json(
 		++doc_size;
 	}
 
-	if (doc_id == IP.doc_sizes.size() - 1) {
-		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	if (doc_id == IP.II[col_idx].doc_sizes.size() - 1) {
+		IP.II[col_idx].doc_sizes[doc_id] += (uint16_t)doc_size;
 	}
 	else {
-		IP.doc_sizes.push_back((uint16_t)doc_size);
+		IP.II[col_idx].doc_sizes.push_back((uint16_t)doc_size);
 	}
 
 	for (const auto& [term_idx, tf] : terms_seen) {
@@ -958,11 +958,11 @@ uint32_t _BM25::process_doc_partition_rfc_4180(
 		++doc_size;
 	}
 
-	if (doc_id == IP.doc_sizes.size() - 1) {
-		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	if (doc_id == IP.II[col_idx].doc_sizes.size() - 1) {
+		IP.II[col_idx].doc_sizes[doc_id] += (uint16_t)doc_size;
 	}
 	else {
-		IP.doc_sizes.push_back((uint16_t)doc_size);
+		IP.II[col_idx].doc_sizes.push_back((uint16_t)doc_size);
 	}
 
 	for (const auto& [term_idx, tf] : terms_seen) {
@@ -1095,11 +1095,11 @@ uint32_t _BM25::_process_doc_partition_rfc_4180_quoted(
 		++doc_size;
 	}
 
-	if (doc_id == IP.doc_sizes.size() - 1) {
-		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	if (doc_id == IP.II[col_idx].doc_sizes.size() - 1) {
+		IP.II[col_idx].doc_sizes[doc_id] += (uint16_t)doc_size;
 	}
 	else {
-		IP.doc_sizes.push_back((uint16_t)doc_size);
+		IP.II[col_idx].doc_sizes.push_back((uint16_t)doc_size);
 	}
 
 	for (const auto& [term_idx, tf] : terms_seen) {
@@ -1240,11 +1240,11 @@ void _BM25::process_doc_partition_rfc_4180_mmap(
 		++doc_size;
 	}
 
-	if (doc_id == IP.doc_sizes.size() - 1) {
-		IP.doc_sizes[doc_id] += (uint16_t)doc_size;
+	if (doc_id == IP.II[col_idx].doc_sizes.size() - 1) {
+		IP.II[col_idx].doc_sizes[doc_id] += (uint16_t)doc_size;
 	}
 	else {
-		IP.doc_sizes.push_back((uint16_t)doc_size);
+		IP.II[col_idx].doc_sizes.push_back((uint16_t)doc_size);
 	}
 
 	for (const auto& [term_idx, tf] : terms_seen) {
@@ -1586,11 +1586,13 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	}
 
 	// Calc avg_doc_size
-	double avg_doc_size = 0;
-	for (const auto& size : IP.doc_sizes) {
-		avg_doc_size += (double)size;
+	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+		double avg_doc_size = 0;
+		for (const auto& size : IP.II[col].doc_sizes) {
+			avg_doc_size += (double)size;
+		}
+		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 	}
-	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 }
 
 void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
@@ -1717,14 +1719,16 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 		}
 	}
 
-	IP.num_docs = IP.doc_sizes.size();
+	IP.num_docs = IP.II[0].doc_sizes.size();
 
 	// Calc avg_doc_size
-	double avg_doc_size = 0;
-	for (const auto& size : IP.doc_sizes) {
-		avg_doc_size += (double)size;
+	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+		double avg_doc_size = 0;
+		for (const auto& size : IP.II[col].doc_sizes) {
+			avg_doc_size += (double)size;
+		}
+		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 	}
-	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 }
 
 
@@ -1867,14 +1871,16 @@ void _BM25::read_csv_rfc_4180_mmap(uint64_t start_byte, uint64_t end_byte, uint1
 		exit(1);
 	}
 
-	IP.num_docs = IP.doc_sizes.size();
+	IP.num_docs = IP.II[0].doc_sizes.size();
 
 	// Calc avg_doc_size
-	double avg_doc_size = 0;
-	for (const auto& size : IP.doc_sizes) {
-		avg_doc_size += (double)size;
+	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+		double avg_doc_size = 0;
+		for (const auto& size : IP.II[col].doc_sizes) {
+			avg_doc_size += (double)size;
+		}
+		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 	}
-	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 }
 
 
@@ -1916,12 +1922,16 @@ void _BM25::read_in_memory(
 	}
 	if (!DEBUG) update_progress(cntr + 1, IP.num_docs, partition_id);
 
+	IP.num_docs = IP.II[0].doc_sizes.size();
+
 	// Calc avg_doc_size
-	double avg_doc_size = 0;
-	for (const auto& size : IP.doc_sizes) {
-		avg_doc_size += (double)size;
+	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+		double avg_doc_size = 0;
+		for (const auto& size : IP.II[col].doc_sizes) {
+			avg_doc_size += (double)size;
+		}
+		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 	}
-	IP.avg_doc_size = (float)(avg_doc_size / IP.num_docs);
 }
 
 
@@ -2066,7 +2076,6 @@ void _BM25::save_index_partition(
 				INVERTED_INDEX_PATH + "_" + std::to_string(partition_id) + "_" + std::to_string(col_idx)
 				);
 	}
-	serialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
 	std::vector<uint8_t> compressed_line_offsets;
 	compressed_line_offsets.reserve(IP.line_offsets.size() * 2);
@@ -2108,7 +2117,6 @@ void _BM25::load_index_partition(
 				INVERTED_INDEX_PATH + "_" + std::to_string(partition_id) + "_" + std::to_string(col_idx)
 				);
 	}
-	deserialize_vector_u16(IP.doc_sizes, DOC_SIZES_PATH + "_" + std::to_string(partition_id));
 
 	std::vector<uint8_t> compressed_line_offsets;
 	deserialize_vector_u8(
@@ -2125,7 +2133,7 @@ void _BM25::load_index_partition(
 				);
 	}
 
-	IP.num_docs = IP.doc_sizes.size();
+	IP.num_docs = IP.II[0].doc_sizes.size();
 }
 
 void _BM25::save_to_disk(const std::string& db_dir) {
@@ -2189,20 +2197,14 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 	out_file.write(reinterpret_cast<const char*>(&b), sizeof(b));
 	out_file.write(reinterpret_cast<const char*>(&num_partitions), sizeof(num_partitions));
 
-	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
-		BM25Partition& IP = index_partitions[partition_id];
-
-		out_file.write(reinterpret_cast<const char*>(&IP.avg_doc_size), sizeof(IP.avg_doc_size));
-	}
-
-	// Write enum as int
-	int file_type_int = static_cast<int>(file_type);
-	out_file.write(reinterpret_cast<const char*>(&file_type_int), sizeof(file_type_int));
-
 	// Write std::string
 	size_t filename_length = filename.size();
 	out_file.write(reinterpret_cast<const char*>(&filename_length), sizeof(filename_length));
 	out_file.write(filename.data(), filename_length);
+
+	// Write enum as int
+	int file_type_int = static_cast<int>(file_type);
+	out_file.write(reinterpret_cast<const char*>(&file_type_int), sizeof(file_type_int));
 
 	// Write std::vector<std::string>
 	size_t columns_size = columns.size();
@@ -2238,7 +2240,6 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 	// Join paths
 	std::string UNIQUE_TERM_MAPPING_PATH = db_dir + "/unique_term_mapping.bin";
 	std::string INVERTED_INDEX_PATH 	 = db_dir + "/inverted_index.bin";
-	std::string DOC_SIZES_PATH 		     = db_dir + "/doc_sizes.bin";
 	std::string LINE_OFFSETS_PATH 		 = db_dir + "/line_offsets.bin";
 	std::string METADATA_PATH 			 = db_dir + "/metadata.bin";
 	std::string PARTITION_BOUNDARY_PATH  = db_dir + "/partition_boundaries.bin";
@@ -2250,7 +2251,7 @@ void _BM25::load_from_disk(const std::string& db_dir) {
         return;
     }
 
-    // Read basic types directly
+    // Read basic types directly.
     in_file.read(reinterpret_cast<char*>(&num_docs), sizeof(num_docs));
     in_file.read(reinterpret_cast<char*>(&bloom_df_threshold), sizeof(bloom_df_threshold));
     in_file.read(reinterpret_cast<char*>(&bloom_fpr), sizeof(bloom_fpr));
@@ -2258,29 +2259,62 @@ void _BM25::load_from_disk(const std::string& db_dir) {
     in_file.read(reinterpret_cast<char*>(&b), sizeof(b));
 	in_file.read(reinterpret_cast<char*>(&num_partitions), sizeof(num_partitions));
 
+	// Read and prep file data.
+    size_t filename_length;
+    in_file.read(reinterpret_cast<char*>(&filename_length), sizeof(filename_length));
+    filename.resize(filename_length);
+    in_file.read(&filename[0], filename_length);
+
+	// read fn_file contents into filename 
+	FILE* f = fopen(filename.c_str(), "r");
+	if (f == nullptr) {
+		printf("Error opening file: %s\n", filename.c_str());
+		exit(1);
+	}
+	char buf[1024];
+	char* res = fgets(buf, 1024, f);
+	if (res == nullptr) {
+		printf("Error reading file: %s\n", filename.c_str());
+		exit(1);
+	}
+	fclose(f);
+
+	if (filename == "in_memory") {
+		file_type = IN_MEMORY;
+	} else if (filename.find(".json") != std::string::npos) {
+		file_type = JSON;
+	} else if (filename.find(".csv") != std::string::npos) {
+		file_type = CSV;
+	} else {
+		std::cerr << "Error: file type not supported" << std::endl;
+		exit(1);
+	}
+
+	if (file_type == IN_MEMORY) {
+		return;
+	}
+
+	// Open the reference file
+	for (uint16_t i = 0; i < num_partitions; i++) {
+		FILE* ref_f = fopen(filename.c_str(), "r");
+		if (ref_f == nullptr) {
+			printf("Error opening file: %s\n", filename.c_str());
+			printf("Partition id: %d\n", i);
+			exit(1);
+		}
+		reference_file_handles.push_back(ref_f);
+	}
+
 	// Load partition boundaries
 	deserialize_vector_u64(partition_boundaries, PARTITION_BOUNDARY_PATH);
 
 	index_partitions.clear();
 	index_partitions.resize(num_partitions);
 
-	// Load rest of metadata.
-	for (uint16_t partition_id = 0; partition_id < num_partitions; ++partition_id) {
-		BM25Partition& IP = index_partitions[partition_id];
-
-		in_file.read(reinterpret_cast<char*>(&IP.avg_doc_size), sizeof(IP.avg_doc_size));
-	}
-
     // Read enum as int
     int file_type_int;
     in_file.read(reinterpret_cast<char*>(&file_type_int), sizeof(file_type_int));
     file_type = static_cast<SupportedFileTypes>(file_type_int);
-
-    // Read std::string
-    size_t filename_length;
-    in_file.read(reinterpret_cast<char*>(&filename_length), sizeof(filename_length));
-    filename.resize(filename_length);
-    in_file.read(&filename[0], filename_length);
 
     // Read std::vector<std::string>
     size_t columns_size;
@@ -2320,9 +2354,7 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 	auto end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> elapsed_seconds = end - start;
 
-	if (DEBUG) {
-		std::cout << "Loaded in " << elapsed_seconds.count() << "s" << std::endl;
-	}
+	printf("Loaded in %fs\n", elapsed_seconds.count()); fflush(stdout);
 }
 
 
@@ -2593,16 +2625,13 @@ inline float _BM25::_compute_bm25(
 		uint64_t doc_id,
 		float tf,
 		float idf,
+		uint16_t col_idx,
 		uint16_t partition_id
 		) {
 	BM25Partition& IP = index_partitions[partition_id];
 
-	float doc_size = IP.doc_sizes[doc_id];
-	if (tf == 0)  {
-		printf("IDF: %f\n", idf);
-		printf("TF: %f\n", tf);
-	}
-	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.avg_doc_size));
+	float doc_size = IP.II[col_idx].doc_sizes[doc_id];
+	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.II[col_idx].avg_doc_size));
 }
 
 void _BM25::add_query_term(
@@ -2751,7 +2780,13 @@ std::vector<BM25Result> _BM25::_query_partition(
 
 				uint64_t doc_id  = row.doc_ids[i];
 				float tf 		 = row.term_freqs[i];
-				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factor;
+				float bm25_score = _compute_bm25(
+						doc_id, 
+						tf, 
+						idf, 
+						col_idx,
+						partition_id
+						) * boost_factor;
 
 				doc_id += doc_offset;
 				if (doc_scores.find(doc_id) == doc_scores.end()) {
@@ -2873,7 +2908,13 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 
 				uint64_t doc_id  = row.doc_ids[i];
 				float tf 		 = row.term_freqs[i];
-				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factor;
+				float bm25_score = _compute_bm25(
+						doc_id, 
+						tf, 
+						idf, 
+						col_idx,
+						partition_id
+						) * boost_factor;
 
 				doc_id += doc_offset;
 				if (doc_scores.find(doc_id) == doc_scores.end()) {
@@ -2926,6 +2967,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 						doc_id, 
 						tf, 
 						idf, 
+						min_df_col_idx,
 						partition_id
 						) * boost_factors[min_df_col_idx];
 
@@ -2958,6 +3000,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 										doc_id, 
 										(float)tf,
 										idf, 
+										col_idx,
 										partition_id
 										) * boost_factors[col_idx];
 							}
@@ -2991,6 +3034,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom(
 										doc_id, 
 										(float)tf,
 										idf, 
+										col_idx,
 										partition_id
 										) * boost_factors[col_idx];
 							}
@@ -3199,6 +3243,7 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 								current_doc.doc_id, 
 								1.0f,
 								idfs[i], 
+								col_idx,
 								partition_id
 								) * boost_factors[i / search_cols.size()];
 					}
@@ -3212,11 +3257,23 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 			}
 
 			current_doc.doc_id = doc_id + doc_offset;
-			current_doc.score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factors[col_idx];
+			current_doc.score = _compute_bm25(
+					doc_id, 
+					tf, 
+					idf, 
+					col_idx,
+					partition_id
+					) * boost_factors[col_idx];
 			current_doc.partition_id = partition_id;
 		} else {
 			// Same doc_id.
-			current_doc.score += _compute_bm25(doc_id, tf, idf, partition_id) * boost_factors[col_idx];
+			current_doc.score += _compute_bm25(
+					doc_id, 
+					tf, 
+					idf, 
+					col_idx,
+					partition_id
+					) * boost_factors[col_idx];
 		}
 
 		--tf_counters[min_idx].second;
@@ -3478,14 +3535,20 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 				continue;
 			}
 
-			float idf = log((IP.num_docs - df + 0.5) / (df + 0.5));
+			float idf = log((IP.num_docs - df + 0.5f) / (df + 0.5f));
 
 			IIRow row = get_II_row(&IP.II[col_idx], term_idx);
 			for (uint64_t i = 0; i < df; ++i) {
 
 				uint64_t doc_id  = row.doc_ids[i];
 				float tf 		 = row.term_freqs[i];
-				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factor;
+				float bm25_score = _compute_bm25(
+						doc_id, 
+						tf, 
+						idf, 
+						col_idx, 
+						partition_id
+						) * boost_factor;
 
 				doc_id += doc_offset;
 				if (doc_scores.find(doc_id) == doc_scores.end()) {
@@ -3532,7 +3595,13 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 			for (uint64_t i = 0; i < bloom_entry.topk_doc_ids.size(); ++i) {
 				uint64_t doc_id  = bloom_entry.topk_doc_ids[i];
 				float tf 		 = bloom_entry.topk_term_freqs[i];
-				float bm25_score = _compute_bm25(doc_id, tf, idf, partition_id) * boost_factors[min_df_col_idx];
+				float bm25_score = _compute_bm25(
+						doc_id, 
+						tf, 
+						idf, 
+						min_df_col_idx,
+						partition_id
+						) * boost_factors[min_df_col_idx];
 
 				doc_id += doc_offset;
 				if (doc_scores.find(doc_id) == doc_scores.end()) {
@@ -3563,6 +3632,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 										doc_id, 
 										(float)tf,
 										idf, 
+										col_idx,
 										partition_id
 										) * boost_factors[col_idx];
 							}
@@ -3587,6 +3657,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 										doc_id, 
 										(float)tf,
 										idf, 
+										col_idx,
 										partition_id
 										) * boost_factors[col_idx];
 							}

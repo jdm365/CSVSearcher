@@ -8,7 +8,7 @@ clean:
 
 
 CXX = g++
-CXXFLAGS = -std=c++17 -O3 -march=native -fopenmp -Wall -Wextra -Wpedantic -Werror
+CXXFLAGS = -std=c++17 -g -O3 -march=native -fopenmp -Wall -Wextra -Wpedantic -Werror
 INCLUDES = -I./bm25
 SRCS = ./local_testing/main.cpp ./bm25/bloom.cpp ./bm25/engine.cpp ./bm25/serialize.cpp ./bm25/vbyte_encoding.cpp
 OBJS = $(SRCS:.cpp=.o)

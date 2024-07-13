@@ -14,6 +14,32 @@
 #endif
 
 
+void test_save_load() {
+	std::string FILENAME = "tests/mb_small.csv";
+	std::vector<std::string> SEARCH_COLS = {"title", "artist"};
+
+	float BLOOM_DF_THRESHOLD = 0.005f;
+	double BLOOM_FPR = 0.000001;
+	float K1 = 1.2f;
+	float B = 0.75f;
+	uint16_t NUM_PARTITIONS = 24;
+
+	_BM25 bm25(
+		FILENAME,
+		SEARCH_COLS,
+		BLOOM_DF_THRESHOLD,
+		BLOOM_FPR,
+		K1,
+		B,
+		NUM_PARTITIONS
+	);
+
+	std::string tmp_filename = "tests/bm25_test_dir";
+	bm25.save_to_disk(tmp_filename);
+
+	_BM25 bm25_loaded(tmp_filename);
+	printf("Loaded from disk\n"); fflush(stdout);
+}
 
 void test_multi_query() {
 	const std::vector<std::vector<std::string>> MULTI_QUERIES = {
@@ -234,7 +260,8 @@ void bloom_test() {
 
 
 int main() {
-	test_multi_query();
+	// test_multi_query();
 	// bloom_test();
+	test_save_load();
 	return 0;
 }
