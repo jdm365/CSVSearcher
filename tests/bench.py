@@ -213,10 +213,12 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.c
     model.load(db_dir='bm25_model')
     print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
+    K = 10
+
     lens = []
     init = perf_counter()
     for query in tqdm(sample, desc="Querying"):
-        results = model.get_topk_docs(query, k=100)#, query_max_df=50_000)
+        results = model.get_topk_docs(query, k=K)#, query_max_df=50_000)
         lens.append(len(results))
     time = perf_counter() - init
 
@@ -237,9 +239,11 @@ def test_documents(csv_filename: str, search_cols: List[str], num_partitions=os.
     bm25.index_documents(documents=names)
     print(f"Time to tokenize: {perf_counter() - init:.2f} seconds")
 
+    K = 10
+
     init = perf_counter()
     for company in tqdm(companies_sample, desc="Querying"):
-        bm25.get_topk_indices(company, k=10)
+        bm25.get_topk_indices(company, k=K)
 
     print(f"Time to query: {perf_counter() - init:.2f} seconds")
 

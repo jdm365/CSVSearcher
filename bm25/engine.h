@@ -246,6 +246,13 @@ class _BM25 {
 				uint16_t partition_id,
 				uint16_t col_idx
 				);
+		uint32_t _process_doc_partition_rfc_4180_quoted(
+				const char* doc,
+				uint64_t doc_id,
+				uint32_t& unique_terms_found,
+				uint16_t partition_id,
+				uint16_t col_idx
+				);
 		void process_doc_partition_rfc_4180_mmap(
 				const char* file_data,
 				const char terminator,

@@ -82,15 +82,13 @@ class SearchApp:
         return cols
 
     def get_search_results(self, query: list) -> list:
-        ## if len(query) == 0:
-            ## return []
         print(f"Query: {query}")
 
         init = perf_counter()
         vals = self.bm25.get_topk_docs(
                 query, 
-                k=1000,
-                boost_factors=[2, 1]
+                k=100,
+                ## boost_factors=[1, 1]
                )
         print(f"Query took {perf_counter() - init:.4f} seconds")
 
@@ -100,11 +98,11 @@ class SearchApp:
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
     DATA_DIR = f"{CURRENT_DIR}/../tests"
-    FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
-    SEARCH_COLS = ['title', 'artist']
+    ## FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
+    ## SEARCH_COLS = ['title', 'artist']
 
-    ## FILEPATH = os.path.join(DATA_DIR, 'wiki_articles.csv')
-    ## SEARCH_COLS = ['title', 'body']
+    FILEPATH = os.path.join(DATA_DIR, 'wiki_articles.csv')
+    SEARCH_COLS = ['title', 'body']
 
     search_app = SearchApp(
             filename=FILEPATH,
