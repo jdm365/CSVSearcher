@@ -2224,6 +2224,12 @@ void _BM25::save_to_disk(const std::string& db_dir) {
 		out_file.write(search_col.data(), search_col_length);
 	}
 
+	for (const auto& search_col_idx : search_col_idxs) {
+		out_file.write(reinterpret_cast<const char*>(&search_col_idx), sizeof(search_col_idx));
+	}
+
+	out_file.write(reinterpret_cast<const char*>(&header_bytes), sizeof(header_bytes));
+
 	out_file.close();
 
 	auto end = std::chrono::high_resolution_clock::now();
@@ -2338,6 +2344,11 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 	}
 
 	search_col_idxs.resize(search_cols.size());
+	for (auto& search_col_idx : search_col_idxs) {
+		in_file.read(reinterpret_cast<char*>(&search_col_idx), sizeof(search_col_idx));
+	}
+
+	in_file.read(reinterpret_cast<char*>(&header_bytes), sizeof(header_bytes));
 
     in_file.close();
 
@@ -2486,7 +2497,7 @@ _BM25::_BM25(
 	total_size /= 1024 * 1024;
 	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
 	uint64_t line_offsets_size = num_docs * 8 / 1048576;
-	uint64_t doc_sizes_size = num_docs * 2 / 1048576;
+	uint64_t doc_sizes_size = num_docs * 2 * search_cols.size() / 1048576;
 	uint64_t inverted_index_size = total_size;
 	bloom_filters_size /= 1048576;
 	total_size = vocab_size + line_offsets_size + doc_sizes_size + inverted_index_size + bloom_filters_size;
@@ -2606,7 +2617,7 @@ _BM25::_BM25(
 	total_size /= 1024 * 1024;
 	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
 	uint64_t line_offsets_size = num_docs * 8 / 1048576;
-	uint64_t doc_sizes_size = num_docs * 2 / 1048576;
+	uint64_t doc_sizes_size = num_docs * 2 * search_cols.size() / 1048576;
 	uint64_t inverted_index_size = total_size;
 	total_size = vocab_size + line_offsets_size + doc_sizes_size + inverted_index_size;
 
@@ -2630,8 +2641,8 @@ inline float _BM25::_compute_bm25(
 		) {
 	BM25Partition& IP = index_partitions[partition_id];
 
-	float doc_size = IP.II[col_idx].doc_sizes[doc_id];
-	return idf * tf / (tf + k1 * (1 - b + b * doc_size / IP.II[col_idx].avg_doc_size));
+	float weigted_doc_size = IP.II[col_idx].doc_sizes[doc_id] / IP.II[col_idx].avg_doc_size;
+	return idf * tf / (tf + k1 * (1 - b + b * weigted_doc_size));
 }
 
 void _BM25::add_query_term(

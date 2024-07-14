@@ -1,5 +1,5 @@
 # BlooM25 (In Development)
-BM25 algorithm using bloom filters in inverted index to allow fast querying of high-df tokens.
+BM25F based FTS engine using bloom filters in inverted index to allow fast querying of high-df tokens.
 
 ## Install
 ```bash

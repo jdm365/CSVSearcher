@@ -75,7 +75,7 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value);
 
 
 
-typedef struct BloomEntry {
+typedef struct {
 	robin_hood::unordered_flat_map<uint16_t, BloomFilter> bloom_filters;
 	std::vector<uint64_t> topk_doc_ids;
 	std::vector<float> topk_term_freqs;

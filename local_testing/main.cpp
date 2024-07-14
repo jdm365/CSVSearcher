@@ -13,6 +13,8 @@
 	#undef NDEBUG
 #endif
 
+#define PRINT_DEBUG 0
+
 
 void test_save_load() {
 	std::string FILENAME = "tests/mb_small.csv";
@@ -38,14 +40,103 @@ void test_save_load() {
 	bm25.save_to_disk(tmp_filename);
 
 	_BM25 bm25_loaded(tmp_filename);
-	printf("Loaded from disk\n"); fflush(stdout);
+
+	// Compare values of bm25 and bm25_loaded
+	assert(bm25.index_partitions.size() == bm25_loaded.index_partitions.size());
+	for (uint16_t i = 0; i < bm25.index_partitions.size(); ++i) {
+		BM25Partition& INITIAL = bm25.index_partitions[i];
+		BM25Partition& LOADED  = bm25_loaded.index_partitions[i];
+
+		assert(INITIAL.II.size() == LOADED.II.size());
+		for (uint16_t j = 0; j < INITIAL.II.size(); ++j) {
+
+			// Check II equivalence
+			assert(INITIAL.II[j].bloom_filters.size() == LOADED.II[j].bloom_filters.size());
+			for (const auto& [init_doc_id, init_bloom_entry] : INITIAL.II[j].bloom_filters) {
+				BloomEntry& loaded_bloom_entry = LOADED.II[j].bloom_filters.at(init_doc_id);
+
+				// Check bloom equivalence
+				assert(init_bloom_entry.bloom_filters.size() == loaded_bloom_entry.bloom_filters.size());
+				for (const auto& [init_term, init_bloom] : init_bloom_entry.bloom_filters) {
+					BloomFilter& loaded_bloom = loaded_bloom_entry.bloom_filters.at(init_term);
+
+					assert(init_bloom.num_bits == loaded_bloom.num_bits);
+					assert(init_bloom.seeds.size() == loaded_bloom.seeds.size());
+					for (uint16_t k = 0; k < init_bloom.seeds.size(); ++k) {
+						assert(init_bloom.seeds[k] == loaded_bloom.seeds[k]);
+					}
+					for (uint64_t k = 0; k < init_bloom.num_bits / 8; ++k) {
+						assert(init_bloom.bits[k] == loaded_bloom.bits[k]);
+					}
+				}
+
+
+				assert(init_bloom_entry.topk_doc_ids.size() == loaded_bloom_entry.topk_doc_ids.size());
+				assert(init_bloom_entry.topk_term_freqs.size() == loaded_bloom_entry.topk_term_freqs.size());
+				for (uint32_t k = 0; k < init_bloom_entry.topk_doc_ids.size(); ++k) {
+					assert(init_bloom_entry.topk_doc_ids[k] == loaded_bloom_entry.topk_doc_ids[k]);
+					assert(init_bloom_entry.topk_term_freqs[k] == loaded_bloom_entry.topk_term_freqs[k]);
+				}
+			}
+		}
+
+		assert(INITIAL.unique_term_mapping.size() == LOADED.unique_term_mapping.size());
+		for (uint32_t map_idx = 0; map_idx < INITIAL.unique_term_mapping.size(); ++map_idx) {
+			const robin_hood::unordered_flat_map<std::string, uint32_t>& init_map = INITIAL.unique_term_mapping[map_idx];
+			const robin_hood::unordered_flat_map<std::string, uint32_t>& loaded_map = LOADED.unique_term_mapping[map_idx];
+
+			for (const auto& [key, value] : init_map) {
+				assert(loaded_map.find(key) != loaded_map.end());
+			}
+		}
+
+		assert(INITIAL.line_offsets.size() == LOADED.line_offsets.size());
+		for (uint64_t j = 0; j < INITIAL.line_offsets.size(); ++j) {
+			assert(INITIAL.line_offsets[j] == LOADED.line_offsets[j]);
+		}
+	}
+
+	assert(bm25.num_docs == bm25_loaded.num_docs);
+	assert(bm25.bloom_df_threshold == bm25_loaded.bloom_df_threshold);
+	assert(bm25.bloom_fpr == bm25_loaded.bloom_fpr);
+	assert(bm25.k1 == bm25_loaded.k1);
+	assert(bm25.b == bm25_loaded.b);
+	assert(bm25.num_partitions == bm25_loaded.num_partitions);
+
+	assert(bm25.file_type == bm25_loaded.file_type);
+
+	assert(bm25.search_cols.size() == bm25_loaded.search_cols.size());
+	for (uint16_t i = 0; i < bm25.search_cols.size(); ++i) {
+		assert(bm25.search_cols[i] == bm25_loaded.search_cols[i]);
+	}
+	assert(bm25.filename == bm25_loaded.filename);
+	assert(bm25.columns.size() == bm25_loaded.columns.size());
+	for (uint16_t i = 0; i < bm25.columns.size(); ++i) {
+		assert(bm25.columns[i] == bm25_loaded.columns[i]);
+	}
+	assert(bm25.search_col_idxs.size() == bm25_loaded.search_col_idxs.size());
+	for (uint16_t i = 0; i < bm25.search_col_idxs.size(); ++i) {
+		assert(bm25.search_col_idxs[i] == bm25_loaded.search_col_idxs[i]);
+	}
+	assert(bm25.header_bytes == bm25_loaded.header_bytes);
+
+	assert(bm25.partition_boundaries.size() == bm25_loaded.partition_boundaries.size());
+	for (uint16_t i = 0; i < bm25.partition_boundaries.size(); ++i) {
+		assert(bm25.partition_boundaries[i] == bm25_loaded.partition_boundaries[i]);
+	}
+
+	assert(bm25.reference_file_handles.size() == bm25_loaded.reference_file_handles.size());
 }
 
 void test_multi_query() {
 	const std::vector<std::vector<std::string>> MULTI_QUERIES = {
 		{"DRAGON BALL Z", "GOKU"}
 	};
-	std::string FILENAME = "tests/wiki_articles.csv";
+	const std::vector<std::string> EXPECTED_URLS = {
+		"https://en.wikipedia.org/wiki?curid=1001666"
+	};
+
+	std::string FILENAME = "tests/wiki_articles_500k.csv";
 	std::vector<std::string> SEARCH_COLS = {"title", "body"};
 
 	float BLOOM_DF_THRESHOLD = 0.005f;
@@ -72,8 +163,8 @@ void test_multi_query() {
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 	printf("\nIndexing time: %ld ms\n", duration);
 
-	for (const std::vector<std::string>& query : MULTI_QUERIES) {
-		std::vector<std::string> _query = query;
+	for (uint32_t idx = 0; idx < MULTI_QUERIES.size(); ++idx) {
+		std::vector<std::string> _query = MULTI_QUERIES[idx];
 
 		start = std::chrono::high_resolution_clock::now();
 		std::vector<std::vector<std::pair<std::string, std::string>>> results = bm25.get_topk_internal_multi(
@@ -83,33 +174,53 @@ void test_multi_query() {
 				{2.0f, 1.0f}
 				);
 
+		bool found = false;
 		for (const std::vector<std::pair<std::string, std::string>>& result : results) {
-			printf("================================\n");
-			for (const std::string& query : _query) {
-				printf("Query: %s\n", query.c_str());
+			if (PRINT_DEBUG) {
+				printf("================================\n");
+				for (const std::string& query : _query) {
+					printf("Query: %s\n", query.c_str());
+				}
+				printf("--------------------------------\n");
 			}
-			printf("--------------------------------\n");
+
 			for (const std::pair<std::string, std::string>& res : result) {
-				if (res.first == "title") {
-					printf("Title: %s\n", res.second.c_str());
-					continue;
-				} else if (res.first == "body") {
-					printf("Body: %s\n", res.second.c_str());
-					continue;
-				} else if (res.first == "score") {
-					printf("Score: %s\n", res.second.c_str());
-					continue;
+				if (PRINT_DEBUG) {
+					if (res.first == "title") {
+						printf("Title: %s\n", res.second.c_str());
+						continue;
+					} else if (res.first == "body") {
+						printf("Body: %s\n", res.second.c_str());
+						continue;
+					} else if (res.first == "url") {
+						printf("URL: %s\n", res.second.c_str());
+						continue;
+					} else if (res.first == "score") {
+						printf("Score: %s\n", res.second.c_str());
+						continue;
+					}
+				}
+
+				if (res.first == "url" && res.second == EXPECTED_URLS[idx]) {
+					found = true;
 				}
 			}
-			printf("--------------------------------\n");
-			printf("================================\n");
+			if (PRINT_DEBUG) {
+				printf("--------------------------------\n");
+				printf("================================\n");
+			}
 		}
-		end = std::chrono::high_resolution_clock::now();
-		duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-		printf("Total Query time: %ld us\n\n", duration);
-		printf("Number of results: %ld\n", results.size());
-		printf("--------------------------------\n");
+		if (PRINT_DEBUG) {
+			end = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+			printf("Total Query time: %ld us\n\n", duration);
+			printf("Number of results: %ld\n", results.size());
+			printf("--------------------------------\n");
+		}
+
+		assert(found);
 	}
+	printf("Found expected results\n");
 }
 
 void test_single_query() {
@@ -132,7 +243,7 @@ void test_single_query() {
 	float B = 0.75f;
 	uint16_t NUM_PARTITIONS = 24;
 
-	uint16_t TOP_K = 10;
+	uint16_t TOP_K = 5;
 
 	auto start = std::chrono::high_resolution_clock::now();
 
@@ -260,8 +371,8 @@ void bloom_test() {
 
 
 int main() {
-	// test_multi_query();
+	test_multi_query();
 	// bloom_test();
-	test_save_load();
+	// test_save_load();
 	return 0;
 }

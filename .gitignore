@@ -3,9 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.bin
-/bm25_db/
+bm25_db/
 gen_compile_commands/
-/tmp_data_dir
+tmp_data_dir/
 *.csv
 *.zip
 *.json
@@ -14,7 +14,8 @@ mb_db/
 bm25_model/
 compile_commands.json
 mb_small.csv
-/bin/
+bin/
+bm25_test_dir/
 
 # C extensions
 *.so
