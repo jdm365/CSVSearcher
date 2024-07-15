@@ -163,14 +163,6 @@ void test_multi_query() {
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 	printf("\nIndexing time: %ld ms\n", duration);
 
-	std::string term = "DRAGON";
-	std::vector<uint64_t> dfs = bm25.get_doc_freqs(term);
-	for (uint16_t idx = 0; idx < dfs.size(); ++idx) {
-		uint64_t df = dfs[idx];
-		printf("Partition %d: %ld\n", idx, df);
-	}
-	printf("\n");
-
 	for (uint32_t idx = 0; idx < MULTI_QUERIES.size(); ++idx) {
 		std::vector<std::string> _query = MULTI_QUERIES[idx];
 

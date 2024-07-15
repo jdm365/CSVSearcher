@@ -1,6 +1,5 @@
 #pragma once
 
-#include <iostream>
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -19,6 +18,12 @@ enum SupportedFileTypes {
 	CSV,
 	JSON,
 	IN_MEMORY
+};
+
+enum TermType {
+	UNKNOWN,
+	LOW_DF,
+	HIGH_DF
 };
 
 
@@ -244,7 +249,10 @@ class _BM25 {
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num, uint16_t partition_id);
 
 		void init_dbs();
-		std::vector<uint64_t> get_doc_freqs(std::string& term);
+		uint64_t get_doc_freqs_sum(
+				std::string& term,
+				uint16_t col_idx
+				);
 		void write_row_to_inverted_index_db(
 				const std::string& term,
 				uint64_t doc_id
@@ -261,35 +269,14 @@ class _BM25 {
 				std::vector<std::vector<uint64_t>>& term_idxs,
 				uint16_t partition_id
 				);
-		void add_query_term_bloom(
+		TermType add_query_term_bloom(
 				std::string& substr,
-				std::vector<std::vector<uint64_t>>& low_df_term_idxs,
-				std::vector<std::vector<uint64_t>>& high_df_term_idxs,
-				std::vector<std::vector<BloomEntry>>& bloom_entries,
-				uint16_t partition_id
-				);
-		void add_query_term_bloom(
-				std::string& substr,
-				std::vector<std::vector<uint64_t>>& low_df_term_idxs,
-				std::vector<std::vector<uint64_t>>& high_df_term_idxs,
-				std::vector<std::vector<BloomEntry>>& bloom_entries,
+				std::vector<std::vector<uint64_t>>& term_idxs,
+				std::vector<robin_hood::unordered_flat_map<uint64_t, BloomEntry>>& bloom_entries,
 				uint16_t partition_id,
 				uint16_t col_idx
 				);
-		std::vector<BM25Result> _query_partition(
-				std::string& query,
-				uint32_t top_k,
-				uint32_t query_max_df,
-				uint16_t partition_id,
-				std::vector<float> boost_factors
-				);
-		std::vector<BM25Result> _query_partition_bloom(
-				std::string& query,
-				uint32_t top_k,
-				uint32_t query_max_df,
-				uint16_t partition_id,
-				std::vector<float> boost_factors
-				);
+
 		std::vector<BM25Result> _query_partition_streaming(
 				std::string& query,
 				uint32_t top_k,
@@ -297,13 +284,13 @@ class _BM25 {
 				uint16_t partition_id,
 				std::vector<float> boost_factors
 				);
+
 		std::vector<BM25Result> query(
 				std::string& query,
 				uint32_t top_k,
 				uint32_t query_max_df,
 				std::vector<float> boost_factors
 				);
-
 		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal(
 				std::string& _query,
 				uint32_t top_k,
@@ -316,7 +303,8 @@ class _BM25 {
 				uint32_t k,
 				uint32_t query_max_df,
 				uint16_t partition_id,
-				std::vector<float> boost_factors
+				std::vector<float> boost_factors,
+				std::vector<std::vector<uint64_t>> doc_freqs
 				);
 		std::vector<BM25Result> query_multi(
 				std::vector<std::string>& query,

@@ -46,7 +46,7 @@ class SearchApp:
                 ## max_df=0.5,
                 ## num_partitions=2,
                 bloom_fpr=1e-8,
-                ## b=0.4,
+                b=0.4,
                 ## k1=1.5
                 )
         self.save_dir = filename.split('/')[-1].replace('.csv', '_db')
