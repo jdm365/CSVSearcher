@@ -163,6 +163,14 @@ void test_multi_query() {
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 	printf("\nIndexing time: %ld ms\n", duration);
 
+	std::string term = "DRAGON";
+	std::vector<uint64_t> dfs = bm25.get_doc_freqs(term);
+	for (uint16_t idx = 0; idx < dfs.size(); ++idx) {
+		uint64_t df = dfs[idx];
+		printf("Partition %d: %ld\n", idx, df);
+	}
+	printf("\n");
+
 	for (uint32_t idx = 0; idx < MULTI_QUERIES.size(); ++idx) {
 		std::vector<std::string> _query = MULTI_QUERIES[idx];
 
@@ -223,60 +231,6 @@ void test_multi_query() {
 	printf("Found expected results\n");
 }
 
-void test_single_query() {
-	const std::vector<std::string> QUERIES = {
-		"UNDER MY SKIN",
-		"THE BEATLES",
-		"MY WAY",
-		"TERMINATOR",
-		"THE GODFATHER",
-		"THE GODFATHER PART II",
-		"SONG FOR GUY"
-	};
-
-	std::string FILENAME = "tests/mb_small.csv";
-	std::vector<std::string> SEARCH_COLS = {"title", "artist"};
-
-	float BLOOM_DF_THRESHOLD = 0.005f;
-	double BLOOM_FPR = 0.000001;
-	float K1 = 1.2f;
-	float B = 0.75f;
-	uint16_t NUM_PARTITIONS = 24;
-
-	uint16_t TOP_K = 5;
-
-	auto start = std::chrono::high_resolution_clock::now();
-
-	_BM25 bm25(
-		FILENAME,
-		SEARCH_COLS,
-		BLOOM_DF_THRESHOLD,
-		BLOOM_FPR,
-		K1,
-		B,
-		NUM_PARTITIONS
-	);
-
-	auto end = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-	printf("\nIndexing time: %ld ms\n", duration);
-
-	for (const std::string& query : QUERIES) {
-		std::string _query = {query};
-		start = std::chrono::high_resolution_clock::now();
-		std::vector<std::vector<std::pair<std::string, std::string>>> results = bm25.get_topk_internal(
-				_query,
-				TOP_K,
-				5000000,
-				{2.0f, 1.0f}
-				);
-		end = std::chrono::high_resolution_clock::now();
-		duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-		printf("Total Query time: %ld us\n\n", duration);
-		printf("Number of results: %ld\n", results.size());
-		printf("--------------------------------\n");
-	}
-}
 
 void _bloom_test_create_query() {
 	double GOAL_FPR 	 = 0.0000001;

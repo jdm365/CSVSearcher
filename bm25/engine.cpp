@@ -33,6 +33,19 @@
 #include "bloom.h"
 
 
+std::vector<uint64_t> _BM25::get_doc_freqs(std::string& term) {
+	std::vector<uint64_t> doc_freqs;
+	for (uint16_t i = 0; i < num_partitions; ++i) {
+		BM25Partition& IP = index_partitions[i];
+		for (uint16_t j = 0; j < IP.unique_term_mapping.size(); ++j) {
+			auto it = IP.unique_term_mapping[j].find(term);
+			if (it != IP.unique_term_mapping[j].end()) {
+				doc_freqs.push_back(IP.II[j].doc_freqs[it->second]);
+			}
+		}
+	}
+	return doc_freqs;
+}
 
 BloomEntry init_bloom_entry(
 		double fpr, 

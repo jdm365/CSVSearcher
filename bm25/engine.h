@@ -244,12 +244,11 @@ class _BM25 {
 		std::vector<std::pair<std::string, std::string>> get_json_line(int line_num, uint16_t partition_id);
 
 		void init_dbs();
-
+		std::vector<uint64_t> get_doc_freqs(std::string& term);
 		void write_row_to_inverted_index_db(
 				const std::string& term,
 				uint64_t doc_id
 				);
-
 		float _compute_bm25(
 				uint64_t doc_id,
 				float tf,
@@ -257,7 +256,6 @@ class _BM25 {
 				uint16_t col_idx,
 				uint16_t partition_id
 				);
-
 		void add_query_term(
 				std::string& substr,
 				std::vector<std::vector<uint64_t>>& term_idxs,
