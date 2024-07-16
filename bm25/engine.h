@@ -313,7 +313,7 @@ class _BM25 {
 				std::vector<float> boost_factors
 				);
 		std::vector<std::vector<std::pair<std::string, std::string>>> get_topk_internal_multi(
-				std::vector<std::string>& _query,
+				std::vector<std::string>& query,
 				uint32_t top_k,
 				uint32_t query_max_df,
 				std::vector<float> boost_factors

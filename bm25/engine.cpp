@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <stdio.h>
+#undef NDEBUG
 #include <assert.h>
 
 #include <iostream>
@@ -2706,11 +2707,13 @@ TermType _BM25::add_query_term_bloom(
 	auto it = vocab.find(substr);
 	if (it == vocab.end()) {
 		substr.clear();
+		term_idxs[col_idx].push_back(UINT64_MAX);
 		return UNKNOWN;
 	}
 
 	if (stop_words.find(substr) != stop_words.end()) {
 		substr.clear();
+		term_idxs[col_idx].push_back(UINT64_MAX);
 		return UNKNOWN;
 	}
 	substr.clear();
@@ -3016,6 +3019,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 	uint16_t num_low_df_terms  = 0;
 	uint16_t num_high_df_terms = 0;
 	for (uint16_t col_idx = 0; col_idx < term_idxs.size(); ++col_idx) {
+		assert(term_idxs[col_idx].size() == doc_freqs[col_idx].size());
 
 		for (uint64_t term_idx = 0; term_idx < term_idxs[col_idx].size(); ++term_idx) {
 			TermType term_type = term_types[col_idx][term_idx];
@@ -3033,7 +3037,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 
 	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 		for (uint16_t idx = 0; idx < term_idxs[col_idx].size(); ++idx) {
-			if (term_types[col_idx][idx] != 1) continue;
+			if (term_types[col_idx][idx] != LOW_DF) continue;
 			uint64_t term_idx = term_idxs[col_idx][idx];
 
 			float boost_factor = boost_factors[col_idx];
@@ -3041,13 +3045,16 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 			uint64_t df = doc_freqs[col_idx][idx];
 			uint64_t df_partition = IP.II[col_idx].doc_freqs[term_idx];
 
-			if (df == 0 || df > query_max_df) {
+			if (df == 0 || df > query_max_df || df_partition == 0) {
 				continue;
 			}
 
 			float idf = log((num_docs - df + 0.5f) / (df + 0.5f));
 
 			IIRow row = get_II_row(&IP.II[col_idx], term_idx);
+
+			assert(df_partition == row.doc_ids.size());
+			assert(df_partition == row.term_freqs.size());
 			for (uint64_t i = 0; i < df_partition; ++i) {
 
 				uint64_t doc_id  = row.doc_ids[i];
@@ -3219,6 +3226,21 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 	}
 
 	return result;
+}
+
+std::vector<BM25Result> _BM25::query(
+		std::string& query,
+		uint32_t top_k,
+		uint32_t query_max_df,
+		std::vector<float> boost_factors
+		) {
+	std::vector<std::string> copied_query(search_cols.size(), query);
+	return query_multi(
+			copied_query, 
+			top_k, 
+			query_max_df, 
+			boost_factors
+			);
 }
 
 
