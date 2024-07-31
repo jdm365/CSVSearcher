@@ -181,6 +181,16 @@ class _BM25 {
 					fclose(handle);
 				}
 			}
+
+			for (auto& partition : index_partitions) {
+				for (auto& II : partition.II) {
+					for (auto& [doc_id, bloom_entry] : II.bloom_filters) {
+						for (auto& [tf, filter] : bloom_entry.bloom_filters) {
+							bloom_free(filter);
+						}
+					}
+				}
+			}
 		}
 		void init_terminal();
 		void proccess_csv_header();

@@ -16,6 +16,7 @@ compile_commands.json
 mb_small.csv
 bin/
 bm25_test_dir/
+heaptrack*
 
 # C extensions
 *.so

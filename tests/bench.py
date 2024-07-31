@@ -208,11 +208,11 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.c
 
     ## Save and load
     init = perf_counter()
-    ## model.save(db_dir='bm25_model')
+    model.save(db_dir='bm25_model')
     print(f"Time to save: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
-    ## model.load(db_dir='bm25_model')
+    model.load(db_dir='bm25_model')
     print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     K = 10

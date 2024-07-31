@@ -1318,10 +1318,7 @@ void _BM25::finalize_progress_bar() {
 }
 
 
-IIRow get_II_row(
-		InvertedIndex* II, 
-		uint64_t term_idx
-		) {
+IIRow get_II_row(InvertedIndex* II, uint64_t term_idx) {
 	IIRow row;
 
 	row.df = get_rle_u8_row_size(II->inverted_index_compressed[term_idx].term_freqs);
@@ -1629,6 +1626,13 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	uint64_t byte_offset = start_byte;
 
 	std::vector<uint32_t> unique_terms_found(search_cols.size());
+	IP.line_offsets.reserve(IP.num_docs);
+	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+		IP.II[col].prev_doc_ids.reserve(IP.num_docs);
+		IP.II[col].doc_freqs.reserve(IP.num_docs);
+		IP.II[col].doc_sizes.reserve(IP.num_docs);
+		IP.unique_term_mapping[col].reserve(IP.num_docs);
+	}
 
 	// Small string optimization limit on most platforms
 	std::string doc = "";
@@ -1727,6 +1731,9 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 		}
 		++line_num;
 	}
+
+	free(line);
+
 	if (!DEBUG) update_progress(line_num + 1, IP.num_docs, partition_id);
 
 	if (DEBUG) {

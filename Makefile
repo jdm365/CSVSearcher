@@ -25,3 +25,6 @@ $(TARGET): $(OBJS)
 # Run the program
 run: $(TARGET)
 	$(TARGET)
+
+memprof: $(TARGET)
+	heaptrack $(TARGET)

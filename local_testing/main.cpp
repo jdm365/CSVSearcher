@@ -136,7 +136,8 @@ void test_multi_query() {
 		"https://en.wikipedia.org/wiki?curid=1001666"
 	};
 
-	std::string FILENAME = "tests/wiki_articles_500k.csv";
+	std::string FILENAME = "tests/wiki_articles.csv";
+	// std::string FILENAME = "tests/wiki_articles_500k.csv";
 	std::vector<std::string> SEARCH_COLS = {"title", "body"};
 
 	float BLOOM_DF_THRESHOLD = 0.005f;
@@ -144,6 +145,7 @@ void test_multi_query() {
 	float K1 = 1.2f;
 	float B = 0.75f;
 	uint16_t NUM_PARTITIONS = 24;
+	// uint16_t NUM_PARTITIONS = 1;
 
 	uint16_t TOP_K = 5;
 
