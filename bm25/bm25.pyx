@@ -9,6 +9,7 @@ from libcpp.pair cimport pair
 from libcpp cimport bool
 
 from time import perf_counter
+import csv
 import os
 
 
@@ -104,7 +105,7 @@ cdef class BM25:
     cdef bool   is_parquet
     cdef vector[string] stopwords
     cdef uint16_t num_partitions
-    cdef vector[string] search_cols
+    cdef list search_cols
 
 
     def __init__(
@@ -114,12 +115,13 @@ cdef class BM25:
             float  k1     = 1.2,
             float  b      = 0.4,
             stopwords = [],
-            int   num_partitions = os.cpu_count()
+            int    num_partitions = os.cpu_count()
             ):
         self.bloom_df_threshold = bloom_df_threshold
-        self.bloom_fpr = bloom_fpr
-        self.k1     = k1
-        self.b      = b
+        self.bloom_fpr   = bloom_fpr
+        self.k1          = k1
+        self.b           = b
+        self.search_cols = []
 
         if num_partitions < 1:
             num_partitions = os.cpu_count()
@@ -136,9 +138,21 @@ cdef class BM25:
     def index_file(self, str filename, list search_cols):
         self.filename = filename
         for text_col in search_cols:
-            self.search_cols.push_back(text_col.lower().encode("utf-8"))
+            self.search_cols.append(text_col.lower())
 
-        self._init_with_file(filename, self.search_cols)
+        if filename.endswith(".csv"):
+            with open(filename, "r") as f:
+                reader = csv.reader(f)
+                header = next(reader)
+
+            self.search_cols = [col.lower() for col in header if col.lower() in self.search_cols]
+
+        cdef vector[string] vector_search_cols
+        for col in self.search_cols:
+            vector_search_cols.push_back(col.encode("utf-8"))
+
+        self._init_with_file(filename, vector_search_cols)
+
 
 
     def index_documents(self, documents):
@@ -225,8 +239,6 @@ cdef class BM25:
     cdef void _init_dicts(self, list documents):
         init = perf_counter()
 
-        self.search_cols = sorted(self.search_cols)
-
         cdef vector[vector[string]] docs
         docs.resize(len(documents))
         cdef str doc
@@ -273,7 +285,7 @@ cdef class BM25:
         self.is_parquet = False
         self.bm25 = new _BM25(
                 filename.encode("utf-8"),
-                self.search_cols,
+                search_cols,
                 self.bloom_df_threshold,
                 self.bloom_fpr,
                 self.k1,
@@ -427,16 +439,20 @@ cdef class BM25:
 
     cpdef _get_topk_docs_multi(
             self,
-            list query,
+            dict _query,
             int k = 10,
             int query_max_df = INT_MAX,
             list boost_factors = None
             ):
-        if self.is_parquet:
-            return self._get_topk_docs_parquet(query, k, query_max_df)
+        query = len(self.search_cols) * []
+        for col in self.search_cols:
+            query.append(_query.get(col, "").upper())
 
         if boost_factors is None:
             boost_factors = len(self.search_cols) * [1]
+
+        if self.is_parquet:
+            return self._get_topk_docs_parquet(query, k, query_max_df)
 
         cdef vector[float] _boost_factors
         _boost_factors.reserve(len(boost_factors))
@@ -483,8 +499,8 @@ cdef class BM25:
         if isinstance(query, str):
             query = query.upper()
             return self._get_topk_docs(query, k, query_max_df, boost_factors)
-        elif isinstance(query, list):
+        elif isinstance(query, dict):
             return self._get_topk_docs_multi(query, k, query_max_df, boost_factors)
         else:
-            raise ValueError("Query must be a string or a list of strings")
+            raise ValueError("Query must be a string or a dict of strings")
 
