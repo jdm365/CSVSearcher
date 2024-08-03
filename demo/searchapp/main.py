@@ -109,16 +109,10 @@ class SearchApp:
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
-    ## DATA_DIR = f"{CURRENT_DIR}/../"
-    DATA_DIR = f"{CURRENT_DIR}/"
+    DATA_DIR = f"{CURRENT_DIR}/../../tests"
 
-    ## FILEPATH = os.path.join(DATA_DIR, 'nodes_export_subset.csv')
-    ## SEARCH_COLS = ['er_name', 'er_address']
-
-    ## FILEPATH = os.path.join(DATA_DIR, 'tests/free_company_dataset.csv')
-    ## SEARCH_COLS = ['name', 'location']
-    FILEPATH = os.path.join(DATA_DIR, 'planet.csv')
-    SEARCH_COLS = ['street', 'city', 'housenumber', 'iso3']
+    FILEPATH = os.path.join(DATA_DIR, 'wiki_articles.csv')
+    SEARCH_COLS = ['title', 'body']
 
     search_app = SearchApp(
             filename=FILEPATH,
