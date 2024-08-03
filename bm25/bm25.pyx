@@ -106,6 +106,7 @@ cdef class BM25:
     cdef vector[string] stopwords
     cdef uint16_t num_partitions
     cdef list search_cols
+    cdef list col_idx_mapping
 
 
     def __init__(
@@ -137,7 +138,8 @@ cdef class BM25:
 
     def index_file(self, str filename, list search_cols):
         self.filename = filename
-        for text_col in search_cols:
+        for idx, text_col in enumerate(search_cols):
+            search_cols[idx] = text_col.lower()
             self.search_cols.append(text_col.lower())
 
         if filename.endswith(".csv"):
@@ -146,6 +148,7 @@ cdef class BM25:
                 header = next(reader)
 
             self.search_cols = [col.lower() for col in header if col.lower() in self.search_cols]
+            self.col_idx_mapping = [search_cols.index(col) for col in self.search_cols]
 
         cdef vector[string] vector_search_cols
         for col in self.search_cols:
@@ -331,6 +334,11 @@ cdef class BM25:
             ):
         if query is None:
             return [], []
+
+        if len(boost_factors) > 0:
+            tmp_boost_factors = boost_factors
+            for i, idx in enumerate(self.col_idx_mapping):
+                boost_factors[i] = tmp_boost_factors[idx]
 
         cdef vector[float] _boost_factors
         _boost_factors.reserve(len(boost_factors))

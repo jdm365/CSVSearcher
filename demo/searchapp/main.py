@@ -100,7 +100,7 @@ class SearchApp:
         vals = self.bm25.get_topk_docs(
                 query,
                 k=100,
-                ## boost_factors=[2, 1]
+                boost_factors=[500, 2, 1, 1]
                )
         print(f"Query took {perf_counter() - init:.4f} seconds")
 
@@ -109,15 +109,16 @@ class SearchApp:
 
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
-    DATA_DIR = f"{CURRENT_DIR}/../"
+    ## DATA_DIR = f"{CURRENT_DIR}/../"
+    DATA_DIR = f"{CURRENT_DIR}/"
 
     ## FILEPATH = os.path.join(DATA_DIR, 'nodes_export_subset.csv')
     ## SEARCH_COLS = ['er_name', 'er_address']
 
     ## FILEPATH = os.path.join(DATA_DIR, 'tests/free_company_dataset.csv')
     ## SEARCH_COLS = ['name', 'location']
-    FILEPATH = os.path.join(DATA_DIR, 'osm_north_america.csv')
-    SEARCH_COLS = ['street', 'city']
+    FILEPATH = os.path.join(DATA_DIR, 'planet.csv')
+    SEARCH_COLS = ['street', 'city', 'housenumber', 'iso3']
 
     search_app = SearchApp(
             filename=FILEPATH,
