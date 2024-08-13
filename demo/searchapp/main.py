@@ -100,7 +100,7 @@ class SearchApp:
         vals = self.bm25.get_topk_docs(
                 query,
                 k=100,
-                boost_factors=[500, 2, 1, 1]
+                boost_factors=[500, 2]
                )
         print(f"Query took {perf_counter() - init:.4f} seconds")
 
