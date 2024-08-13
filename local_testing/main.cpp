@@ -58,15 +58,15 @@ void test_save_load() {
 				// Check bloom equivalence
 				assert(init_bloom_entry.bloom_filters.size() == loaded_bloom_entry.bloom_filters.size());
 				for (const auto& [init_term, init_bloom] : init_bloom_entry.bloom_filters) {
-					BloomFilter& loaded_bloom = loaded_bloom_entry.bloom_filters.at(init_term);
+					// BloomFilter& loaded_bloom = loaded_bloom_entry.bloom_filters.at(init_term);
+					ChunkedBloomFilter& loaded_bloom = loaded_bloom_entry.bloom_filters.at(init_term);
 
-					assert(init_bloom.num_bits == loaded_bloom.num_bits);
-					assert(init_bloom.seeds.size() == loaded_bloom.seeds.size());
-					for (uint16_t k = 0; k < init_bloom.seeds.size(); ++k) {
-						assert(init_bloom.seeds[k] == loaded_bloom.seeds[k]);
-					}
-					for (uint64_t k = 0; k < init_bloom.num_bits / 8; ++k) {
-						assert(init_bloom.bits[k] == loaded_bloom.bits[k]);
+					assert(init_bloom.num_filters == loaded_bloom.num_filters);
+					assert(init_bloom.num_elements_chunk == loaded_bloom.num_elements_chunk);
+					for (uint64_t filter_idx = 0; filter_idx < init_bloom.num_filters; ++filter_idx) {
+						for (uint64_t k = 0; k < init_bloom.num_bits_chunk; ++k) {
+							assert(init_bloom.bits[k] == loaded_bloom.bits[k]);
+						}
 					}
 				}
 

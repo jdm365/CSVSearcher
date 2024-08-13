@@ -176,3 +176,220 @@ void bloom_load(BloomFilter& filter, std::ifstream& file) {
 	filter.bits = (uint8_t*)calloc((filter.num_bits + 7) / 8, sizeof(uint8_t));
 	file.read((char*)filter.bits, (filter.num_bits + 7) / 8);
 }
+
+
+ChunkedBloomFilter init_chunked_bloom_filter(uint32_t max_elements_chunk, double fpr) {
+	ChunkedBloomFilter filter;
+	filter.num_filters    = 1;
+	filter.num_elements_chunk = 0; 
+	filter.max_elements_chunk = max_elements_chunk; 
+
+	uint64_t num_hashes, num_bits;
+	get_optimal_params(max_elements_chunk, fpr, num_hashes, num_bits);
+	filter.num_hashes = num_hashes;
+	filter.bits    = (uint8_t**)calloc(filter.num_filters, sizeof(uint8_t*));
+	filter.bits[0] = (uint8_t*)calloc((num_bits + 7) / 8, sizeof(uint8_t));
+	filter.num_bits_chunk = num_bits;
+
+	return filter;
+}
+
+void bloom_free(ChunkedBloomFilter& filter) {
+	for (uint64_t i = 0; i < filter.num_filters; ++i) {
+		free(filter.bits[i]);
+	}
+
+	free(filter.bits);
+	filter.bits = nullptr;
+	filter.num_bits_chunk = 0;
+	filter.num_filters    = 0;
+	filter.num_hashes     = 0;
+	filter.num_elements_chunk = 0;
+}
+
+void bloom_put(ChunkedBloomFilter& filter, const uint64_t key) {
+	for (uint64_t i = 0; i < filter.num_hashes; ++i) {
+		uint64_t hash = fnv1a_64(key, filter.num_hashes) % filter.num_bits_chunk;
+		filter.bits[filter.num_filters - 1][hash / 8] |= 1 << (hash % 8);
+	}
+
+	if (++filter.num_elements_chunk >= filter.max_elements_chunk) {
+		// Allocate new filter
+		++filter.num_filters;
+		filter.bits = (uint8_t**)realloc(filter.bits, filter.num_filters * sizeof(uint8_t*));
+		filter.bits[filter.num_filters - 1] = (uint8_t*)calloc((filter.num_bits_chunk + 7) / 8, sizeof(uint8_t));
+		filter.num_elements_chunk = 0;
+	}
+}
+
+bool bloom_query(const ChunkedBloomFilter& filter, const uint64_t key) {
+	// Precompute hashes
+	uint64_t hashes[128];
+	for (uint64_t i = 0; i < filter.num_hashes; ++i) {
+		hashes[i] = fnv1a_64(key, filter.num_hashes) % filter.num_bits_chunk;
+	}
+
+	for (uint64_t i = 0; i < filter.num_filters; ++i) {
+		bool found = true;
+		for (uint64_t j = 0; j < filter.num_hashes; ++j) {
+			uint64_t hash = hashes[j];
+			if (!(filter.bits[i][hash / 8] & (1 << (hash % 8)))) {
+				found = false;
+				break;
+			}
+		}
+
+		if (found) return true;
+	}
+
+	return false;
+}
+
+void bloom_clear(ChunkedBloomFilter& filter) {
+	for (uint64_t i = 0; i < filter.num_filters; ++i) {
+		memset(filter.bits[i], 0, (filter.num_bits_chunk + 7) / 8);
+	}
+}
+
+void bloom_save(const ChunkedBloomFilter& filter, const char* filename) {
+	FILE* file = fopen(filename, "wb");
+	if (file) {
+		// Write number of filters
+		fwrite(&filter.num_filters, sizeof(filter.num_filters), 1, file);
+
+		// Write number of bits per chunk
+		fwrite(&filter.num_bits_chunk, sizeof(filter.num_bits_chunk), 1, file);
+
+		// Write number of hashes
+		fwrite(&filter.num_hashes, sizeof(filter.num_hashes), 1, file);
+
+		// Write max elements per chunk
+		fwrite(&filter.max_elements_chunk, sizeof(filter.max_elements_chunk), 1, file);
+
+		// Write elements per chunk
+		fwrite(&filter.num_elements_chunk, sizeof(filter.num_elements_chunk), 1, file);
+
+		// Write bits
+		for (uint64_t i = 0; i < filter.num_filters; ++i) {
+			fwrite(filter.bits[i], sizeof(uint8_t), (filter.num_bits_chunk + 7) / 8, file);
+		}
+
+		fclose(file);
+	}
+}
+
+void bloom_load(ChunkedBloomFilter& filter, const char* filename) {
+	FILE* file = fopen(filename, "rb");
+	if (file) {
+		// Read number of filters
+		size_t size = fread(&filter.num_filters, sizeof(filter.num_filters), 1, file);
+		if (size != 1) {
+			printf("Failed to read number of filters\n");
+			filter.num_filters = 0;
+			return;
+		}
+
+		// Read number of bits per chunk
+		size = fread(&filter.num_bits_chunk, sizeof(filter.num_bits_chunk), 1, file);
+		if (size != 1) {
+			printf("Failed to read number of bits per chunk\n");
+			filter.num_bits_chunk = 0;
+			return;
+		}
+
+		// Read number of hashes
+		size = fread(&filter.num_hashes, sizeof(filter.num_hashes), 1, file);
+		if (size != 1) {
+			printf("Failed to read number of hashes\n");
+			filter.num_hashes = 0;
+			return;
+		}
+
+		// Read max elements per chunk
+		size = fread(&filter.max_elements_chunk, sizeof(filter.max_elements_chunk), 1, file);
+		if (size != 1) {
+			printf("Failed to read max elements per chunk\n");
+			filter.max_elements_chunk = 0;
+			return;
+		}
+
+		// Read elements per chunk
+		size = fread(&filter.num_elements_chunk, sizeof(filter.num_elements_chunk), 1, file);
+		if (size != 1) {
+			printf("Failed to read elements per chunk\n");
+			filter.num_elements_chunk = 0;
+			return;
+		}
+
+		// Read bits
+		filter.bits = (uint8_t**)calloc(filter.num_filters, sizeof(uint8_t*));
+		for (uint64_t i = 0; i < filter.num_filters; ++i) {
+			filter.bits[i] = (uint8_t*)calloc((filter.num_bits_chunk + 7) / 8, sizeof(uint8_t));
+			size = fread(filter.bits[i], sizeof(uint8_t), (filter.num_bits_chunk + 7) / 8, file);
+			if (size != (filter.num_bits_chunk + 7) / 8) {
+				printf("Failed to read bits\n");
+				free(filter.bits[i]);
+				filter.bits[i] = nullptr;
+				filter.num_bits_chunk = 0;
+				return;
+			}
+		}
+
+		fclose(file);
+	}
+}
+
+void bloom_save(const ChunkedBloomFilter& filter, std::ofstream& file) {
+	// Write number of filters
+	file.write((char*)&filter.num_filters, sizeof(filter.num_filters));
+
+	// Write number of bits per chunk
+	file.write((char*)&filter.num_bits_chunk, sizeof(filter.num_bits_chunk));
+
+	// Write number of hashes
+	file.write((char*)&filter.num_hashes, sizeof(filter.num_hashes));
+
+	// Write max elements per chunk
+	file.write((char*)&filter.max_elements_chunk, sizeof(filter.max_elements_chunk));
+
+	// Write elements per chunk
+	file.write((char*)&filter.num_elements_chunk, sizeof(filter.num_elements_chunk));
+
+	// Write bits
+	for (uint64_t i = 0; i < filter.num_filters; ++i) {
+		file.write((char*)filter.bits[i], (filter.num_bits_chunk + 7) / 8);
+	}
+}
+
+void bloom_load(ChunkedBloomFilter& filter, std::ifstream& file) {
+	// Read number of filters
+	file.read((char*)&filter.num_filters, sizeof(filter.num_filters));
+
+	// Read number of bits per chunk
+	file.read((char*)&filter.num_bits_chunk, sizeof(filter.num_bits_chunk));
+
+	// Read number of hashes
+	file.read((char*)&filter.num_hashes, sizeof(filter.num_hashes));
+
+	// Read max elements per chunk
+	file.read((char*)&filter.max_elements_chunk, sizeof(filter.max_elements_chunk));
+
+	// Read elements per chunk
+	file.read((char*)&filter.num_elements_chunk, sizeof(filter.num_elements_chunk));
+
+	// Read bits
+	filter.bits = (uint8_t**)calloc(filter.num_filters, sizeof(uint8_t*));
+	for (uint64_t i = 0; i < filter.num_filters; ++i) {
+		filter.bits[i] = (uint8_t*)calloc((filter.num_bits_chunk + 7) / 8, sizeof(uint8_t));
+		file.read((char*)filter.bits[i], (filter.num_bits_chunk + 7) / 8);
+	}
+}
+
+uint64_t get_bloom_memory_usage(const ChunkedBloomFilter& filter) {
+	uint64_t total = 0;
+	for (uint64_t i = 0; i < filter.num_filters; ++i) {
+		total += (filter.num_bits_chunk + 7) / 8;
+	}
+
+	return total;
+}

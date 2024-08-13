@@ -51,7 +51,7 @@ struct _compare_64_16 {
 typedef struct {
 	uint64_t df;
 	std::vector<uint64_t> doc_ids;
-	std::vector<uint16_t> term_freqs;
+	std::vector<uint8_t> term_freqs;
 } IIRow;
 
 typedef struct {
@@ -69,7 +69,7 @@ struct _compare_bm25_result {
 
 
 typedef struct {
-	uint16_t num_repeats;
+	uint8_t num_repeats;
 	uint8_t  value;
 } RLEElement_u8;
 
@@ -81,14 +81,15 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value);
 
 
 typedef struct {
-	robin_hood::unordered_flat_map<uint16_t, BloomFilter> bloom_filters;
+	// robin_hood::unordered_flat_map<uint16_t, BloomFilter> bloom_filters;
+	robin_hood::unordered_flat_map<uint16_t, ChunkedBloomFilter> bloom_filters;
 	std::vector<uint64_t> topk_doc_ids;
-	std::vector<float> topk_term_freqs;
+	std::vector<uint8_t> topk_term_freqs;
 } BloomEntry;
 
 BloomEntry init_bloom_entry(
 		double fpr, 
-		robin_hood::unordered_flat_map<uint16_t, uint64_t>& tf_map 
+		robin_hood::unordered_flat_map<uint8_t, uint64_t>& tf_map 
 		);
 
 typedef struct {

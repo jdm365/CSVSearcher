@@ -7,6 +7,7 @@
 
 
 void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& filename);
+void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::ofstream& file);
 void serialize_vector_u16(const std::vector<uint16_t>& vec, const std::string& filename);
 void serialize_vector_u16(const std::vector<uint16_t>& vec, std::ofstream& file);
 void serialize_vector_u32(const std::vector<uint32_t>& vec, const std::string& filename);
@@ -46,6 +47,7 @@ void serialize_vector_of_vectors_u8(
 
 
 void deserialize_vector_u8(std::vector<uint8_t>& vec, const std::string& filename);
+void deserialize_vector_u8(std::vector<uint8_t>& vec, std::ifstream& file);
 void deserialize_vector_u16(std::vector<uint16_t>& vec, const std::string& filename);
 void deserialize_vector_u16(std::vector<uint16_t>& vec, std::ifstream& file);
 void deserialize_vector_u32(std::vector<uint32_t>& vec, const std::string& filename);

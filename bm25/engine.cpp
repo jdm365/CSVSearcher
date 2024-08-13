@@ -53,12 +53,13 @@ uint64_t _BM25::get_doc_freqs_sum(
 
 BloomEntry init_bloom_entry(
 		double fpr, 
-		robin_hood::unordered_flat_map<uint16_t, uint64_t>& tf_map 
+		robin_hood::unordered_flat_map<uint8_t, uint64_t>& tf_map 
 		) {
 	BloomEntry bloom_entry;
 
 	for (const auto& [term_freq, num_docs] : tf_map) {
-		BloomFilter bf = init_bloom_filter(num_docs, fpr);
+		// BloomFilter bf = init_bloom_filter(num_docs, fpr);
+		ChunkedBloomFilter bf = init_chunked_bloom_filter(num_docs, fpr);
 		bloom_entry.bloom_filters.insert({term_freq, bf});
 	}
 	return bloom_entry;
@@ -536,7 +537,7 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value) {
 	}
 	else {
 		if (rle_row.back().value == value) {
-			if (rle_row.back().num_repeats == 65535) {
+			if (rle_row.back().num_repeats == 255) {
 				rle_row.push_back(init_rle_element_u8(value));
 			}
 			else {
@@ -1337,7 +1338,7 @@ IIRow get_II_row(InvertedIndex* II, uint64_t term_idx) {
 	for (size_t i = 0; i < II->inverted_index_compressed[term_idx].term_freqs.size(); ++i) {
 		for (size_t j = 0; j < II->inverted_index_compressed[term_idx].term_freqs[i].num_repeats; ++j) {
 			row.term_freqs.push_back(
-					(uint16_t)II->inverted_index_compressed[term_idx].term_freqs[i].value
+					(uint8_t)II->inverted_index_compressed[term_idx].term_freqs[i].value
 					);
 		}
 	}
@@ -1411,14 +1412,14 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 			if (df < min_df_bloom) continue;
 
 			// robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values;
-			robin_hood::unordered_flat_map<uint16_t, uint64_t> tf_map;
+			robin_hood::unordered_flat_map<uint8_t, uint64_t> tf_map;
 			IIRow row = get_II_row(&II, idx);
 
 			// Construct min heap to keep track of top k term frequencies and doc ids
 			std::priority_queue<
-				std::pair<uint16_t, uint64_t>, 
-				std::vector<std::pair<uint16_t, uint64_t>>, 
-				std::greater<std::pair<uint16_t, uint64_t>>> min_heap;
+				std::pair<uint8_t, uint64_t>, 
+				std::vector<std::pair<uint8_t, uint64_t>>, 
+				std::greater<std::pair<uint8_t, uint64_t>>> min_heap;
 
 
 			for (uint32_t i = 0; i < row.term_freqs.size(); ++i) {
@@ -2510,7 +2511,7 @@ _BM25::_BM25(
 			total_bloom_filters += IP.II[col_idx].bloom_filters.size();
 			for (const auto& bf : index_partitions[i].II[col_idx].bloom_filters) {
 				for (const auto& filter : bf.second.bloom_filters) {
-					bloom_filters_size += filter.second.num_bits / 8;
+					bloom_filters_size += get_bloom_memory_usage(filter.second);
 				}
 			}
 		}
@@ -2884,7 +2885,7 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 		uint16_t col_idx = min_idx / search_cols.size();
 
 		float idf = idfs[min_idx];
-		float tf  = tf_counters[min_idx].first;
+		float tf  = (float)tf_counters[min_idx].first;
 
 		// TODO: Add handling for when StandardEntries are empty.
 
@@ -3065,7 +3066,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 			for (uint64_t i = 0; i < df_partition; ++i) {
 
 				uint64_t doc_id  = row.doc_ids[i];
-				float tf 		 = row.term_freqs[i];
+				float tf 		 = (float)row.term_freqs[i];
 				float bm25_score = _compute_bm25(
 						doc_id, 
 						tf, 
@@ -3119,7 +3120,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 			BloomEntry& bloom_entry = bloom_entries[min_df_col_idx][min_df_idx];
 			for (uint64_t i = 0; i < bloom_entry.topk_doc_ids.size(); ++i) {
 				uint64_t doc_id  = bloom_entry.topk_doc_ids[i];
-				float tf 		 = bloom_entry.topk_term_freqs[i];
+				float tf 		 = (float)bloom_entry.topk_term_freqs[i];
 				float bm25_score = _compute_bm25(
 						doc_id, 
 						tf, 
