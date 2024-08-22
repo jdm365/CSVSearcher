@@ -8,11 +8,14 @@ MODULE_NAME = "bloom25"
 ## Optionally choose compiler ##
 COMPILER_FLAGS = [
     "-std=c++17",
+    "-g",
     "-O3",
     "-Wall",
     "-Wextra",
     "-march=native",
     "-ffast-math",
+
+    "-UNDEBUG",
 ]
 
 '''
@@ -48,7 +51,7 @@ extensions = [
         sources=["bm25/bm25.pyx", "bm25/engine.cpp", "bm25/vbyte_encoding.cpp", "bm25/serialize.cpp", "bm25/bloom.cpp"],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
-        include_dirs=["bm25"],
+        include_dirs=["bm25", "bm25/parallel_hashmap"],
         extra_link_args=LINK_ARGS,
     ),
 ]

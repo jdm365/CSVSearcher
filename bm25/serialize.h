@@ -3,7 +3,9 @@
 #include <vector>
 
 #include "engine.h"
-#include "robin_hood.h"
+// #include "robin_hood.h"
+#include <parallel_hashmap/phmap.h>
+#include <parallel_hashmap/btree.h>
 
 
 void serialize_vector_u8(const std::vector<uint8_t>& vec, const std::string& filename);
@@ -25,11 +27,11 @@ void serialize_vector_of_vectors_u64(
 		const std::string& filename
 		);
 void serialize_robin_hood_flat_map_string_u32(
-		const robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		const MAP<std::string, uint32_t>& map,
 		const std::string& filename
 		);
 void serialize_robin_hood_flat_map_string_u64(
-		const robin_hood::unordered_flat_map<std::string, uint64_t>& map,
+		const MAP<std::string, uint64_t>& map,
 		const std::string& filename
 		);
 void serialize_vector_of_vectors_pair_u32_u16(
@@ -65,11 +67,11 @@ void deserialize_vector_of_vectors_u64(
 		const std::string& filename
 		);
 void deserialize_robin_hood_flat_map_string_u32(
-		robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		MAP<std::string, uint32_t>& map,
 		const std::string& filename
 		);
 void deserialize_robin_hood_flat_map_string_u64(
-		robin_hood::unordered_flat_map<std::string, uint64_t>& map,
+		MAP<std::string, uint64_t>& map,
 		const std::string& filename
 		);
 void deserialize_vector_of_vectors_pair_u32_u16(

@@ -85,6 +85,7 @@ void bloom_save(const BloomFilter& filter, const char* filename);
 void bloom_load(BloomFilter& filter, const char* filename);
 void bloom_save(const BloomFilter& filter, std::ofstream& file);
 void bloom_load(BloomFilter& filter, std::ifstream& file);
+uint64_t get_bloom_memory_usage(const BloomFilter& filter);
 
 ChunkedBloomFilter init_chunked_bloom_filter(uint32_t num_elements_chunk, double fpr);
 void bloom_free(ChunkedBloomFilter& filter);

@@ -75,8 +75,8 @@ cdef extern from "engine.h":
                 uint32_t query_max_df,
                 vector[float] boost_factors
                 ) nogil 
-        void save_to_disk(string db_dir) nogil
-        void load_from_disk(string db_dir) nogil
+        ## void save_to_disk(string db_dir) nogil
+        ## void load_from_disk(string db_dir) nogil
 
         
 def is_pandas_dataframe(obj):
@@ -184,6 +184,7 @@ cdef class BM25:
             raise ValueError("Documents must be list, tuple, or dict.")
 
 
+    '''
     def save(self, db_dir):
         self.db_dir = db_dir
 
@@ -213,6 +214,7 @@ cdef class BM25:
 
         self.bm25 = new _BM25(self.db_dir.encode("utf-8"))
         return True
+    '''
 
 
     cdef void _init_lists(self, list documents):

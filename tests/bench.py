@@ -198,7 +198,8 @@ def test_bm25_json(json_filename: str, search_cols: List[str], num_partitions=os
     
 
 def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.cpu_count()):
-    df = pd.read_csv(csv_filename, usecols=search_cols, nrows=1000)
+    ## df = pd.read_csv(csv_filename, usecols=search_cols, nrows=1000)
+    df = pd.read_csv(csv_filename, usecols=search_cols, nrows=25_000).sample(n=1000)
     sample = df[search_cols[0]].fillna('').astype(str).values
 
     init = perf_counter()
@@ -208,11 +209,11 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.c
 
     ## Save and load
     init = perf_counter()
-    model.save(db_dir='bm25_model')
+    ## model.save(db_dir='bm25_model')
     print(f"Time to save: {perf_counter() - init:.2f} seconds")
 
     init = perf_counter()
-    model.load(db_dir='bm25_model')
+    ## model.load(db_dir='bm25_model')
     print(f"Time to load: {perf_counter() - init:.2f} seconds")
 
     K = 10
@@ -220,6 +221,10 @@ def test_bm25_csv(csv_filename: str, search_cols: List[str], num_partitions=os.c
     lens = []
     init = perf_counter()
     for idx, query in enumerate(tqdm(sample, desc="Querying")):
+        query = {
+                'title': query,
+                'body': query
+            }
         results = model.get_topk_docs(query, k=K)#, query_max_df=50_000)
         ## results = model.get_topk_docs([query, query], k=K)#, query_max_df=50_000)
         lens.append(len(results))
@@ -267,8 +272,9 @@ if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, 'wiki_articles_500k.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'wiki_articles_500k.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'wiki_articles.csv')
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
 
     ## test_okapi_bm25(CSV_FILENAME, search_cols='title')
@@ -276,8 +282,8 @@ if __name__ == '__main__':
     ## test_duckdb(FILENAME)
     ## test_anserini(CSV_FILENAME, search_cols='title')
     ## test_sklearn(FILENAME)
-    ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=24)
-    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'body'], num_partitions=24)
+    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=24)
+    ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'body'], num_partitions=24)
     ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')
     ## test_documents(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=24)

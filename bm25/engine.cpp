@@ -27,12 +27,201 @@
 #include <mutex>
 #include <termios.h>
 
+#include <parallel_hashmap/phmap.h>
+#include <parallel_hashmap/btree.h>
+// #include "robin_hood.h"
+
 #include "engine.h"
-#include "robin_hood.h"
 #include "vbyte_encoding.h"
 #include "serialize.h"
 #include "bloom.h"
 
+
+void flush_token_stream(TokenStream* token_stream) {
+	fwrite(
+			&token_stream->num_terms,
+			sizeof(uint32_t), 
+			1, 
+			token_stream->file
+			);
+	if (token_stream->num_terms == 0) return;
+
+	fwrite(
+			token_stream->term_ids, 
+			sizeof(uint32_t), 
+			token_stream->num_terms, 
+			token_stream->file
+			);
+	fwrite(
+			token_stream->term_freqs, 
+			sizeof(uint8_t), 
+			token_stream->num_terms, 
+			token_stream->file
+			);
+	token_stream->num_terms = 0;
+}
+
+void init_token_stream(TokenStream* token_stream, const std::string& out_file) {
+	token_stream->term_ids   = (uint32_t*)malloc(TOKEN_STREAM_CAPACITY * sizeof(uint32_t));
+	token_stream->term_freqs = (uint8_t*)malloc(TOKEN_STREAM_CAPACITY * sizeof(uint8_t));
+	token_stream->num_terms  = 0;
+	token_stream->file = fopen(out_file.c_str(), "w+b");
+}
+
+void add_token(
+		TokenStream* token_stream,
+		uint32_t term_id,
+		uint8_t term_freq,
+		bool new_doc
+		) {
+	token_stream->term_ids[token_stream->num_terms]   = (term_id) | (new_doc << 31);
+	token_stream->term_freqs[token_stream->num_terms] = term_freq;
+	++(token_stream->num_terms);
+
+	if (token_stream->num_terms == TOKEN_STREAM_CAPACITY) {
+		flush_token_stream(token_stream);
+	}
+}
+
+void free_token_stream(TokenStream* token_stream) {
+	free(token_stream->term_ids);
+	free(token_stream->term_freqs);
+}
+
+
+void init_inverted_index_new(InvertedIndexNew* II) {
+	II->doc_ids     = NULL;
+	II->doc_offsets = NULL;
+	II->doc_freqs   = NULL;
+
+	II->num_terms    = 0;
+	II->num_docs     = 0;
+	II->avg_doc_size = 0.0f;
+}
+
+void free_inverted_index_new(InvertedIndexNew* II) {
+	free(II->doc_ids);
+	free(II->doc_offsets);
+	free(II->doc_freqs);
+}
+
+void read_token_stream(
+		InvertedIndexNew* II, 
+		TokenStream* token_stream
+		) {
+	// Reset file pointer to beginning
+	if (fseek(token_stream->file, 0, SEEK_SET) != 0) {
+		printf("Error seeking file.");
+		exit(1);
+	}
+
+	// Assume num_terms, num_docs, and avg_doc_size are known and set.
+	assert(II->num_terms > 0);
+	assert(II->num_docs > 0);
+	assert(II->avg_doc_size > 0.0f);
+
+	assert(II->doc_offsets == NULL);
+	II->doc_offsets = (uint32_t*)malloc(II->num_terms * sizeof(uint32_t));
+
+	// Calculate doc offsets from doc_freqs
+	uint32_t offset = 0;
+	II->doc_offsets[0] = offset;
+	for (size_t term_idx = 1; term_idx < II->num_terms; ++term_idx) {
+		offset += II->doc_freqs[term_idx];
+		II->doc_offsets[term_idx] = offset;
+
+		assert(II->doc_freqs[term_idx] <= II->num_docs);
+	}
+	offset += II->doc_freqs[0];
+
+	II->doc_ids = (tf_df_t*)malloc(offset * sizeof(tf_df_t));
+
+	uint32_t* num_docs_read = (uint32_t*)malloc(II->num_terms * sizeof(uint32_t));
+	memset(num_docs_read, 0, II->num_terms * sizeof(uint32_t));
+
+	// Read token_stream->file in chunks
+	uint32_t num_tokens = TOKEN_STREAM_CAPACITY;
+	uint32_t doc_id = 0;
+	while (num_tokens == TOKEN_STREAM_CAPACITY) {
+		fread(
+				&num_tokens,
+				sizeof(uint32_t),
+				1, 
+				token_stream->file
+				);
+		assert(num_tokens <= TOKEN_STREAM_CAPACITY);
+
+		if (num_tokens == 0) break;
+
+		fread(
+			token_stream->term_ids,
+			sizeof(uint32_t),
+			num_tokens,
+			token_stream->file
+			);
+		fread(
+			token_stream->term_freqs,
+			sizeof(uint8_t),
+			num_tokens,
+			token_stream->file
+			);
+
+		for (size_t idx = 0; idx < num_tokens; ++idx) {
+			if (token_stream->term_ids[idx] == UINT32_MAX) {
+				++doc_id;
+				continue;
+			}
+
+			// Pop highest bit to determine if new doc
+			doc_id += (token_stream->term_ids[idx] >> 31);
+
+			size_t term_id = (size_t)(token_stream->term_ids[idx] & 0x7FFFFFFF);
+
+			tf_df_t entry;
+			entry.tf     = token_stream->term_freqs[idx];
+			entry.doc_id = doc_id;
+
+			if (doc_id >= II->num_docs) {
+				printf("Doc ID: %u\n", doc_id);
+				printf("Num Docs: %u\n", II->num_docs);
+				printf("Term freq: %u\n", entry.tf);
+				printf("Term ID: %lu\n", term_id);
+				exit(1);
+			}
+
+			// TODO: Recheck this. Probably should be <
+			// assert(doc_id <= II->num_docs);
+			assert(doc_id < II->num_docs);
+
+			uint32_t II_idx = II->doc_offsets[term_id] + num_docs_read[term_id]++;
+			assert(II_idx < offset);
+
+			II->doc_ids[II_idx] = entry;
+		}
+	}
+	assert(doc_id < II->num_docs);
+
+	free(num_docs_read);
+	free_token_stream(token_stream);
+	fclose(token_stream->file);
+}
+
+void init_bm25_partition_new(BM25PartitionNew* IP, uint64_t num_docs, uint16_t num_cols) {
+	assert(num_cols > 0);
+	assert(num_cols < 4096);
+
+	IP->II = (InvertedIndexNew*)malloc(num_cols * sizeof(InvertedIndexNew));
+	IP->unique_term_mappings = new MAP<std::string, uint32_t>[num_cols];
+
+	IP->line_offsets = (uint64_t*)malloc(num_docs * sizeof(uint64_t));
+	IP->num_docs = num_docs;
+}
+
+void free_bm25_partition_new(BM25PartitionNew* IP) {
+	free(IP->II);
+	free(IP->unique_term_mappings);
+	free(IP->line_offsets);
+}
 
 uint64_t _BM25::get_doc_freqs_sum(
 		std::string& term, 
@@ -41,11 +230,11 @@ uint64_t _BM25::get_doc_freqs_sum(
 	uint64_t doc_freqs_sum = 0;
 
 	for (uint16_t i = 0; i < num_partitions; ++i) {
-		BM25Partition& IP = index_partitions[i];
+		BM25PartitionNew* IP = &index_partitions[i];
 
-		auto it = IP.unique_term_mapping[col_idx].find(term);
-		if (it != IP.unique_term_mapping[col_idx].end()) {
-			doc_freqs_sum += IP.II[col_idx].doc_freqs[it->second];
+		auto it = IP->unique_term_mappings[col_idx].find(term);
+		if (it != IP->unique_term_mappings[col_idx].end()) {
+			doc_freqs_sum += IP->II[col_idx].doc_freqs[it->second];
 		}
 	}
 	return doc_freqs_sum;
@@ -53,13 +242,15 @@ uint64_t _BM25::get_doc_freqs_sum(
 
 BloomEntry init_bloom_entry(
 		double fpr, 
-		robin_hood::unordered_flat_map<uint8_t, uint64_t>& tf_map 
+		MAP<uint8_t, uint64_t>& tf_map,
+		uint64_t min_df_bloom 
 		) {
 	BloomEntry bloom_entry;
 
+	assert(min_df_bloom > 0);
 	for (const auto& [term_freq, num_docs] : tf_map) {
-		// BloomFilter bf = init_bloom_filter(num_docs, fpr);
-		ChunkedBloomFilter bf = init_chunked_bloom_filter(num_docs, fpr);
+		BloomFilter bf = init_bloom_filter(num_docs, fpr);
+		// ChunkedBloomFilter bf = init_chunked_bloom_filter(min_df_bloom, fpr);
 		bloom_entry.bloom_filters.insert({term_freq, bf});
 	}
 	return bloom_entry;
@@ -247,58 +438,6 @@ void _BM25::init_terminal() {
 }
 
 
-void _BM25::determine_partition_boundaries_csv() {
-	// First find number of bytes in file.
-	// Get avg chunk size in bytes.
-	// Seek in jumps of byte chunks, then scan forward to newline and append to partition_boundaries.
-	// If we reach end of file, break.
-
-	FILE* f = reference_file_handles[0];
-
-	struct stat sb;
-	if (fstat(fileno(f), &sb) == -1) {
-		std::cerr << "Error getting file size." << std::endl;
-		std::exit(1);
-	}
-
-	size_t file_size = sb.st_size;
-	size_t chunk_size = file_size / num_partitions;
-
-	partition_boundaries.push_back(header_bytes);
-
-	size_t byte_offset = header_bytes;
-	while (true) {
-		byte_offset += chunk_size;
-
-		if (byte_offset >= file_size) {
-			partition_boundaries.push_back(file_size);
-			break;
-		}
-
-		fseek(f, byte_offset, SEEK_SET);
-
-		char buf[1024];
-		while (true) {
-			size_t bytes_read = fread(buf, 1, sizeof(buf), f);
-			for (size_t i = 0; i < bytes_read; ++i) {
-				if (buf[i] == '\n') {
-					partition_boundaries.push_back(++byte_offset);
-					goto end_of_loop;
-				}
-				++byte_offset;
-			}
-		}
-
-		end_of_loop:
-			continue;
-	}
-
-	assert((uint16_t)partition_boundaries.size() == num_partitions + 1);
-
-	// Reset file pointer to beginning
-	fseek(f, header_bytes, SEEK_SET);
-}
-
 void _BM25::determine_partition_boundaries_json() {
     FILE* f = reference_file_handles[0];
 
@@ -363,15 +502,21 @@ void _BM25::determine_partition_boundaries_json() {
     uint64_t num_lines  = line_offsets.size();
     size_t   chunk_size = num_lines / num_partitions;
 
+	index_partitions = (BM25PartitionNew*)malloc(num_partitions * sizeof(BM25PartitionNew));
     for (size_t i = 0; i < num_partitions; ++i) {
         partition_boundaries.push_back(line_offsets[i * chunk_size]);
 
-        BM25Partition& IP = index_partitions[i];
-        IP.num_docs = chunk_size;
-        IP.line_offsets = std::vector<uint64_t>(
-                line_offsets.begin() + i * chunk_size, 
-                line_offsets.begin() + (i + 1) * chunk_size
-                );
+        BM25PartitionNew* IP = &index_partitions[i];
+		init_bm25_partition_new(
+				&index_partitions[i],
+				chunk_size,
+				search_cols.size()
+				);
+
+		size_t idx = 0;
+		for (size_t j = i * chunk_size; j < (i + 1) * chunk_size; ++j) {
+			IP->line_offsets[idx++] = line_offsets[j];
+		}
     }
     partition_boundaries.push_back(line_offsets.back());
 
@@ -451,6 +596,7 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
 
 	uint64_t cntr = 0;
     size_t file_pos = header_bytes;
+	line_offsets.push_back(header_bytes);
 	while (file_pos < file_size - 1) {
 		if (file_data[file_pos] == '"') {
 			// Skip to next unescaped quote
@@ -472,6 +618,7 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
 		}
 		if (file_data[file_pos++] == '\n') {
 			line_offsets.push_back(file_pos);
+
 			if (cntr++ % 1000 == 0) {
 				printf("%luK lines read\r", cntr / 1000);
 				fflush(stdout);
@@ -481,16 +628,40 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
 
     uint64_t num_lines  = line_offsets.size();
     size_t   chunk_size = num_lines / num_partitions;
+	size_t   final_chunk_size = chunk_size + (num_lines % num_partitions);
 
+	// TODO: Fix last chunk size issue on json.
+	index_partitions = (BM25PartitionNew*)malloc(num_partitions * sizeof(BM25PartitionNew));
     for (size_t i = 0; i < num_partitions; ++i) {
-        partition_boundaries.push_back(line_offsets[i * chunk_size]);
+		if (i != num_partitions - 1) {
+			partition_boundaries.push_back(line_offsets[i * chunk_size]);
 
-        BM25Partition& IP = index_partitions[i];
-        IP.num_docs = chunk_size;
-        IP.line_offsets = std::vector<uint64_t>(
-                line_offsets.begin() + i * chunk_size, 
-                line_offsets.begin() + (i + 1) * chunk_size
-                );
+			BM25PartitionNew* IP = &index_partitions[i];
+			init_bm25_partition_new(
+					&index_partitions[i],
+					chunk_size,
+					search_cols.size()
+					);
+
+			size_t idx = 0;
+			for (size_t j = i * chunk_size; j < (i + 1) * chunk_size; ++j) {
+				IP->line_offsets[idx++] = line_offsets[j];
+			}
+		} else {
+			partition_boundaries.push_back(line_offsets[i * chunk_size]);
+
+			BM25PartitionNew* IP = &index_partitions[i];
+			init_bm25_partition_new(
+					&index_partitions[i],
+					final_chunk_size,
+					search_cols.size()
+					);
+
+			size_t idx = 0;
+			for (size_t j = i * chunk_size; j < num_lines; ++j) {
+				IP->line_offsets[idx++] = line_offsets[j];
+			}
+		}
     }
     partition_boundaries.push_back(line_offsets.back());
 
@@ -551,6 +722,7 @@ void add_rle_element_u8(std::vector<RLEElement_u8>& rle_row, uint8_t value) {
 	}
 }
 
+/*
 uint32_t _BM25::process_doc_partition(
 		const char* doc,
 		const char terminator,
@@ -566,7 +738,8 @@ uint32_t _BM25::process_doc_partition(
 
 	std::string term = "";
 
-	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	// robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	MAP<uint64_t, uint8_t> terms_seen;
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
@@ -704,33 +877,35 @@ uint32_t _BM25::process_doc_partition(
 
 	return char_idx;
 }
+*/
 
 uint32_t _BM25::process_doc_partition_json(
 		const char* doc,
 		const char terminator,
+		TokenStream* token_stream,
 		uint64_t doc_id,
-		uint32_t& unique_terms_found,
 		uint16_t partition_id,
-		uint16_t col_idx
+		uint16_t col_idx,
+		uint32_t* doc_freqs_capacity
 		) {
-	BM25Partition& IP = index_partitions[partition_id];
-	InvertedIndex& II = IP.II[col_idx];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
+	InvertedIndexNew* II = &IP->II[col_idx];
 
 	uint32_t char_idx = 0;
 
 	std::string term = "";
 
-	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	MAP<uint64_t, uint8_t> terms_seen;
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
 	while (true) {
 		if (char_idx > 1048576) {
-			std::cout << "Search field not found on line: " << doc_id << std::endl;
-			std::cout << "Doc: " << doc << std::endl;
-			std::cout << std::flush;
-			std::exit(1);
+			printf("Search field not found on line: %lu", doc_id);
+			printf("Doc: %s\n", doc);
+			exit(1);
 		}
+
 		if (doc[char_idx] == '\\') {
 			++char_idx;
 			term += toupper(doc[char_idx]);
@@ -763,23 +938,29 @@ uint32_t _BM25::process_doc_partition_json(
 				continue;
 			}
 
-			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+			auto [it, add] = IP->unique_term_mappings[col_idx].try_emplace(
 					term, 
-					unique_terms_found
+					II->num_terms
 					);
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
-				II.inverted_index_compressed.emplace_back();
-				II.prev_doc_ids.push_back(0);
-				II.doc_freqs.push_back(1);
-				++unique_terms_found;
+
+				if (II->num_terms + 1 == *doc_freqs_capacity) {
+					*doc_freqs_capacity *= 2;
+					II->doc_freqs = (uint32_t*)realloc(
+							II->doc_freqs, 
+							*doc_freqs_capacity * sizeof(uint32_t)
+							);
+				}
+
+				II->doc_freqs[II->num_terms++] = 1;
 			}
 			else {
 				// Term already exists
 				if (terms_seen.find(it->second) == terms_seen.end()) {
 					terms_seen.insert({it->second, 1});
-					++(II.doc_freqs[it->second]);
+					++(II->doc_freqs[it->second]);
 				}
 				else {
 					++(terms_seen[it->second]);
@@ -799,24 +980,30 @@ uint32_t _BM25::process_doc_partition_json(
 
 	if (term != "") {
 		if ((stop_words.find(term) == stop_words.end()) && is_valid_token(term)) {
-			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+			auto [it, add] = IP->unique_term_mappings[col_idx].try_emplace(
 					term, 
-					unique_terms_found
+					II->num_terms
 					);
 
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
-				II.inverted_index_compressed.emplace_back();
-				II.prev_doc_ids.push_back(0);
-				II.doc_freqs.push_back(1);
-				++unique_terms_found;
+
+				if (II->num_terms + 1 == *doc_freqs_capacity) {
+					*doc_freqs_capacity *= 2;
+					II->doc_freqs = (uint32_t*)realloc(
+							II->doc_freqs, 
+							*doc_freqs_capacity * sizeof(uint32_t)
+							);
+				}
+
+				II->doc_freqs[II->num_terms++] = 1;
 			}
 			else {
 				// Term already exists
 				if (terms_seen.find(it->second) == terms_seen.end()) {
 					terms_seen.insert({it->second, 1});
-					++(II.doc_freqs[it->second]);
+					++(II->doc_freqs[it->second]);
 				}
 				else {
 					++(terms_seen[it->second]);
@@ -826,29 +1013,24 @@ uint32_t _BM25::process_doc_partition_json(
 		++doc_size;
 	}
 
-	if (doc_id == IP.II[col_idx].doc_sizes.size() - 1) {
-		IP.II[col_idx].doc_sizes[doc_id] += (uint16_t)doc_size;
-	}
-	else {
-		IP.II[col_idx].doc_sizes.push_back((uint16_t)doc_size);
-	}
+	IP->II[col_idx].doc_sizes[doc_id] = (uint16_t)doc_size;
 
+	// Start as true unless it is the first document.
+	bool first = doc_id != 0;
 	for (const auto& [term_idx, tf] : terms_seen) {
-		compress_uint64_differential_single(
-				II.inverted_index_compressed[term_idx].doc_ids,
-				doc_id,
-				II.prev_doc_ids[term_idx]
+		add_token(
+				token_stream,
+				term_idx,
+				tf,
+				first
 				);
-		add_rle_element_u8(
-				II.inverted_index_compressed[term_idx].term_freqs, 
-				tf
-				);
-		II.prev_doc_ids[term_idx] = doc_id;
+		first = false;
 	}
 
 	return char_idx;
 }
 
+/*
 uint32_t _BM25::process_doc_partition_rfc_4180(
 		const char* doc,
 		const char terminator,
@@ -857,14 +1039,15 @@ uint32_t _BM25::process_doc_partition_rfc_4180(
 		uint16_t partition_id,
 		uint16_t col_idx
 		) {
-	BM25Partition& IP = index_partitions[partition_id];
-	InvertedIndex& II = IP.II[col_idx];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
+	InvertedIndexNew* II = &IP->II[col_idx];
 
 	uint32_t char_idx = 0;
 
 	std::string term = "";
 
-	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	// robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	MAP<uint64_t, uint8_t> terms_seen;
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
@@ -911,16 +1094,23 @@ uint32_t _BM25::process_doc_partition_rfc_4180(
 				continue;
 			}
 
-			auto [it, add] = IP.unique_term_mapping[col_idx].try_emplace(
+			auto [it, add] = IP->unique_term_mappings[col_idx].try_emplace(
 					term, 
 					unique_terms_found
 					);
 			if (add) {
 				// New term
 				terms_seen.insert({it->second, 1});
-				II.inverted_index_compressed.emplace_back();
-				II.prev_doc_ids.push_back(0);
-				II.doc_freqs.push_back(1);
+				++(II->num_terms);
+				if (II->num_terms == *doc_freqs_capacity) {
+					*doc_freqs_capacity *= 2;
+					II->doc_freqs = (uint32_t*)realloc(
+							II->doc_freqs, 
+							*doc_freqs_capacity * sizeof(uint32_t)
+							);
+				}
+
+				II->doc_freqs[II->num_terms] = 1;
 				++unique_terms_found;
 
 			}
@@ -1012,7 +1202,8 @@ uint32_t _BM25::_process_doc_partition_rfc_4180_quoted(
 
 	std::string term = "";
 
-	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	// robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	MAP<uint64_t, uint8_t> terms_seen;
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
@@ -1134,8 +1325,329 @@ uint32_t _BM25::_process_doc_partition_rfc_4180_quoted(
 
 	return char_idx;
 }
+*/
+
+uint32_t _BM25::process_doc_partition_rfc_4180_v2(
+		const char* doc,
+		const char terminator,
+		TokenStream* token_stream,
+		uint64_t doc_id,
+		uint16_t partition_id,
+		uint16_t col_idx,
+		uint32_t* doc_freqs_capacity
+		) {
+	BM25PartitionNew* IP = &index_partitions[partition_id];
+	InvertedIndexNew* II = &IP->II[col_idx];
+
+	uint32_t char_idx = 0;
+
+	std::string term = "";
+
+	MAP<uint64_t, uint8_t> terms_seen;
+
+	// Split by commas not inside double quotes
+	uint64_t doc_size = 0;
+	while (true) {
+		if (char_idx > 1048576) {
+			std::cout << "Search field not found on line: " << doc_id << std::endl;
+			std::cout << "Doc: " << doc << std::endl;
+			std::cout << std::flush;
+			std::exit(1);
+		}
+
+		if (terminator == ',' && doc[char_idx] == ',') {
+			++char_idx;
+			break;
+		}
+
+		if (doc[char_idx] == '\n') {
+			++char_idx;
+			break;
+		}
+
+		if (terminator == '"' && doc[char_idx] == '"') {
+			++char_idx;
+			if (doc[char_idx] == ',' || doc[char_idx] == '\n') {
+				break;
+			}
+
+			if (doc[char_idx] == terminator) {
+				++char_idx;
+				continue;
+			}
+		}
+
+		if (doc[char_idx] == ' ' && term == "") {
+			++char_idx;
+			continue;
+		}
+
+		if (doc[char_idx] == ' ') {
+			if ((stop_words.find(term) != stop_words.end()) || !is_valid_token(term)) {
+				term.clear();
+				++char_idx;
+				++doc_size;
+				continue;
+			}
+
+			auto [it, add] = IP->unique_term_mappings[col_idx].try_emplace(
+					term, 
+					II->num_terms
+					);
+			if (add) {
+				// New term
+				terms_seen.insert({it->second, 1});
+
+				if (II->num_terms + 1 == *doc_freqs_capacity) {
+					*doc_freqs_capacity *= 2;
+					II->doc_freqs = (uint32_t*)realloc(
+							II->doc_freqs, 
+							*doc_freqs_capacity * sizeof(uint32_t)
+							);
+				}
+
+				II->doc_freqs[II->num_terms++] = 1;
+
+			} else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert({it->second, 1});
+					++(II->doc_freqs[it->second]);
+				} else {
+					++(terms_seen[it->second]);
+				}
+			}
+
+			++doc_size;
+			term.clear();
+
+			++char_idx;
+			continue;
+		}
+
+		term += toupper(doc[char_idx]);
+		++char_idx;
+	}
+
+	if (term != "") {
+		if ((stop_words.find(term) == stop_words.end()) && is_valid_token(term)) {
+			auto [it, add] = IP->unique_term_mappings[col_idx].try_emplace(
+					term, 
+					II->num_terms
+					);
+
+			if (add) {
+				// New term
+				terms_seen.insert({it->second, 1});
+
+				if (II->num_terms + 1 == *doc_freqs_capacity) {
+					*doc_freqs_capacity *= 2;
+					II->doc_freqs = (uint32_t*)realloc(
+							II->doc_freqs, 
+							*doc_freqs_capacity * sizeof(uint32_t)
+							);
+				}
+
+				II->doc_freqs[II->num_terms++] = 1;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert({it->second, 1});
+					++(II->doc_freqs[it->second]);
+				}
+				else {
+					++(terms_seen[it->second]);
+				}
+			}
+		}
+		++doc_size;
+	}
+
+	// When other col for doc has already been processed.
+	IP->II[col_idx].doc_sizes[doc_id] = (uint16_t)doc_size;
+
+	if (terms_seen.empty()) {
+		add_token(
+				token_stream,
+				UINT32_MAX,
+				UINT8_MAX,
+				true
+				);
+		return char_idx;
+	}
+
+	// Start as true unless it is the first document.
+	bool first = doc_id != 0;
+	for (const auto& [term_idx, tf] : terms_seen) {
+		add_token(
+				token_stream,
+				term_idx,
+				tf,
+				first
+				);
+		first = false;
+	}
+
+	return char_idx;
+}
+
+uint32_t _BM25::_process_doc_partition_rfc_4180_quoted_v2(
+		const char* doc,
+		TokenStream* token_stream,
+		uint64_t doc_id,
+		uint16_t partition_id,
+		uint16_t col_idx,
+		uint32_t* doc_freqs_capacity
+		) {
+	BM25PartitionNew* IP = &index_partitions[partition_id];
+	InvertedIndexNew* II = &IP->II[col_idx];
+
+	uint32_t char_idx = 0;
+
+	std::string term = "";
+
+	MAP<uint64_t, uint8_t> terms_seen;
+
+	// Split by commas not inside double quotes
+	uint64_t doc_size = 0;
+	while (true) {
+		if (char_idx > 1048576) {
+			std::cout << "Search field not found on line: " << doc_id << std::endl;
+			std::cout << "Doc: " << doc << std::endl;
+			std::cout << std::flush;
+			std::exit(1);
+		}
+
+		if (doc[char_idx] == '"') {
+			++char_idx;
+			if (doc[char_idx] == ',' || doc[char_idx] == '\n') {
+				break;
+			}
+
+			if (doc[char_idx] == '"') {
+				++char_idx;
+				continue;
+			}
+		}
+
+		if ((doc[char_idx] == ' ' || doc[char_idx] == ' ') && term == "") {
+			++char_idx;
+			continue;
+		}
+
+		if ((doc[char_idx] == ' ' || doc[char_idx] == ' ')) {
+			if ((stop_words.find(term) != stop_words.end()) || !is_valid_token(term)) {
+				term.clear();
+				++char_idx;
+				++doc_size;
+				continue;
+			}
+
+			auto [it, add] = IP->unique_term_mappings[col_idx].try_emplace(
+					term, 
+					II->num_terms
+					);
+			if (add) {
+				// New term
+				terms_seen.insert({it->second, 1});
+
+				if (II->num_terms + 1 == *doc_freqs_capacity) {
+					*doc_freqs_capacity *= 2;
+					II->doc_freqs = (uint32_t*)realloc(
+							II->doc_freqs, 
+							*doc_freqs_capacity * sizeof(uint32_t)
+							);
+				}
+
+				II->doc_freqs[II->num_terms++] = 1;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert({it->second, 1});
+					++(II->doc_freqs[it->second]);
+				}
+				else {
+					++(terms_seen[it->second]);
+				}
+			}
+
+			++doc_size;
+			term.clear();
+
+			++char_idx;
+			continue;
+		}
+
+		term += toupper(doc[char_idx]);
+		++char_idx;
+	}
+
+	if (term != "") {
+		if ((stop_words.find(term) == stop_words.end()) && is_valid_token(term)) {
+			auto [it, add] = IP->unique_term_mappings[col_idx].try_emplace(
+					term, 
+					II->num_terms
+					);
+
+			if (add) {
+				// New term
+				terms_seen.insert({it->second, 1});
+
+				if (II->num_terms + 1 == *doc_freqs_capacity) {
+					*doc_freqs_capacity *= 2;
+					II->doc_freqs = (uint32_t*)realloc(
+							II->doc_freqs, 
+							*doc_freqs_capacity * sizeof(uint32_t)
+							);
+				}
+
+				II->doc_freqs[II->num_terms++] = 1;
+			}
+			else {
+				// Term already exists
+				if (terms_seen.find(it->second) == terms_seen.end()) {
+					terms_seen.insert({it->second, 1});
+					++(II->doc_freqs[it->second]);
+				}
+				else {
+					++(terms_seen[it->second]);
+				}
+			}
+		}
+		++doc_size;
+	}
+
+	IP->II[col_idx].doc_sizes[doc_id] = (uint16_t)doc_size;
+
+	if (terms_seen.empty()) {
+		add_token(
+				token_stream,
+				UINT32_MAX,
+				UINT8_MAX,
+				true
+				);
+		return char_idx;
+	}
+
+	// Start as true unless it is the first document.
+	bool first = doc_id != 0;
+	for (const auto& [term_idx, tf] : terms_seen) {
+		add_token(
+				token_stream,
+				term_idx,
+				tf,
+				first
+				);
+		first = false;
+	}
+
+	return char_idx;
+}
 
 
+/*
 void _BM25::process_doc_partition_rfc_4180_mmap(
 		const char* file_data,
 		const char terminator,
@@ -1150,7 +1662,8 @@ void _BM25::process_doc_partition_rfc_4180_mmap(
 
 	std::string term = "";
 
-	robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	// robin_hood::unordered_flat_map<uint64_t, uint8_t> terms_seen;
+	MAP<uint64_t, uint8_t> terms_seen;
 
 	// Split by commas not inside double quotes
 	uint64_t doc_size = 0;
@@ -1277,6 +1790,7 @@ void _BM25::process_doc_partition_rfc_4180_mmap(
 		II.prev_doc_ids[term_idx] = doc_id;
 	}
 }
+*/
 
 void _BM25::update_progress(int line_num, int num_lines, uint16_t partition_id) {
     const int bar_width = 121;
@@ -1298,7 +1812,7 @@ void _BM25::update_progress(int line_num, int num_lines, uint16_t partition_id) 
     {
         std::lock_guard<std::mutex> lock(progress_mutex);
 
-        progress_bars.resize(std::max(progress_bars.size(), static_cast<size_t>(partition_id + 1)));
+        progress_bars.resize(max(progress_bars.size(), static_cast<size_t>(partition_id + 1)));
         progress_bars[partition_id] = output;
 
         std::cout << "\033[s";  // Save the cursor position
@@ -1319,6 +1833,7 @@ void _BM25::finalize_progress_bar() {
 }
 
 
+/*
 IIRow get_II_row(InvertedIndex* II, uint64_t term_idx) {
 	IIRow row;
 
@@ -1344,6 +1859,24 @@ IIRow get_II_row(InvertedIndex* II, uint64_t term_idx) {
 	}
 
 	assert(row.doc_ids.size() == row.term_freqs.size());
+
+	return row;
+}
+*/
+
+IIRow get_II_row_new(InvertedIndexNew* II, uint64_t term_idx) {
+	IIRow row;
+
+	row.df = II->doc_freqs[term_idx];
+
+	// Convert doc_ids back to absolute values
+	row.term_freqs.resize(row.df);
+	row.doc_ids.resize(row.df);
+	for (size_t i = 0; i < row.df; ++i) {
+		size_t idx = II->doc_offsets[term_idx] + i;
+		row.term_freqs[i] = II->doc_ids[idx].tf;
+		row.doc_ids[i]    = II->doc_ids[idx].doc_id;
+	}
 
 	return row;
 }
@@ -1394,6 +1927,7 @@ static inline void scan_to_next_key(
 	++char_idx;
 }
 
+/*
 void _BM25::write_bloom_filters(uint16_t partition_id) {
 	uint32_t min_df_bloom;
 	if (bloom_df_threshold <= 1.0f) {
@@ -1409,10 +1943,10 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 
 		for (uint64_t idx = 0; idx < II.doc_freqs.size(); ++idx) {
 			uint32_t df = II.doc_freqs[idx];
-			if (df < min_df_bloom) continue;
+			if (df <= min_df_bloom) continue;
 
-			// robin_hood::unordered_flat_set<uint16_t> distinct_term_freq_values;
-			robin_hood::unordered_flat_map<uint8_t, uint64_t> tf_map;
+			// robin_hood::unordered_flat_map<uint8_t, uint64_t> tf_map;
+			MAP<uint8_t, uint64_t> tf_map;
 			IIRow row = get_II_row(&II, idx);
 
 			// Construct min heap to keep track of top k term frequencies and doc ids
@@ -1435,7 +1969,7 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 				}
 			}
 
-			BloomEntry bloom_entry = init_bloom_entry(bloom_fpr, tf_map);
+			BloomEntry bloom_entry = init_bloom_entry(bloom_fpr, tf_map, min_df_bloom);
 
 			// partial sort TOP_K term_freqs descending. Get idxs
 			bloom_entry.topk_doc_ids.reserve(min_heap.size());
@@ -1451,7 +1985,7 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 
 			for (uint32_t i = 0; i < row.doc_ids.size(); ++i) {
 				uint64_t doc_id    = row.doc_ids[i];
-				uint16_t term_freq = row.term_freqs[i];
+				size_t   term_freq = (size_t)row.term_freqs[i];
 				bloom_put(bloom_entry.bloom_filters[term_freq], doc_id);
 			}
 
@@ -1459,14 +1993,35 @@ void _BM25::write_bloom_filters(uint16_t partition_id) {
 		}
 	}
 }
+*/
 
 void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
 	FILE* f = reference_file_handles[partition_id];
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
 	if (fseek(f, start_byte, SEEK_SET) != 0) {
 		std::cerr << "Error seeking file." << std::endl;
 		std::exit(1);
+	}
+
+
+	// Make dir with partition_id
+	std::string dir = "partition_" + std::to_string(partition_id);
+	std::string cmd = "rm -rf " + dir;
+	system(cmd.c_str());
+	cmd = "mkdir -p " + dir;
+	system(cmd.c_str());
+
+	TokenStream* token_streams = (TokenStream*)malloc(search_cols.size() * sizeof(TokenStream));
+	uint32_t* doc_freqs_capacity = (uint32_t*)malloc(search_cols.size() * sizeof(uint32_t));
+
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		doc_freqs_capacity[col_idx] = (uint32_t)(IP->num_docs * 0.1);
+		IP->II[col_idx].doc_freqs = (uint32_t*)malloc(doc_freqs_capacity[col_idx] * sizeof(uint32_t));
+		IP->II[col_idx].doc_sizes = (uint16_t*)malloc(IP->num_docs * sizeof(uint16_t));
+
+		std::string filename = dir + "/" + "col_" + std::to_string(col_idx) + ".txt";
+		init_token_stream(&token_streams[col_idx], filename);
 	}
 
 	// Reset file pointer to beginning
@@ -1479,27 +2034,18 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 	uint64_t line_num = 0;
 	uint64_t byte_offset = start_byte;
 
-	std::vector<uint32_t> unique_terms_found(search_cols.size(), 0);
-
-	const int UPDATE_INTERVAL = 10000;
+	const uint32_t UPDATE_INTERVAL = max(1, IP->num_docs / 1000);
 	while ((read = json_getline(&line, &len, f)) != -1) {
 
 		if (byte_offset >= end_byte) {
 			break;
 		}
 
-		if (!DEBUG) {
-			if (line_num % UPDATE_INTERVAL == 0) {
-				update_progress(line_num, IP.num_docs, partition_id);
-			}
-		}
+		if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, IP->num_docs, partition_id);
 		if (strlen(line) == 0) {
 			std::cout << "Empty line found" << std::endl;
 			std::exit(1);
 		}
-
-		IP.line_offsets.push_back(byte_offset);
-		byte_offset += read;
 
 		std::string key = "";
 		bool found = false;
@@ -1540,10 +2086,11 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 							char_idx += process_doc_partition_json(
 									&line[char_idx], 
 									'"', 
+									&token_streams[search_col_idx],
 									line_num, 
-									unique_terms_found[search_col_idx], 
 									partition_id,
-									search_col_idx
+									search_col_idx,
+									&doc_freqs_capacity[search_col_idx]
 									); ++char_idx;
 							scan_to_next_key(line, char_idx);
 							key.clear();
@@ -1581,37 +2128,44 @@ void _BM25::read_json(uint64_t start_byte, uint64_t end_byte, uint16_t partition
 				}
 		}
 
-		if (!DEBUG) {
-			if (line_num % UPDATE_INTERVAL == 0) {
-				update_progress(line_num, IP.num_docs, partition_id);
-			}
-		}
+			if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, IP->num_docs, partition_id);
 
 		++line_num;
 	}
 
-	if (!DEBUG) update_progress(line_num, IP.num_docs, partition_id);
+	update_progress(line_num, IP->num_docs, partition_id);
 	free(line);
 
-	if (DEBUG) {
-		for (uint16_t col = 0; col < search_cols.size(); ++col) {
-			std::cout << "Vocab size: " << unique_terms_found[col] << std::endl;
+	// Calc avg_doc_size
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		double avg_doc_size = 0;
+		for (size_t idx = 0; idx < IP->num_docs; ++idx) {
+			avg_doc_size += (double)IP->II[col_idx].doc_sizes[idx];
 		}
+		IP->II[col_idx].avg_doc_size = (float)(avg_doc_size / IP->num_docs);
 	}
 
-	// Calc avg_doc_size
-	for (uint16_t col = 0; col < search_cols.size(); ++col) {
-		double avg_doc_size = 0;
-		for (const auto& size : IP.II[col].doc_sizes) {
-			avg_doc_size += (double)size;
-		}
-		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
+
+	// TODO: Process token stream and build II and bloom filters.
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		IP->II[col_idx].num_terms = IP->unique_term_mappings[col_idx].size();
+		IP->II[col_idx].num_docs  = IP->num_docs;
+		IP->II[col_idx].avg_doc_size = IP->II[col_idx].avg_doc_size;
+
+		read_token_stream(&IP->II[col_idx], &token_streams[col_idx]);
 	}
+
+	free(token_streams);
+	free(doc_freqs_capacity);
+
+	// delete dir
+	std::string rm_cmd = "rm -rf " + dir;
+	system(rm_cmd.c_str());
 }
 
 void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
 	FILE* f = reference_file_handles[partition_id];
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
 	// Reset file pointer to beginning
 	if (fseek(f, start_byte, SEEK_SET) != 0) {
@@ -1621,41 +2175,61 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 
 	// Read the file line by line
 	char*    line = NULL;
-	size_t   len = 0;
-	ssize_t  read;
 	uint64_t line_num = 0;
-	uint64_t byte_offset = start_byte;
 
-	std::vector<uint32_t> unique_terms_found(search_cols.size());
-	IP.line_offsets.reserve(IP.num_docs);
-	for (uint16_t col = 0; col < search_cols.size(); ++col) {
-		IP.II[col].prev_doc_ids.reserve(IP.num_docs);
-		IP.II[col].doc_freqs.reserve(IP.num_docs);
-		IP.II[col].doc_sizes.reserve(IP.num_docs);
-		IP.unique_term_mapping[col].reserve(IP.num_docs);
+	// Make dir with partition_id
+	std::string dir = "partition_" + std::to_string(partition_id);
+	std::string cmd = "rm -rf " + dir;
+	system(cmd.c_str());
+	cmd = "mkdir -p " + dir;
+	system(cmd.c_str());
+
+	TokenStream* token_streams = (TokenStream*)malloc(search_cols.size() * sizeof(TokenStream));
+	uint32_t* doc_freqs_capacity = (uint32_t*)malloc(search_cols.size() * sizeof(uint32_t));
+
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		init_inverted_index_new(&IP->II[col_idx]);
+
+		doc_freqs_capacity[col_idx] = (uint32_t)(IP->num_docs * 0.1);
+		IP->II[col_idx].doc_freqs = (uint32_t*)malloc(
+				doc_freqs_capacity[col_idx] * sizeof(uint32_t)
+				);
+		IP->II[col_idx].doc_sizes = (uint16_t*)malloc(IP->num_docs * sizeof(uint16_t));
+
+		std::string filename = dir + "/" + "col_" + std::to_string(col_idx) + ".txt";
+		init_token_stream(&token_streams[col_idx], filename);
 	}
 
-	// Small string optimization limit on most platforms
 	std::string doc = "";
-	doc.reserve(22);
 
 	char end_delim = ',';
 
-	const int UPDATE_INTERVAL = 10000;
-	while ((read = rfc4180_getline(&line, &len, f)) != -1) {
+	uint64_t current_offset;
+	uint64_t next_offset;
+	
+	assert(IP->num_docs != 0);
 
-		if (byte_offset >= end_byte) {
-			break;
+	line = (char*)malloc(1048576);
+
+	const uint32_t UPDATE_INTERVAL = max(1, IP->num_docs / 1000);
+	while (line_num < IP->num_docs) {
+		current_offset = IP->line_offsets[line_num];
+
+		fseek(f, current_offset, SEEK_SET);
+		if (line_num == IP->num_docs - 1) {
+			next_offset = end_byte;
+			fread(line, 1, next_offset - current_offset, f);
+		} else {
+			next_offset = IP->line_offsets[line_num + 1];
+			fread(line, 1, next_offset - current_offset, f);
 		}
+
 
 		if (!DEBUG) {
 			if (line_num % UPDATE_INTERVAL == 0) {
-				update_progress(line_num, IP.num_docs, partition_id);
+				update_progress(line_num, IP->num_docs, partition_id);
 			}
 		}
-
-		IP.line_offsets.push_back(byte_offset);
-		byte_offset += read;
 
 		int char_idx = 0;
 		int col_idx  = 0;
@@ -1709,24 +2283,27 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 			// Split by commas not inside double quotes
 			if (line[char_idx] == '"') {
 				++char_idx;
-				char_idx += _process_doc_partition_rfc_4180_quoted(
+				char_idx += _process_doc_partition_rfc_4180_quoted_v2(
 					&line[char_idx],
+					&token_streams[_search_col_idx],
 					line_num,
-					unique_terms_found[_search_col_idx],
 					partition_id,
-					_search_col_idx
+					_search_col_idx,
+					&doc_freqs_capacity[_search_col_idx]
 					) + 1;
 				++_search_col_idx;
+				++line_num;
 				continue;
 			}
 
-			char_idx += process_doc_partition_rfc_4180(
+			char_idx += process_doc_partition_rfc_4180_v2(
 				&line[char_idx], 
 				end_delim,
+				&token_streams[_search_col_idx],
 				line_num, 
-				unique_terms_found[_search_col_idx], 
 				partition_id,
-				_search_col_idx
+				_search_col_idx,
+				&doc_freqs_capacity[_search_col_idx]
 				);
 			++_search_col_idx;
 		}
@@ -1735,177 +2312,40 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 
 	free(line);
 
-	if (!DEBUG) update_progress(line_num + 1, IP.num_docs, partition_id);
-
-	if (DEBUG) {
-		for (uint32_t col = 0; col < search_col_idxs.size(); ++col) {
-			std::cout << "Vocab size " << col << ": " << unique_terms_found[col] << std::endl;
-		}
+	// Flush remaining tokens
+	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+		flush_token_stream(&token_streams[col]);
 	}
+	
 
-	IP.num_docs = IP.II[0].doc_sizes.size();
+	if (!DEBUG) update_progress(line_num + 1, IP->num_docs, partition_id);
 
 	// Calc avg_doc_size
-	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 		double avg_doc_size = 0;
-		for (const auto& size : IP.II[col].doc_sizes) {
-			avg_doc_size += (double)size;
+		for (size_t idx = 0; idx < IP->num_docs; ++idx) {
+			avg_doc_size += (double)IP->II[col_idx].doc_sizes[idx];
 		}
-		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
+		IP->II[col_idx].avg_doc_size = (float)(avg_doc_size / IP->num_docs);
 	}
+
+	// TODO: Process token stream and build II and bloom filters.
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		IP->II[col_idx].num_terms = IP->unique_term_mappings[col_idx].size();
+		IP->II[col_idx].num_docs  = IP->num_docs;
+		IP->II[col_idx].avg_doc_size = IP->II[col_idx].avg_doc_size;
+
+		read_token_stream(&IP->II[col_idx], &token_streams[col_idx]);
+	}
+
+	free(token_streams);
+	free(doc_freqs_capacity);
+
+	// delete dir
+	std::string rm_cmd = "rm -rf " + dir;
+	system(rm_cmd.c_str());
 }
 
-
-void _BM25::read_csv_rfc_4180_mmap(uint64_t start_byte, uint64_t end_byte, uint16_t partition_id) {
-	FILE* f = reference_file_handles[partition_id];
-	BM25Partition& IP = index_partitions[partition_id];
-
-	// Reset file pointer to beginning
-	if (fseek(f, start_byte, SEEK_SET) != 0) {
-		std::cerr << "Error seeking file." << std::endl;
-		std::exit(1);
-	}
-
-	uint64_t byte_offset = start_byte;
-	uint64_t line_num = 0;
-
-	// Use mmap to read file
-	struct stat sb;
-	if (fstat(fileno(f), &sb) == -1) {
-		perror("fstat");
-		exit(1);
-	}
-
-	char* data = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fileno(f), 0);
-	if (data == MAP_FAILED) {
-		perror("mmap");
-		exit(1);
-	}
-
-	std::vector<uint32_t> unique_terms_found(search_cols.size());
-
-	// Small string optimization limit on most platforms
-	std::string doc = "";
-	doc.reserve(22);
-
-	char end_delim = ',';
-	uint16_t col_idx  = 0;
-	uint16_t _search_col_idx = 0;
-
-	const int UPDATE_INTERVAL = 10000;
-	while (byte_offset < end_byte) {
-
-		for (const auto& search_col_idx : search_col_idxs) {
-
-			if (search_col_idx == (int)columns.size() - 1) {
-				end_delim = '\n';
-			}
-			else {
-				end_delim = ',';
-			}
-
-			// Iterate of line chars until we get to relevant column.
-			while (col_idx != search_col_idx) {
-
-				if (data[byte_offset] == '"') {
-					// Skip to next unescaped quote
-					++byte_offset;
-
-					while (1) {
-						// Escape quote. Continue to next character.
-						if (data[byte_offset] == '"' && data[byte_offset + 1] == '"') {
-							byte_offset += 2;
-							continue;
-						} else if (data[byte_offset] == '"') {
-							++byte_offset;
-							break;
-						} else {
-							++byte_offset;
-						}
-					}
-				}
-
-				if (data[byte_offset] == ',') {
-					++col_idx;
-					++byte_offset;
-				} else if (data[byte_offset] == '\n') {
-					col_idx = 0;
-
-					++line_num;
-					if (!DEBUG) {
-						if (line_num % UPDATE_INTERVAL == 0) {
-							update_progress(line_num, IP.num_docs, partition_id);
-						}
-					}
-					IP.line_offsets.push_back(++byte_offset);
-				} else {
-					++byte_offset;
-				}
-			}
-			++col_idx;
-
-			// Split by commas not inside double quotes
-			if (data[byte_offset] == '"') {
-				++byte_offset;
-
-				process_doc_partition_rfc_4180_mmap(
-					data,
-					'"',
-					line_num,
-					unique_terms_found[_search_col_idx],
-					partition_id,
-					_search_col_idx,
-					byte_offset
-					);
-				_search_col_idx = (_search_col_idx + 1) % search_cols.size();
-				continue;
-			}
-
-			process_doc_partition_rfc_4180_mmap(
-				data,
-				end_delim,
-				line_num, 
-				unique_terms_found[_search_col_idx], 
-				partition_id,
-				_search_col_idx,
-				byte_offset
-				);
-			_search_col_idx = (_search_col_idx + 1) % search_cols.size();
-		}
-
-		++line_num;
-		if (!DEBUG) {
-			if (line_num % UPDATE_INTERVAL == 0) {
-				update_progress(line_num, IP.num_docs, partition_id);
-			}
-		}
-		IP.line_offsets.push_back(++byte_offset);
-	}
-	if (!DEBUG) update_progress(line_num + 1, IP.num_docs, partition_id);
-
-	if (DEBUG) {
-		for (uint32_t col = 0; col < search_col_idxs.size(); ++col) {
-			std::cout << "Vocab size " << col << ": " << unique_terms_found[col] << std::endl;
-		}
-	}
-
-	// Unmap file
-	if (munmap(data, sb.st_size) == -1) {
-		perror("munmap");
-		exit(1);
-	}
-
-	IP.num_docs = IP.II[0].doc_sizes.size();
-
-	// Calc avg_doc_size
-	for (uint16_t col = 0; col < search_cols.size(); ++col) {
-		double avg_doc_size = 0;
-		for (const auto& size : IP.II[col].doc_sizes) {
-			avg_doc_size += (double)size;
-		}
-		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
-	}
-}
 
 
 void _BM25::read_in_memory(
@@ -1914,59 +2354,91 @@ void _BM25::read_in_memory(
 		uint64_t end_idx, 
 		uint16_t partition_id
 		) {
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
-	IP.num_docs = end_idx - start_idx;
+	IP->num_docs = end_idx - start_idx;
 
-	std::vector<uint32_t> unique_terms_found(search_cols.size(), 0);
+	// Make dir with partition_id
+	std::string dir = "partition_" + std::to_string(partition_id);
+	std::string cmd = "rm -rf " + dir;
+	system(cmd.c_str());
+	cmd = "mkdir -p " + dir;
+	system(cmd.c_str());
+
+	TokenStream* token_streams = (TokenStream*)malloc(search_cols.size() * sizeof(TokenStream));
+	uint32_t* doc_freqs_capacity = (uint32_t*)malloc(search_cols.size() * sizeof(uint32_t));
+
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		doc_freqs_capacity[col_idx] = (uint32_t)(IP->num_docs * 0.1);
+		IP->II[col_idx].doc_freqs = (uint32_t*)malloc(doc_freqs_capacity[col_idx] * sizeof(uint32_t));
+		IP->II[col_idx].doc_sizes = (uint16_t*)malloc(IP->num_docs * sizeof(uint16_t));
+
+		std::string filename = dir + "/" + "col_" + std::to_string(col_idx) + ".txt";
+		init_token_stream(&token_streams[col_idx], filename);
+
+		init_inverted_index_new(&IP->II[col_idx]);
+	}
 
 	uint32_t cntr = 0;
-	const int UPDATE_INTERVAL = 10000;
+	const uint32_t UPDATE_INTERVAL = max(1, IP->num_docs / 1000);
 
 	for (uint64_t line_num = start_idx; line_num < end_idx; ++line_num) {
-		if (!DEBUG) {
-			if (cntr % UPDATE_INTERVAL == 0) {
-				update_progress(cntr, IP.num_docs, partition_id);
-			}
-		}
+		if (cntr % UPDATE_INTERVAL == 0) update_progress(cntr, IP->num_docs, partition_id);
 
-		for (uint16_t col = 0; col < search_cols.size(); ++col) {
-			std::string& doc = documents[line_num][col];
-			// process_doc_partition(
-			process_doc_partition_rfc_4180(
+		for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+			std::string& doc = documents[line_num][col_idx];
+			process_doc_partition_rfc_4180_v2(
 				(doc + "\n").c_str(),
 				'\n',
+				&token_streams[col_idx],
 				cntr, 
-				unique_terms_found[col],
 				partition_id,
-				col
+				col_idx,
+				&doc_freqs_capacity[col_idx]
 				);
 		}
 		++cntr;
 	}
-	if (!DEBUG) update_progress(cntr + 1, IP.num_docs, partition_id);
-
-	IP.num_docs = IP.II[0].doc_sizes.size();
+	if (!DEBUG) update_progress(cntr + 1, IP->num_docs, partition_id);
 
 	// Calc avg_doc_size
-	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 		double avg_doc_size = 0;
-		for (const auto& size : IP.II[col].doc_sizes) {
-			avg_doc_size += (double)size;
+		for (size_t idx = 0; idx < IP->num_docs; ++idx) {
+			avg_doc_size += (double)IP->II[col_idx].doc_sizes[idx];
 		}
-		IP.II[col].avg_doc_size = (float)(avg_doc_size / IP.num_docs);
+		IP->II[col_idx].avg_doc_size = (float)(avg_doc_size / IP->num_docs);
 	}
+
+	// TODO: Process token stream and build II and bloom filters.
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		IP->II[col_idx].num_terms = IP->unique_term_mappings[col_idx].size();
+		IP->II[col_idx].num_docs  = IP->num_docs;
+		IP->II[col_idx].avg_doc_size = IP->II[col_idx].avg_doc_size;
+
+		read_token_stream(&IP->II[col_idx], &token_streams[col_idx]);
+	}
+
+	free(token_streams);
+	free(doc_freqs_capacity);
+
+	// delete dir
+	std::string rm_cmd = "rm -rf " + dir;
+	system(rm_cmd.c_str());
 }
 
 
-std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_num, uint16_t partition_id) {
+std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(
+		uint32_t line_num, 
+		uint16_t partition_id
+		) {
 	FILE* f = reference_file_handles[partition_id];
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
 	// seek from FILE* reference_file which is already open
-	fseek(f, IP.line_offsets[line_num], SEEK_SET);
-	char* line = NULL;
-	size_t len = 0;
+	fseek(f, IP->line_offsets[line_num], SEEK_SET);
+	char*   line = NULL;
+	size_t  len  = 0;
 	ssize_t read = rfc4180_getline(&line, &len, f);
 
 	// Create effective json by combining column names with values split by commas
@@ -2012,12 +2484,15 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_csv_line(int line_nu
 }
 
 
-std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_num, uint16_t partition_id) {
+std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(
+		uint32_t line_num, 
+		uint16_t partition_id
+		) {
 	FILE* f = reference_file_handles[partition_id];
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
 	// seek from FILE* reference_file which is already open
-	fseek(f, IP.line_offsets[line_num], SEEK_SET);
+	fseek(f, IP->line_offsets[line_num], SEEK_SET);
 	char* line = NULL;
 	size_t len = 0;
 	ssize_t size = getline(&line, &len, f);
@@ -2078,6 +2553,7 @@ std::vector<std::pair<std::string, std::string>> _BM25::get_json_line(int line_n
 	return row;
 }
 
+/*
 void _BM25::save_index_partition(
 		std::string db_dir,
 		uint16_t partition_id
@@ -2148,6 +2624,7 @@ void _BM25::load_index_partition(
 			);
 
 	decompress_uint64(compressed_line_offsets, IP.line_offsets);
+	printf("Line offsets size: %lu\n", IP.line_offsets.size());
 
 	// Load doc_freqs
 	for (uint16_t col_idx = 0; col_idx < search_col_idxs.size(); ++col_idx) {
@@ -2391,7 +2868,7 @@ void _BM25::load_from_disk(const std::string& db_dir) {
 
 	printf("Loaded in %fs\n", elapsed_seconds.count()); fflush(stdout);
 }
-
+*/
 
 _BM25::_BM25(
 		std::string filename,
@@ -2429,13 +2906,7 @@ _BM25::_BM25(
 
 	std::vector<std::thread> threads;
 
-	index_partitions.resize(num_partitions);
-	for (uint16_t i = 0; i < num_partitions; ++i) {
-		index_partitions[i].II.resize(search_cols.size());
-		index_partitions[i].unique_term_mapping.resize(search_cols.size());
-	}
-
-	num_docs = 0;
+	// num_docs = 0;
 
 	progress_bars.resize(num_partitions);
 
@@ -2452,8 +2923,7 @@ _BM25::_BM25(
 			threads.push_back(std::thread(
 				[this, i] {
 					read_csv_rfc_4180(partition_boundaries[i], partition_boundaries[i + 1], i);
-					// read_csv_rfc_4180_mmap(partition_boundaries[i], partition_boundaries[i + 1], i);
-					write_bloom_filters(i);
+					// write_bloom_filters(i);
 				}
 			));
 		}
@@ -2471,7 +2941,7 @@ _BM25::_BM25(
 			threads.push_back(std::thread(
 				[this, i] {
 					read_json(partition_boundaries[i], partition_boundaries[i + 1], i);
-					write_bloom_filters(i);
+					// write_bloom_filters(i);
 				}
 			));
 		}
@@ -2498,17 +2968,14 @@ _BM25::_BM25(
 	uint32_t unique_terms_found = 0;
 	uint64_t bloom_filters_size = 0;
 	uint64_t total_bloom_filters = 0;
+	/*
 	for (uint16_t i = 0; i < num_partitions; ++i) {
-		BM25Partition& IP = index_partitions[i];
+		BM25PartitionNew* IP = &index_partitions[i];
 
 		uint64_t part_size = 0;
 		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
-			for (const auto& row : IP.II[col_idx].inverted_index_compressed) {
-				part_size += sizeof(uint8_t) * row.doc_ids.size();
-				part_size += sizeof(RLEElement_u8) * row.term_freqs.size();
-			}
-			unique_terms_found += IP.unique_term_mapping[col_idx].size();
-			total_bloom_filters += IP.II[col_idx].bloom_filters.size();
+			unique_terms_found += IP->unique_term_mappings[col_idx].size();
+			total_bloom_filters += IP->II[col_idx].bloom_filters.size();
 			for (const auto& bf : index_partitions[i].II[col_idx].bloom_filters) {
 				for (const auto& filter : bf.second.bloom_filters) {
 					bloom_filters_size += get_bloom_memory_usage(filter.second);
@@ -2518,6 +2985,7 @@ _BM25::_BM25(
 		total_size += part_size;
 
 	}
+	*/
 	total_size /= 1024 * 1024;
 	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
 	uint64_t line_offsets_size = num_docs * 8 / 1048576;
@@ -2574,17 +3042,17 @@ _BM25::_BM25(
 	search_cols.resize(documents[0].size());
 	search_col_idxs.resize(documents[0].size());
 
-	index_partitions.resize(num_partitions);
-	for (uint16_t i = 0; i < num_partitions; ++i) {
-		index_partitions[i].II.resize(search_cols.size());
-		index_partitions[i].unique_term_mapping.resize(search_cols.size());
-	}
-
-	index_partitions.resize(num_partitions);
 	partition_boundaries.resize(num_partitions + 1);
+
+	index_partitions = (BM25PartitionNew*)malloc(num_partitions * sizeof(BM25PartitionNew));
 
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		partition_boundaries[i] = (uint64_t)i * (num_docs / num_partitions);
+		init_bm25_partition_new(
+				&index_partitions[i],
+				num_docs / num_partitions,
+				search_cols.size()
+				);
 	}
 	partition_boundaries[num_partitions] = num_docs;
 
@@ -2613,7 +3081,7 @@ _BM25::_BM25(
 						partition_boundaries[i + 1], 
 						i
 						);
-				write_bloom_filters(i);
+				// write_bloom_filters(i);
 			}
 		));
 	}
@@ -2626,6 +3094,7 @@ _BM25::_BM25(
 
 	uint64_t total_size = 0;
 	uint32_t unique_terms_found = 0;
+	/*
 	for (uint16_t i = 0; i < num_partitions; ++i) {
 		BM25Partition& IP = index_partitions[i];
 
@@ -2641,6 +3110,8 @@ _BM25::_BM25(
 
 	}
 	total_size /= 1024 * 1024;
+	*/
+
 	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
 	uint64_t line_offsets_size = num_docs * 8 / 1048576;
 	uint64_t doc_sizes_size = num_docs * 2 * search_cols.size() / 1048576;
@@ -2671,7 +3142,7 @@ inline float _BM25::_compute_bm25(
 		uint16_t col_idx,
 		uint16_t partition_id
 		) {
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew IP = index_partitions[partition_id];
 
 	float weigted_doc_size = IP.II[col_idx].doc_sizes[doc_id] / IP.II[col_idx].avg_doc_size;
 	return idf * tf / (tf + k1 * (1 - b + b * weigted_doc_size));
@@ -2682,10 +3153,10 @@ void _BM25::add_query_term(
 		std::vector<std::vector<uint64_t>>& term_idxs,
 		uint16_t partition_id
 		) {
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
-	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
-		robin_hood::unordered_map<std::string, uint32_t>& vocab = IP.unique_term_mapping[col_idx];
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		MAP<std::string, uint32_t>& vocab = IP->unique_term_mappings[col_idx];
 
 		if (vocab.find(substr) == vocab.end()) {
 			continue;
@@ -2704,13 +3175,13 @@ void _BM25::add_query_term(
 TermType _BM25::add_query_term_bloom(
 		std::string& substr,
 		std::vector<std::vector<uint64_t>>& term_idxs,
-		std::vector<robin_hood::unordered_flat_map<uint64_t, BloomEntry>>& bloom_entries,
+		std::vector<MAP<uint64_t, BloomEntry>>& bloom_entries,
 		uint16_t partition_id,
 		uint16_t col_idx
 		) {
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
-	robin_hood::unordered_map<std::string, uint32_t>& vocab = IP.unique_term_mapping[col_idx];
+	MAP<std::string, uint32_t>& vocab = IP->unique_term_mappings[col_idx];
 
 	auto it = vocab.find(substr);
 	if (it == vocab.end()) {
@@ -2727,6 +3198,8 @@ TermType _BM25::add_query_term_bloom(
 	substr.clear();
 	term_idxs[col_idx].push_back(it->second);
 
+	// TODO: Fix
+	/*
 	auto it2 = IP.II[col_idx].bloom_filters.find(it->second);
 	if (it2 == IP.II[col_idx].bloom_filters.end()) {
 		return LOW_DF;
@@ -2735,6 +3208,8 @@ TermType _BM25::add_query_term_bloom(
 		bloom_entries[col_idx][it->second] = it2->second;
 		return HIGH_DF;
 	}
+	*/
+	return LOW_DF;
 }
 
 
@@ -2761,7 +3236,7 @@ static inline std::pair<uint64_t, uint16_t> pop_replace_minheap(
 			std::pair<uint64_t, uint16_t>,
 			std::vector<std::pair<uint64_t, uint16_t>>,
 			_compare_64_16>& min_heap,
-		robin_hood::unordered_flat_map<uint16_t, StandardEntry*>& II_streams,
+		MAP<uint16_t, StandardEntry*>& II_streams,
 		std::vector<uint32_t>& stream_idxs,
 		std::vector<uint64_t>& prev_doc_ids
 		) {
@@ -2779,6 +3254,7 @@ static inline std::pair<uint64_t, uint16_t> pop_replace_minheap(
 
 
 
+/*
 std::vector<BM25Result> _BM25::_query_partition_streaming(
 		std::string& query, 
 		uint32_t k,
@@ -2813,8 +3289,8 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 	}
 	if (total_terms == 0) return std::vector<BM25Result>();
 
-	robin_hood::unordered_flat_map<uint16_t, StandardEntry*> II_streams;
-	robin_hood::unordered_flat_map<uint16_t, BloomEntry*> bloom_entries;
+	MAP<uint16_t, StandardEntry*> II_streams;
+	MAP<uint16_t, BloomEntry*> bloom_entries;
 
 	std::vector<uint64_t> doc_freqs(total_terms, 0);
 	std::vector<float> idfs(total_terms, 0);
@@ -2958,6 +3434,7 @@ std::vector<BM25Result> _BM25::_query_partition_streaming(
 
 	return result;
 }
+*/
 
 std::vector<std::vector<std::pair<std::string, std::string>>> _BM25::get_topk_internal(
 		std::string& query,
@@ -2982,17 +3459,16 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 		std::vector<float> boost_factors,
 		std::vector<std::vector<uint64_t>> doc_freqs
 		) {
-	auto start = std::chrono::high_resolution_clock::now();
 
-	std::vector<robin_hood::unordered_flat_map<uint64_t, BloomEntry>> bloom_entries(search_cols.size());
+	std::vector<MAP<uint64_t, BloomEntry>> bloom_entries(search_cols.size());
 
-	BM25Partition& IP = index_partitions[partition_id];
+	BM25PartitionNew* IP = &index_partitions[partition_id];
 
 	uint64_t doc_offset = (file_type == IN_MEMORY) ? partition_boundaries[partition_id] : 0;
 
 	std::vector<std::vector<uint64_t>> term_idxs(search_cols.size());
 	std::vector<std::vector<TermType>> term_types(search_cols.size());
-	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 		std::string& q = query[col_idx];
 		std::string substr = "";
 
@@ -3011,6 +3487,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 					);	
 			term_types[col_idx].push_back(term_type);
 		}
+
 		if (!substr.empty()) {
 			TermType term_type = add_query_term_bloom(
 					substr, 
@@ -3026,14 +3503,14 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 
 	uint16_t num_low_df_terms  = 0;
 	uint16_t num_high_df_terms = 0;
-	for (uint16_t col_idx = 0; col_idx < term_idxs.size(); ++col_idx) {
+	for (size_t col_idx = 0; col_idx < term_idxs.size(); ++col_idx) {
 		assert(term_idxs[col_idx].size() == doc_freqs[col_idx].size());
 
-		for (uint64_t term_idx = 0; term_idx < term_idxs[col_idx].size(); ++term_idx) {
+		for (size_t term_idx = 0; term_idx < term_idxs[col_idx].size(); ++term_idx) {
 			TermType term_type = term_types[col_idx][term_idx];
-			if (term_type == 1) {
+			if (term_type == LOW_DF) {
 				++num_low_df_terms;
-			} else if (term_type == 2) {
+			} else if (term_type == HIGH_DF) {
 				++num_high_df_terms;
 			}
 		}
@@ -3041,39 +3518,38 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 	if (num_low_df_terms + num_high_df_terms == 0) return std::vector<BM25Result>();
 
 	// Score low_df terms first.
-	robin_hood::unordered_map<uint64_t, float> doc_scores;
+	MAP<uint64_t, float> doc_scores;
 
-	for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
-		for (uint16_t idx = 0; idx < term_idxs[col_idx].size(); ++idx) {
+	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		InvertedIndexNew* II = &IP->II[col_idx];
+
+		for (size_t idx = 0; idx < term_idxs[col_idx].size(); ++idx) {
 			if (term_types[col_idx][idx] != LOW_DF) continue;
 			uint64_t term_idx = term_idxs[col_idx][idx];
 
-			float boost_factor = boost_factors[col_idx];
-
 			uint64_t df = doc_freqs[col_idx][idx];
-			uint64_t df_partition = IP.II[col_idx].doc_freqs[term_idx];
+			uint64_t df_partition = IP->II[col_idx].doc_freqs[term_idx];
 
-			if (df == 0 || df > query_max_df || df_partition == 0) {
-				continue;
-			}
+			if (df == 0 || df > query_max_df || df_partition == 0) continue;
 
 			float idf = log((num_docs - df + 0.5f) / (df + 0.5f));
 
-			IIRow row = get_II_row(&IP.II[col_idx], term_idx);
-
-			assert(df_partition == row.doc_ids.size());
-			assert(df_partition == row.term_freqs.size());
 			for (uint64_t i = 0; i < df_partition; ++i) {
 
-				uint64_t doc_id  = row.doc_ids[i];
-				float tf 		 = (float)row.term_freqs[i];
+				size_t   idx 	= II->doc_offsets[term_idx] + i;
+				float    tf 	= (float)II->doc_ids[idx].tf;
+				uint64_t doc_id = (uint64_t)II->doc_ids[idx].doc_id;
+
+				// if (doc_id == IP->num_docs) continue;
+				assert(doc_id < IP->num_docs);
+
 				float bm25_score = _compute_bm25(
 						doc_id, 
 						tf, 
 						idf, 
 						col_idx, 
 						partition_id
-						) * boost_factor;
+						) * boost_factors[col_idx];
 
 				doc_id += doc_offset;
 				if (doc_scores.find(doc_id) == doc_scores.end()) {
@@ -3160,6 +3636,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 										col_idx,
 										partition_id
 										) * boost_factors[col_idx];
+								break;
 							}
 						}
 					}
@@ -3187,6 +3664,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 										col_idx,
 										partition_id
 										) * boost_factors[col_idx];
+								break;
 							}
 						}
 					}
@@ -3195,19 +3673,10 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 		}
 	}
 
-	if (DEBUG) {
-		auto end = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
-		std::cout << "Number of docs: " << doc_scores.size() << "   GATHER TIME: ";
-		std::cout << elapsed_ms.count() << "ms" << std::endl;
-		fflush(stdout);
-	}
-	
 	if (doc_scores.size() == 0) {
 		return std::vector<BM25Result>();
 	}
 
-	start = std::chrono::high_resolution_clock::now();
 	std::priority_queue<
 		BM25Result,
 		std::vector<BM25Result>,
@@ -3216,12 +3685,16 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 	for (const auto& pair : doc_scores) {
 		BM25Result result;
 		result.doc_id = pair.first;
-		result.score = pair.second;
+		result.score  = pair.second;
 		result.partition_id = partition_id;
 
-		top_k_docs.push(result);
-		if (top_k_docs.size() > k) {
-			top_k_docs.pop();
+		if (top_k_docs.size() < k) {
+			top_k_docs.push(result);
+		} else {
+			if (result.score > top_k_docs.top().score) {
+				top_k_docs.pop();
+				top_k_docs.push(result);
+			}
 		}
 	}
 

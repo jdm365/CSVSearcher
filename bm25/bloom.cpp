@@ -3,12 +3,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 #include <cmath>
 #include <random>
 
 #include <vector>
 
 #include "bloom.h"
+
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
 
 
 const uint64_t FNV_prime    = 1099511628211ULL;
@@ -177,19 +181,29 @@ void bloom_load(BloomFilter& filter, std::ifstream& file) {
 	file.read((char*)filter.bits, (filter.num_bits + 7) / 8);
 }
 
+uint64_t get_bloom_memory_usage(const BloomFilter& filter) {
+	return (filter.num_bits + 7) / 8;
+}
+
 
 ChunkedBloomFilter init_chunked_bloom_filter(uint32_t max_elements_chunk, double fpr) {
 	ChunkedBloomFilter filter;
-	filter.num_filters    = 1;
+	filter.num_filters        = 1;
 	filter.num_elements_chunk = 0; 
 	filter.max_elements_chunk = max_elements_chunk; 
 
 	uint64_t num_hashes, num_bits;
 	get_optimal_params(max_elements_chunk, fpr, num_hashes, num_bits);
+	num_bits = max(num_bits, 8);
+
 	filter.num_hashes = num_hashes;
 	filter.bits    = (uint8_t**)calloc(filter.num_filters, sizeof(uint8_t*));
 	filter.bits[0] = (uint8_t*)calloc((num_bits + 7) / 8, sizeof(uint8_t));
 	filter.num_bits_chunk = num_bits;
+
+	assert(num_bits > 7);
+	assert(num_hashes > 0); 
+	assert(num_hashes <= 128);
 
 	return filter;
 }
@@ -209,11 +223,11 @@ void bloom_free(ChunkedBloomFilter& filter) {
 
 void bloom_put(ChunkedBloomFilter& filter, const uint64_t key) {
 	for (uint64_t i = 0; i < filter.num_hashes; ++i) {
-		uint64_t hash = fnv1a_64(key, filter.num_hashes) % filter.num_bits_chunk;
+		uint64_t hash = fnv1a_64(key, SEEDS[i]) % filter.num_bits_chunk;
 		filter.bits[filter.num_filters - 1][hash / 8] |= 1 << (hash % 8);
 	}
 
-	if (++filter.num_elements_chunk >= filter.max_elements_chunk) {
+	if (++filter.num_elements_chunk == filter.max_elements_chunk) {
 		// Allocate new filter
 		++filter.num_filters;
 		filter.bits = (uint8_t**)realloc(filter.bits, filter.num_filters * sizeof(uint8_t*));

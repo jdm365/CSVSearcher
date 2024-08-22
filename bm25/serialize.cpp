@@ -4,8 +4,11 @@
 #include <fstream>
 
 
+#include <parallel_hashmap/phmap.h>
+#include <parallel_hashmap/btree.h>
+// #include "robin_hood.h"
+
 #include "serialize.h"
-#include "robin_hood.h"
 #include "bloom.h"
 
 
@@ -345,7 +348,7 @@ void serialize_vector_of_vectors_u64(
 }
 
 void serialize_robin_hood_flat_map_string_u32(
-		const robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		const MAP<std::string, uint32_t>& map,
 		const std::string& filename
 		) {
 	std::ofstream out_file(filename, std::ios::binary);
@@ -369,7 +372,7 @@ void serialize_robin_hood_flat_map_string_u32(
 }
 
 void serialize_robin_hood_flat_map_string_u64(
-		const robin_hood::unordered_flat_map<std::string, uint64_t>& map,
+		const MAP<std::string, uint64_t>& map,
 		const std::string& filename
 		) {
 	std::ofstream out_file(filename, std::ios::binary);
@@ -710,7 +713,7 @@ void deserialize_vector_of_vectors_u64(
 }
 
 void deserialize_robin_hood_flat_map_string_u32(
-		robin_hood::unordered_flat_map<std::string, uint32_t>& map,
+		MAP<std::string, uint32_t>& map,
 		const std::string& filename
 		) {
 	std::ifstream in_file(filename, std::ios::binary);
@@ -741,7 +744,7 @@ void deserialize_robin_hood_flat_map_string_u32(
 }
 
 void deserialize_robin_hood_flat_map_string_u64(
-		robin_hood::unordered_flat_map<std::string, uint64_t>& map,
+		MAP<std::string, uint64_t>& map,
 		const std::string& filename
 		) {
 	std::ifstream in_file(filename, std::ios::binary);
@@ -894,8 +897,8 @@ BloomEntry deserialize_bloom_entry(const char* filename) {
 				sizeof(uint16_t)
 				);
 
-		// BloomFilter filter;
-		ChunkedBloomFilter filter;
+		BloomFilter filter;
+		// ChunkedBloomFilter filter;
 		bloom_load(filter, in_file);
 
 		bloom_entry.bloom_filters[tf] = filter;

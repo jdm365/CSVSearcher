@@ -110,6 +110,15 @@ document.addEventListener("DOMContentLoaded", function() {
 	})();
 });
 
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 function highlightMatchingText(row, cell, value, columnDef, dataContext) {
 	let search_box = "search_box_" + columnDef.name;
 	try {
@@ -124,7 +133,10 @@ function highlightMatchingText(row, cell, value, columnDef, dataContext) {
 
 	// Do for tokens split by space
 	var tokens = query.split(" ");
-	var result = value;
+	// Only do first 6 tokens
+	tokens = tokens.slice(0, 6);
+
+	var result = escapeHtml(value);
 	tokens.forEach(token => {
 		// Token must contain at least one alphanumeric character
 		if (!/[a-z0-9]/i.test(token)) {
