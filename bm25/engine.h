@@ -82,8 +82,10 @@ void flush_token_stream(TokenStream* token_stream);
 // First 8 bits - tf     (u8)
 // Next 24 bits - doc_id (u24)
 typedef struct {
-	uint32_t tf : 8;
-	uint32_t doc_id : 24;
+	// uint32_t tf : 8;
+	// uint32_t doc_id : 24;
+	uint32_t tf : 4;
+	uint32_t doc_id : 28;
 } tf_df_t;
 
 typedef struct {

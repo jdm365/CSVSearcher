@@ -15,7 +15,6 @@
 #include <string>
 #include <cstdint>
 #include <cmath>
-#include <fstream>
 #include <sstream>
 
 #include <chrono>
@@ -74,7 +73,7 @@ void add_token(
 		uint8_t term_freq,
 		bool new_doc
 		) {
-	token_stream->term_ids[token_stream->num_terms]   = (term_id) | (new_doc << 31);
+	token_stream->term_ids[token_stream->num_terms]   = term_id | ((uint32_t)new_doc << 31);
 	token_stream->term_freqs[token_stream->num_terms] = term_freq;
 	++(token_stream->num_terms);
 
@@ -181,17 +180,19 @@ void read_token_stream(
 			entry.tf     = token_stream->term_freqs[idx];
 			entry.doc_id = doc_id;
 
+			/*
 			if (doc_id >= II->num_docs) {
 				printf("Doc ID: %u\n", doc_id);
 				printf("Num Docs: %u\n", II->num_docs);
 				printf("Term freq: %u\n", entry.tf);
 				printf("Term ID: %lu\n", term_id);
+				printf("Tokens remaining: %lu\n", num_tokens - idx);
 				exit(1);
 			}
+			*/
 
 			// TODO: Recheck this. Probably should be <
-			// assert(doc_id <= II->num_docs);
-			assert(doc_id < II->num_docs);
+			assert(doc_id <= II->num_docs);
 
 			uint32_t II_idx = II->doc_offsets[term_id] + num_docs_read[term_id]++;
 			assert(II_idx < offset);
@@ -199,7 +200,7 @@ void read_token_stream(
 			II->doc_ids[II_idx] = entry;
 		}
 	}
-	assert(doc_id < II->num_docs);
+	assert(doc_id <= II->num_docs);
 
 	free(num_docs_read);
 	free_token_stream(token_stream);
@@ -628,7 +629,7 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
 
     uint64_t num_lines  = line_offsets.size();
     size_t   chunk_size = num_lines / num_partitions;
-	size_t   final_chunk_size = chunk_size + (num_lines % num_partitions);
+	size_t   final_chunk_size = chunk_size + (num_lines % chunk_size);
 
 	// TODO: Fix last chunk size issue on json.
 	index_partitions = (BM25PartitionNew*)malloc(num_partitions * sizeof(BM25PartitionNew));
@@ -1349,10 +1350,10 @@ uint32_t _BM25::process_doc_partition_rfc_4180_v2(
 	uint64_t doc_size = 0;
 	while (true) {
 		if (char_idx > 1048576) {
-			std::cout << "Search field not found on line: " << doc_id << std::endl;
-			std::cout << "Doc: " << doc << std::endl;
-			std::cout << std::flush;
-			std::exit(1);
+			printf("Search field not found on line: %lu\n", doc_id);
+			printf("Doc: %s\n", doc);
+			fflush(stdout);
+			exit(1);
 		}
 
 		if (terminator == ',' && doc[char_idx] == ',') {
@@ -1513,10 +1514,9 @@ uint32_t _BM25::_process_doc_partition_rfc_4180_quoted_v2(
 	uint64_t doc_size = 0;
 	while (true) {
 		if (char_idx > 1048576) {
-			std::cout << "Search field not found on line: " << doc_id << std::endl;
-			std::cout << "Doc: " << doc << std::endl;
-			std::cout << std::flush;
-			std::exit(1);
+			printf("Search field not found on line: %lu", doc_id);
+			printf("Doc: %s\n", doc);
+			exit(1);
 		}
 
 		if (doc[char_idx] == '"') {
@@ -2225,16 +2225,13 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 		}
 
 
-		if (!DEBUG) {
-			if (line_num % UPDATE_INTERVAL == 0) {
-				update_progress(line_num, IP->num_docs, partition_id);
-			}
-		}
+		if (line_num % UPDATE_INTERVAL == 0) update_progress(line_num, IP->num_docs, partition_id);
 
 		int char_idx = 0;
 		int col_idx  = 0;
-		uint16_t _search_col_idx = 0;
-		for (const auto& search_col_idx : search_col_idxs) {
+		size_t _search_col_idx = 0;
+		for (size_t sc_idx = 0; sc_idx < search_col_idxs.size(); ++sc_idx) {
+			int search_col_idx = search_col_idxs[sc_idx];
 
 			if (search_col_idx == (int)columns.size() - 1) {
 				end_delim = '\n';
@@ -2292,7 +2289,6 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 					&doc_freqs_capacity[_search_col_idx]
 					) + 1;
 				++_search_col_idx;
-				++line_num;
 				continue;
 			}
 
@@ -2316,7 +2312,6 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	for (uint16_t col = 0; col < search_cols.size(); ++col) {
 		flush_token_stream(&token_streams[col]);
 	}
-	
 
 	if (!DEBUG) update_progress(line_num + 1, IP->num_docs, partition_id);
 
