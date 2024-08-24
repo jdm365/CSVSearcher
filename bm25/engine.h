@@ -324,16 +324,16 @@ class _BM25 {
 				const char terminator,
 				TokenStream* token_stream,
 				uint64_t doc_id,
-				uint16_t partition_id,
-				uint16_t col_idx,
+				size_t partition_id,
+				size_t col_idx,
 				uint32_t* doc_freqs_capacity
 				);
 		uint32_t _process_doc_partition_rfc_4180_quoted_v2(
 				const char* doc,
 				TokenStream* token_stream,
 				uint64_t doc_id,
-				uint16_t partition_id,
-				uint16_t col_idx,
+				size_t partition_id,
+				size_t col_idx,
 				uint32_t* doc_freqs_capacity
 				);
 

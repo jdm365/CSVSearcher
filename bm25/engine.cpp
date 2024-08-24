@@ -180,19 +180,17 @@ void read_token_stream(
 			entry.tf     = token_stream->term_freqs[idx];
 			entry.doc_id = doc_id;
 
-			/*
 			if (doc_id >= II->num_docs) {
 				printf("Doc ID: %u\n", doc_id);
 				printf("Num Docs: %u\n", II->num_docs);
 				printf("Term freq: %u\n", entry.tf);
 				printf("Term ID: %lu\n", term_id);
 				printf("Tokens remaining: %lu\n", num_tokens - idx);
-				exit(1);
+				fflush(stdout);
 			}
-			*/
 
 			// TODO: Recheck this. Probably should be <
-			assert(doc_id <= II->num_docs);
+			assert(doc_id < II->num_docs);
 
 			uint32_t II_idx = II->doc_offsets[term_id] + num_docs_read[term_id]++;
 			assert(II_idx < offset);
@@ -200,7 +198,7 @@ void read_token_stream(
 			II->doc_ids[II_idx] = entry;
 		}
 	}
-	assert(doc_id <= II->num_docs);
+	assert(doc_id < II->num_docs);
 
 	free(num_docs_read);
 	free_token_stream(token_stream);
@@ -629,39 +627,25 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
 
     uint64_t num_lines  = line_offsets.size();
     size_t   chunk_size = num_lines / num_partitions;
-	size_t   final_chunk_size = chunk_size + (num_lines % chunk_size);
+	size_t   final_chunk_size = chunk_size + (num_lines % num_partitions);
 
 	// TODO: Fix last chunk size issue on json.
 	index_partitions = (BM25PartitionNew*)malloc(num_partitions * sizeof(BM25PartitionNew));
     for (size_t i = 0; i < num_partitions; ++i) {
-		if (i != num_partitions - 1) {
-			partition_boundaries.push_back(line_offsets[i * chunk_size]);
+		partition_boundaries.push_back(line_offsets[i * chunk_size]);
 
-			BM25PartitionNew* IP = &index_partitions[i];
-			init_bm25_partition_new(
-					&index_partitions[i],
-					chunk_size,
-					search_cols.size()
-					);
+		size_t current_chunk_size = (i != (size_t)num_partitions - 1) ? chunk_size : final_chunk_size;
 
-			size_t idx = 0;
-			for (size_t j = i * chunk_size; j < (i + 1) * chunk_size; ++j) {
-				IP->line_offsets[idx++] = line_offsets[j];
-			}
-		} else {
-			partition_boundaries.push_back(line_offsets[i * chunk_size]);
+		BM25PartitionNew* IP = &index_partitions[i];
+		init_bm25_partition_new(
+				&index_partitions[i],
+				current_chunk_size,
+				search_cols.size()
+				);
 
-			BM25PartitionNew* IP = &index_partitions[i];
-			init_bm25_partition_new(
-					&index_partitions[i],
-					final_chunk_size,
-					search_cols.size()
-					);
-
-			size_t idx = 0;
-			for (size_t j = i * chunk_size; j < num_lines; ++j) {
-				IP->line_offsets[idx++] = line_offsets[j];
-			}
+		size_t idx = 0;
+		for (size_t j = i * chunk_size; j < (i * chunk_size) + current_chunk_size; ++j) {
+			IP->line_offsets[idx++] = line_offsets[j];
 		}
     }
     partition_boundaries.push_back(line_offsets.back());
@@ -1333,8 +1317,8 @@ uint32_t _BM25::process_doc_partition_rfc_4180_v2(
 		const char terminator,
 		TokenStream* token_stream,
 		uint64_t doc_id,
-		uint16_t partition_id,
-		uint16_t col_idx,
+		size_t partition_id,
+		size_t col_idx,
 		uint32_t* doc_freqs_capacity
 		) {
 	BM25PartitionNew* IP = &index_partitions[partition_id];
@@ -1352,7 +1336,6 @@ uint32_t _BM25::process_doc_partition_rfc_4180_v2(
 		if (char_idx > 1048576) {
 			printf("Search field not found on line: %lu\n", doc_id);
 			printf("Doc: %s\n", doc);
-			fflush(stdout);
 			exit(1);
 		}
 
@@ -1497,8 +1480,8 @@ uint32_t _BM25::_process_doc_partition_rfc_4180_quoted_v2(
 		const char* doc,
 		TokenStream* token_stream,
 		uint64_t doc_id,
-		uint16_t partition_id,
-		uint16_t col_idx,
+		size_t partition_id,
+		size_t col_idx,
 		uint32_t* doc_freqs_capacity
 		) {
 	BM25PartitionNew* IP = &index_partitions[partition_id];
@@ -2309,11 +2292,11 @@ void _BM25::read_csv_rfc_4180(uint64_t start_byte, uint64_t end_byte, uint16_t p
 	free(line);
 
 	// Flush remaining tokens
-	for (uint16_t col = 0; col < search_cols.size(); ++col) {
+	for (size_t col = 0; col < search_cols.size(); ++col) {
 		flush_token_stream(&token_streams[col]);
 	}
 
-	if (!DEBUG) update_progress(line_num + 1, IP->num_docs, partition_id);
+	if (!DEBUG) update_progress(line_num, IP->num_docs, partition_id);
 
 	// Calc avg_doc_size
 	for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
