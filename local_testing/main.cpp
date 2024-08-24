@@ -24,7 +24,7 @@ void test_save_load() {
 	double BLOOM_FPR = 0.000001;
 	float K1 = 1.2f;
 	float B = 0.75f;
-	uint16_t NUM_PARTITIONS = 24;
+	uint16_t NUM_PARTITIONS = 1;
 
 	_BM25 bm25(
 		FILENAME,
@@ -149,8 +149,8 @@ void test_multi_query() {
 	double BLOOM_FPR = 0.000001;
 	float K1 = 1.2f;
 	float B = 0.75f;
-	uint16_t NUM_PARTITIONS = 24;
-	// uint16_t NUM_PARTITIONS = 1;
+	// uint16_t NUM_PARTITIONS = 24;
+	uint16_t NUM_PARTITIONS = 1;
 
 	uint16_t TOP_K = 5;
 

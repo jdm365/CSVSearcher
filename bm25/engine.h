@@ -91,7 +91,7 @@ typedef struct {
 typedef struct {
 	tf_df_t*  doc_ids;
 	uint16_t* doc_sizes;
-	uint32_t* doc_offsets;
+	uint32_t* term_offsets;
 	uint32_t* doc_freqs;
 
 	uint32_t  num_terms;
@@ -105,6 +105,7 @@ void read_token_stream(
 		TokenStream* token_stream
 		);
 void free_inverted_index_new(InvertedIndexNew* II);
+uint64_t calc_inverted_index_size(const InvertedIndexNew* II);
 
 typedef struct {
 	InvertedIndexNew* II;
@@ -137,8 +138,6 @@ struct _compare_bm25_result {
 		return a.score > b.score;
 	}
 };
-
-
 
 typedef struct {
 	uint8_t num_repeats;

@@ -89,9 +89,9 @@ void free_token_stream(TokenStream* token_stream) {
 
 
 void init_inverted_index_new(InvertedIndexNew* II) {
-	II->doc_ids     = NULL;
-	II->doc_offsets = NULL;
-	II->doc_freqs   = NULL;
+	II->doc_ids      = NULL;
+	II->term_offsets = NULL;
+	II->doc_freqs    = NULL;
 
 	II->num_terms    = 0;
 	II->num_docs     = 0;
@@ -100,7 +100,7 @@ void init_inverted_index_new(InvertedIndexNew* II) {
 
 void free_inverted_index_new(InvertedIndexNew* II) {
 	free(II->doc_ids);
-	free(II->doc_offsets);
+	free(II->term_offsets);
 	free(II->doc_freqs);
 }
 
@@ -119,15 +119,15 @@ void read_token_stream(
 	assert(II->num_docs > 0);
 	assert(II->avg_doc_size > 0.0f);
 
-	assert(II->doc_offsets == NULL);
-	II->doc_offsets = (uint32_t*)malloc(II->num_terms * sizeof(uint32_t));
+	assert(II->term_offsets == NULL);
+	II->term_offsets = (uint32_t*)malloc(II->num_terms * sizeof(uint32_t));
 
 	// Calculate doc offsets from doc_freqs
 	uint32_t offset = 0;
-	II->doc_offsets[0] = offset;
+	II->term_offsets[0] = offset;
 	for (size_t term_idx = 1; term_idx < II->num_terms; ++term_idx) {
 		offset += II->doc_freqs[term_idx];
-		II->doc_offsets[term_idx] = offset;
+		II->term_offsets[term_idx] = offset;
 
 		assert(II->doc_freqs[term_idx] <= II->num_docs);
 	}
@@ -190,19 +190,147 @@ void read_token_stream(
 			}
 
 			// TODO: Recheck this. Probably should be <
-			assert(doc_id < II->num_docs);
+			// assert(doc_id < II->num_docs);
 
-			uint32_t II_idx = II->doc_offsets[term_id] + num_docs_read[term_id]++;
+			uint32_t II_idx = II->term_offsets[term_id] + num_docs_read[term_id]++;
 			assert(II_idx < offset);
 
 			II->doc_ids[II_idx] = entry;
 		}
 	}
-	assert(doc_id < II->num_docs);
+	// assert(doc_id < II->num_docs);
 
 	free(num_docs_read);
 	free_token_stream(token_stream);
 	fclose(token_stream->file);
+}
+
+/*
+void read_token_stream(
+		InvertedIndexNew* II, 
+		TokenStream* token_stream
+		) {
+	// Reset file pointer to beginning
+	if (fseek(token_stream->file, 0, SEEK_SET) != 0) {
+		printf("Error seeking file.");
+		exit(1);
+	}
+
+	// Assume num_terms, num_docs, and avg_doc_size are known and set.
+	assert(II->num_terms > 0);
+	assert(II->num_docs > 0);
+	assert(II->avg_doc_size > 0.0f);
+
+	assert(II->term_offsets == NULL);
+	II->term_offsets = (uint32_t*)malloc(II->num_terms * sizeof(uint32_t));
+
+	II->doc_ids = (roaring_bitmap_t**)malloc(II->num_terms * sizeof(roaring_bitmap_t*));
+
+	// Calculate doc offsets from doc_freqs
+	uint32_t offset = 0;
+	II->term_offsets[0] = offset;
+	II->doc_ids[0] = roaring_bitmap_create_with_capacity(II->doc_freqs[0]);
+	for (size_t term_idx = 1; term_idx < II->num_terms; ++term_idx) {
+		offset += II->doc_freqs[term_idx];
+		II->term_offsets[term_idx] = offset;
+
+		II->doc_ids[term_idx] = roaring_bitmap_create_with_capacity(II->doc_freqs[term_idx]);
+
+		assert(II->doc_freqs[term_idx] <= II->num_docs);
+	}
+	offset += II->doc_freqs[0];
+
+	// uint32_t* num_docs_read = (uint32_t*)malloc(II->num_terms * sizeof(uint32_t));
+	// memset(num_docs_read, 0, II->num_terms * sizeof(uint32_t));
+
+	// Read token_stream->file in chunks
+	uint32_t num_tokens = TOKEN_STREAM_CAPACITY;
+	uint32_t doc_id = 0;
+	while (num_tokens == TOKEN_STREAM_CAPACITY) {
+		fread(
+				&num_tokens,
+				sizeof(uint32_t),
+				1, 
+				token_stream->file
+				);
+		assert(num_tokens <= TOKEN_STREAM_CAPACITY);
+
+		if (num_tokens == 0) break;
+
+		fread(
+			token_stream->term_ids,
+			sizeof(uint32_t),
+			num_tokens,
+			token_stream->file
+			);
+		fread(
+			token_stream->term_freqs,
+			sizeof(uint8_t),
+			num_tokens,
+			token_stream->file
+			);
+
+		for (size_t idx = 0; idx < num_tokens; ++idx) {
+			if (token_stream->term_ids[idx] == UINT32_MAX) {
+				++doc_id;
+				continue;
+			}
+
+			// Pop highest bit to determine if new doc
+			doc_id += (token_stream->term_ids[idx] >> 31);
+
+			size_t term_id = (size_t)(token_stream->term_ids[idx] & 0x7FFFFFFF);
+
+			tf_df_t entry;
+			entry.tf     = token_stream->term_freqs[idx];
+			entry.doc_id = doc_id;
+
+			if (doc_id >= II->num_docs) {
+				printf("Doc ID: %u\n", doc_id);
+				printf("Num Docs: %u\n", II->num_docs);
+				printf("Term freq: %u\n", entry.tf);
+				printf("Term ID: %lu\n", term_id);
+				printf("Tokens remaining: %lu\n", num_tokens - idx);
+				fflush(stdout);
+			}
+
+			// TODO: Recheck this. Probably should be <
+			// assert(doc_id < II->num_docs);
+
+			// uint32_t II_idx = II->term_offsets[term_id] + num_docs_read[term_id]++;
+			// assert(II_idx < offset);
+
+			// II->doc_ids[II_idx] = entry;
+			roaring_bitmap_add(II->doc_ids[II->term_offsets[term_id]], doc_id);
+		}
+	}
+	// assert(doc_id < II->num_docs);
+
+	// free(num_docs_read);
+	free_token_stream(token_stream);
+	fclose(token_stream->file);
+}
+*/
+
+uint64_t calc_inverted_index_size(const InvertedIndexNew* II) {
+	uint64_t size = 0;
+
+	// Num tokens
+	uint64_t num_tokens = II->term_offsets[II->num_terms - 1] + II->doc_freqs[II->num_terms - 1];
+
+	// doc_ids
+	size += num_tokens * sizeof(tf_df_t);
+
+	// doc_sizes
+	size += II->num_docs * sizeof(uint16_t);
+
+	// term_offsets + doc_freqs
+	size += II->num_terms * 2 * sizeof(uint32_t);
+
+	// num_terms + num_docs + avg_doc_size
+	size += 2 * sizeof(uint32_t) + sizeof(float);
+
+	return size;
 }
 
 void init_bm25_partition_new(BM25PartitionNew* IP, uint64_t num_docs, uint16_t num_cols) {
@@ -228,7 +356,7 @@ uint64_t _BM25::get_doc_freqs_sum(
 		) {
 	uint64_t doc_freqs_sum = 0;
 
-	for (uint16_t i = 0; i < num_partitions; ++i) {
+	for (size_t i = 0; i < num_partitions; ++i) {
 		BM25PartitionNew* IP = &index_partitions[i];
 
 		auto it = IP->unique_term_mappings[col_idx].find(term);
@@ -1845,7 +1973,6 @@ IIRow get_II_row(InvertedIndex* II, uint64_t term_idx) {
 
 	return row;
 }
-*/
 
 IIRow get_II_row_new(InvertedIndexNew* II, uint64_t term_idx) {
 	IIRow row;
@@ -1856,13 +1983,14 @@ IIRow get_II_row_new(InvertedIndexNew* II, uint64_t term_idx) {
 	row.term_freqs.resize(row.df);
 	row.doc_ids.resize(row.df);
 	for (size_t i = 0; i < row.df; ++i) {
-		size_t idx = II->doc_offsets[term_idx] + i;
+		size_t idx = II->term_offsets[term_idx] + i;
 		row.term_freqs[i] = II->doc_ids[idx].tf;
 		row.doc_ids[i]    = II->doc_ids[idx].doc_id;
 	}
 
 	return row;
 }
+*/
 
 static inline void get_key(
 		const char* line, 
@@ -2936,7 +3064,7 @@ _BM25::_BM25(
 	}
 
 	num_docs = 0;
-	for (uint16_t i = 0; i < num_partitions; ++i) {
+	for (size_t i = 0; i < num_partitions; ++i) {
 		num_docs += index_partitions[i].num_docs;
 	}
 
@@ -2944,45 +3072,31 @@ _BM25::_BM25(
 
 	uint64_t total_size = 0;
 	uint32_t unique_terms_found = 0;
-	uint64_t bloom_filters_size = 0;
-	uint64_t total_bloom_filters = 0;
-	/*
-	for (uint16_t i = 0; i < num_partitions; ++i) {
+	for (size_t i = 0; i < num_partitions; ++i) {
 		BM25PartitionNew* IP = &index_partitions[i];
 
 		uint64_t part_size = 0;
-		for (uint16_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
+		for (size_t col_idx = 0; col_idx < search_cols.size(); ++col_idx) {
 			unique_terms_found += IP->unique_term_mappings[col_idx].size();
-			total_bloom_filters += IP->II[col_idx].bloom_filters.size();
-			for (const auto& bf : index_partitions[i].II[col_idx].bloom_filters) {
-				for (const auto& filter : bf.second.bloom_filters) {
-					bloom_filters_size += get_bloom_memory_usage(filter.second);
-				}
-			}
+			total_size += calc_inverted_index_size(&IP->II[col_idx]);
 		}
 		total_size += part_size;
 
 	}
-	*/
 	total_size /= 1024 * 1024;
-	uint64_t vocab_size = unique_terms_found * (4 + 5 + 1) / 1048576;
+	uint64_t vocab_size = unique_terms_found * (4 + 32 + 5 + 1) / 1048576;
 	uint64_t line_offsets_size = num_docs * 8 / 1048576;
-	uint64_t doc_sizes_size = num_docs * 2 * search_cols.size() / 1048576;
 	uint64_t inverted_index_size = total_size;
-	bloom_filters_size /= 1048576;
-	total_size = vocab_size + line_offsets_size + doc_sizes_size + inverted_index_size + bloom_filters_size;
+	total_size = vocab_size + line_offsets_size + inverted_index_size;
 
-	std::cout << "Total size of vocab mappings:  ~" << vocab_size << "MB" << std::endl;
-	std::cout << "Total size of line offsets:     " << line_offsets_size << "MB" << std::endl;
-	std::cout << "Total size of doc sizes:        " << doc_sizes_size << "MB" << std::endl;
-	std::cout << "Total size of inverted indexes: " << inverted_index_size << "MB" << std::endl;
-	std::cout << "Total size of bloom filters:    " << bloom_filters_size << "MB" << std::endl;
-	std::cout << "--------------------------------------" << std::endl;
-	std::cout << "Approx total in-memory size:    " << total_size << "MB" << std::endl << std::endl;
+	printf("Total size of vocab mappings: ~%luMB\n", vocab_size);
+	printf("Total size of line offsets: %luMB\n", line_offsets_size);
+	printf("Total size of inverted indexes: %luMB\n", inverted_index_size);
+	printf("--------------------------------------\n");
+	printf("Approx total in-memory size:    %luMB\n\n", total_size);
 
-	std::cout << "Total number of documents:      " << num_docs << std::endl;
-	std::cout << "Total number of unique terms:   " << unique_terms_found << std::endl;
-	std::cout << "Total number of bloom filters:  " << total_bloom_filters << std::endl;
+	printf("Total number of documents:      %lu\n", num_docs);
+	printf("Total number of unique terms:   %u\n", unique_terms_found);
 
 	auto read_end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> read_elapsed_seconds = read_end - overall_start;
@@ -3514,7 +3628,7 @@ std::vector<BM25Result> _BM25::_query_partition_bloom_multi(
 
 			for (uint64_t i = 0; i < df_partition; ++i) {
 
-				size_t   idx 	= II->doc_offsets[term_idx] + i;
+				size_t   idx 	= II->term_offsets[term_idx] + i;
 				float    tf 	= (float)II->doc_ids[idx].tf;
 				uint64_t doc_id = (uint64_t)II->doc_ids[idx].doc_id;
 

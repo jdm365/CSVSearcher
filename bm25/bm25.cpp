@@ -32,8 +32,7 @@
             "bm25/engine.cpp",
             "bm25/vbyte_encoding.cpp",
             "bm25/serialize.cpp",
-            "bm25/bloom.cpp",
-            "bm25/roaring.c"
+            "bm25/bloom.cpp"
         ]
     },
     "module_name": "bloom25"

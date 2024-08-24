@@ -114,7 +114,7 @@ if __name__ == '__main__':
     ## FILEPATH = os.path.join(DATA_DIR, 'wiki_articles.csv')
     ## SEARCH_COLS = ['title', 'body']
 
-    FILEPATH = os.path.join(DATA_DIR, 'mb_small.csv')
+    FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
     SEARCH_COLS = ['title', 'artist']
 
     search_app = SearchApp(

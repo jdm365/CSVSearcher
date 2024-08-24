@@ -54,7 +54,6 @@ extensions = [
             "bm25/vbyte_encoding.cpp", 
             "bm25/serialize.cpp", 
             "bm25/bloom.cpp",
-            "bm25/roaring.c",
             ],
         extra_compile_args=COMPILER_FLAGS,
         language="c++",
