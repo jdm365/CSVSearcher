@@ -32,7 +32,7 @@
 
 #include "engine.h"
 #include "vbyte_encoding.h"
-#include "serialize.h"
+// #include "serialize.h"
 #include "bloom.h"
 
 
@@ -672,8 +672,10 @@ void _BM25::proccess_csv_header() {
 		if (value.find("\n") != std::string::npos) {
 			value.erase(value.find("\n"));
 		}
+		std::transform(value.begin(), value.end(), value.begin(), ::tolower);
 		columns.push_back(value);
-		for (const auto& col : search_cols) {
+		for (std::string col : search_cols) {
+			std::transform(col.begin(), col.end(), col.begin(), ::tolower);
 			if (value == col) {
 				search_col_idxs.push_back(columns.size() - 1);
 			}
@@ -721,7 +723,6 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
 		std::exit(1);
 	}
 
-	uint64_t cntr = 0;
     size_t file_pos = header_bytes;
 	line_offsets.push_back(header_bytes);
 	while (file_pos < file_size - 1) {
@@ -746,10 +747,9 @@ void _BM25::determine_partition_boundaries_csv_rfc_4180() {
 		if (file_data[file_pos++] == '\n') {
 			line_offsets.push_back(file_pos);
 
-			if (cntr++ % 1000 == 0) {
-				printf("%luK lines read\r", cntr / 1000);
-				fflush(stdout);
-			}
+			// if (cntr++ % 10000 == 0) {
+				// printf("%luK lines read\r", cntr / 10000);
+			// }
 		}
 	}
 

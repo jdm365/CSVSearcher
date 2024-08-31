@@ -53,7 +53,7 @@ class SearchApp:
                 ## stopwords='english',
                 ## min_df=1,
                 ## max_df=0.5,
-                num_partitions=24,
+                num_partitions=1,
                 ## bloom_df_threshold=1.0,
                 bloom_fpr=1e-8,
                 ## b=0.4,
@@ -115,7 +115,8 @@ if __name__ == '__main__':
     ## SEARCH_COLS = ['title', 'body']
 
     FILEPATH = os.path.join(DATA_DIR, 'mb.csv')
-    SEARCH_COLS = ['title', 'artist']
+    ## SEARCH_COLS = ['title', 'artist']
+    SEARCH_COLS = ['TID']
 
     search_app = SearchApp(
             filename=FILEPATH,
