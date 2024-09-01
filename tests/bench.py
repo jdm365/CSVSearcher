@@ -271,8 +271,8 @@ def test_documents(csv_filename: str, search_cols: List[str], num_partitions=os.
 if __name__ == '__main__':
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
-    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
+    CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb_small.csv')
+    ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'mb.csv')
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'wiki_articles_500k.csv')
     ## CSV_FILENAME = os.path.join(CURRENT_DIR, 'wiki_articles.csv')
     JSON_FILENAME = os.path.join(CURRENT_DIR, 'mb.json')
@@ -282,7 +282,7 @@ if __name__ == '__main__':
     ## test_duckdb(FILENAME)
     ## test_anserini(CSV_FILENAME, search_cols='title')
     ## test_sklearn(FILENAME)
-    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=24)
+    test_bm25_csv(CSV_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
     ## test_bm25_csv(CSV_FILENAME, search_cols=['title', 'body'], num_partitions=24)
     ## test_bm25_json(JSON_FILENAME, search_cols=['title', 'artist'], num_partitions=1)
     ## test_bm25_parquet(PARQUET_FILENAME, search_cols='name')

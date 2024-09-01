@@ -82,35 +82,37 @@ const TokenStream = struct {
         self.num_terms = 0;
     }
 
-    pub fn iterField(self: *TokenStream, byte_pos: *usize) void {
+    pub fn iterField(self: *TokenStream, byte_pos: *usize) !void {
         // Iterate to next field in compliance with RFC 4180.
         const is_quoted = self.f_data[byte_pos.*] == '"';
         byte_pos.* += @intFromBool(is_quoted);
 
         while (true) {
             if (is_quoted) {
-                if (self.f_data[byte_pos.*] == '"') {
-                    if (self.f_data[byte_pos.* + 1] == '"') {
-                        byte_pos.* += 2;
-                        continue;
-                    }
-                    
-                    // Iter over quote and comma/newline.
-                    byte_pos.* += 2;
-                    break;
-                }
 
-                byte_pos.* += 1;
+                if (self.f_data[byte_pos.*] == '"') {
+                    byte_pos.* += 2;
+                    if (self.f_data[byte_pos.* - 1] != '"') {
+                        return;
+                    }
+                } else {
+                    byte_pos.* += 1;
+                }
 
             } else {
 
-                if ((self.f_data[byte_pos.*] == ',') or (self.f_data[byte_pos.*] == '\n')) {
-                    // Iter over quote and comma/newline.
-                    byte_pos.* += 1;
-                    break;
+                switch (self.f_data[byte_pos.*]) {
+                    ',' => {
+                        byte_pos.* += 1;
+                        return;
+                    },
+                    '\n' => {
+                        return error.UnexpectedNewline;
+                    },
+                    else => {
+                        byte_pos.* += 1;
+                    }
                 }
-
-                byte_pos.* += 1;
             }
         }
     }
@@ -132,16 +134,37 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         num_docs: usize,
         ) !InvertedIndex {
-        return InvertedIndex{
+        const II = InvertedIndex{
             .postings = &[_]token_t{},
             .vocab = std.StringArrayHashMap(u32).init(allocator),
             .term_offsets = &[_]u32{},
-            .doc_freqs = try std.ArrayList(u32).initCapacity(allocator, @as(usize, @intFromFloat(@as(f32, @floatFromInt(num_docs)) * 0.1))),
+            .doc_freqs = try std.ArrayList(u32).initCapacity(
+                allocator, @as(usize, @intFromFloat(@as(f32, @floatFromInt(num_docs)) * 0.1))
+                ),
             .doc_sizes = try allocator.alloc(u16, num_docs),
             .num_terms = 0,
             .num_docs = @intCast(num_docs),
             .avg_doc_size = 0.0,
         };
+        @memset(II.doc_sizes, 0);
+        return II;
+    }
+
+    pub fn deinit(
+        self: *InvertedIndex,
+        allocator: std.mem.Allocator,
+        ) void {
+        allocator.free(self.postings);
+
+        var vocab_iter = self.vocab.iterator();
+        while (vocab_iter.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+        }
+        self.vocab.deinit();
+
+        allocator.free(self.term_offsets);
+        self.doc_freqs.deinit();
+        allocator.free(self.doc_sizes);
     }
 
     pub fn resizePostings(
@@ -194,12 +217,8 @@ const BM25Partition = struct {
 
     pub fn free(self: *BM25Partition) void {
         self.allocator.free(self.line_offsets);
-        for (0..self.II.len) |col_idx| {
-            self.allocator.free(self.II[col_idx].postings);
-            self.II[col_idx].vocab.deinit();
-            self.allocator.free(self.II[col_idx].term_offsets);
-            self.II[col_idx].doc_freqs.deinit();
-            self.allocator.free(self.II[col_idx].doc_sizes);
+        for (0..self.II.len) |i| {
+            self.II[i].deinit(self.allocator);
         }
         self.allocator.free(self.II);
     }
@@ -209,15 +228,14 @@ pub fn processDocRfc4180(
     token_stream: *TokenStream,
     index_partition: *BM25Partition,
     doc_id: u32,
-    start_pos: usize,
+    byte_idx: *usize,
     col_idx: usize,
     term: *[MAX_TERM_LENGTH]u8,
-) !usize {
-    var bytes_read: usize = 0;
-    var idx: usize = start_pos;
+    max_byte: usize,
+) !void {
     var term_pos: u8 = 0;
-    const is_quoted  = (token_stream.f_data[start_pos] == '"');
-    idx += @intFromBool(is_quoted);
+    const is_quoted  = (token_stream.f_data[byte_idx.*] == '"');
+    byte_idx.* += @intFromBool(is_quoted);
 
     var cntr: usize = 0;
 
@@ -226,26 +244,26 @@ pub fn processDocRfc4180(
     if (is_quoted) {
 
         while (true) {
-            if (idx - start_pos > 1_048_576) {
-                return error.TooLarge;
-            }
+            std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+            std.debug.assert(byte_idx.* < max_byte);
 
-            if (token_stream.f_data[start_pos] == '"') {
-                idx += 1;
+            if (token_stream.f_data[byte_idx.*] == '"') {
+                byte_idx.* += 1;
 
-                if ((token_stream.f_data[idx] == ',') or (token_stream.f_data[idx] == '\n')) {
+                if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
                     break;
                 }
 
                 // Double quote means escaped quote. Opt not to include in token for now.
-                if (token_stream.f_data[idx] == '"') {
+                if (token_stream.f_data[byte_idx.*] == '"') {
+                    byte_idx.* += 1;
                     continue;
                 }
             }
 
-            if (token_stream.f_data[idx] == ' ') {
+            if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
                 if (cntr == 0) {
-                    idx += 1;
+                    byte_idx.* += 1;
                     continue;
                 }
 
@@ -270,26 +288,29 @@ pub fn processDocRfc4180(
                     term_pos += 1;
                 }
                 cntr = 0;
-                idx += 1;
+                byte_idx.* += 1;
                 continue;
             }
 
-            term[cntr] = std.ascii.toUpper(token_stream.f_data[idx]);
+            term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
             cntr += 1;
-            idx += 1;
+            byte_idx.* += 1;
+            index_partition.II[col_idx].doc_sizes[doc_id] += 1;
         }
 
     } else {
 
         while (true) {
+            std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+            std.debug.assert(byte_idx.* < max_byte);
 
-            if ((token_stream.f_data[idx] == ',') or (token_stream.f_data[idx] == '\n')) {
+            if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
                 break;
             }
 
-            if (token_stream.f_data[idx] == ' ') {
+            if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
                 if (cntr == 0) {
-                    idx += 1;
+                    byte_idx.* += 1;
                     continue;
                 }
 
@@ -310,7 +331,8 @@ pub fn processDocRfc4180(
                 }
 
                 cntr = 0;
-                idx += 1;
+                byte_idx.* += 1;
+                index_partition.II[col_idx].doc_sizes[doc_id] += 1;
 
                 try token_stream.addToken(term_pos, doc_id);
                 if (term_pos != 255) {
@@ -319,13 +341,15 @@ pub fn processDocRfc4180(
                 continue;
             }
 
-            term[cntr] = std.ascii.toUpper(token_stream.f_data[idx]);
+            term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
             cntr += 1;
-            idx += 1;
+            byte_idx.* += 1;
         }
     }
 
     if (cntr > 0) {
+        std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+         
         const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..cntr]);
         if (!gop.found_existing) {
             const duped_term = try index_partition.allocator.dupe(u8, term[0..cntr]);
@@ -339,13 +363,12 @@ pub fn processDocRfc4180(
             }
         }
 
-        idx += 1;
+        index_partition.II[col_idx].doc_sizes[doc_id] += 1;
 
         try token_stream.addToken(term_pos, doc_id);
     }
-    bytes_read = idx - start_pos;
 
-    return bytes_read;
+    byte_idx.* += 1;
 }
 
 pub fn readFile(
@@ -375,28 +398,34 @@ pub fn readFile(
 
     while (file_pos < file_size - 1) {
 
-        if (f_data[file_pos] == '"') {
-            file_pos += 1;
-
-            while (true) {
-                // Escape quote. Continue to next character.
-
-                if ((f_data[file_pos] == '"') and (f_data[file_pos + 1] == '"')) {
-                    file_pos += 2;
-                    continue;
-                } else if (f_data[file_pos] == '"') {
-                    file_pos += 1;
-                    break;
-                }
+        switch (f_data[file_pos]) {
+            '"' => {
+                // Iter over quote
                 file_pos += 1;
-            }
-        }
 
-        if (f_data[file_pos] == '\n') {
-            file_pos += 1;
-            try line_offsets.append(file_pos);
+                while (true) {
+
+                    if (f_data[file_pos] == '"') {
+                        // Escape quote. Continue to next character.
+                        if (f_data[file_pos + 1] == '"') {
+                            file_pos += 2;
+                            continue;
+                        }
+
+                        // Iter over quote.
+                        file_pos += 1;
+                        break;
+                    }
+
+                    file_pos += 1;
+                }
+            },
+            '\n' => {
+                file_pos += 1;
+                try line_offsets.append(file_pos);
+            },
+            else => file_pos += 1,
         }
-        file_pos += 1;
     }
 
     const end_time = std.time.milliTimestamp();
@@ -421,7 +450,9 @@ pub fn readFile(
         }
         allocator.free(index_partitions);
     }
-    const NUM_COLS = 2;
+    // const search_col_idxs: [2]usize = .{6, 8};
+    const search_col_idxs: [1]usize = .{6};
+    const num_cols = search_col_idxs.len;
 
     for (0..num_partitions) |i| {
         try partition_boundaries.append(line_offsets.items[i * chunk_size]);
@@ -434,48 +465,60 @@ pub fn readFile(
         const partition_line_offsets = try allocator.alloc(usize, current_chunk_size);
         @memcpy(partition_line_offsets, line_offsets.items[start..end]);
 
-        index_partitions[i] = try BM25Partition.init(allocator, NUM_COLS, partition_line_offsets);
+        index_partitions[i] = try BM25Partition.init(allocator, num_cols, partition_line_offsets);
     }
-    try partition_boundaries.append(line_offsets.items[line_offsets.items.len - 1]);
+    try partition_boundaries.append(file_size);
 
     std.debug.assert(partition_boundaries.items.len == num_partitions + 1);
 
     // Create FBA
     var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
 
-    const col_idx = 7;
-
     const time_start = std.time.milliTimestamp();
     for (0..num_partitions) |i| {
         // const start_pos = partition_boundaries.items[i];
-        // const end_pos   = partition_boundaries.items[i + 1];
-
-        const partition = &index_partitions[i];
+        const end_pos   = partition_boundaries.items[i + 1];
 
         var token_stream = try TokenStream.init(filename, "output.bin", allocator);
-
+        defer token_stream.deinit();
 
         var doc_id: usize = 0;
         while (doc_id < line_offsets.items.len) {
+
             if (doc_id % 100_000 == 0) {
                 std.debug.print("Processed {d} documents\n", .{doc_id});
             }
+
             var line_offset = line_offsets.items[doc_id];
 
-            // Read through
-            for (0..col_idx) |_| {
-                token_stream.iterField(&line_offset);
+            const next_line_offset = switch (doc_id == line_offsets.items.len - 1) {
+                true => end_pos,
+                false => line_offsets.items[doc_id + 1],
+            };
+
+            var search_col_idx: usize = 0;
+            var prev_col: usize = 0;
+
+            while (search_col_idx < search_col_idxs.len) {
+
+                for (prev_col..search_col_idxs[search_col_idx]) |_| {
+                    try token_stream.iterField(&line_offset);
+                }
+
+                std.debug.assert(line_offset < next_line_offset);
+                try processDocRfc4180(
+                    &token_stream, 
+                    &index_partitions[i],
+                    @intCast(doc_id), 
+                    &line_offset, 
+                    search_col_idx,
+                    &term_buffer,
+                    next_line_offset,
+                    );
+                prev_col = search_col_idxs[search_col_idx];
+                search_col_idx += 1;
             }
 
-            // const bytes_read = processDocRfc4180(
-            _ = try processDocRfc4180(
-                &token_stream, 
-                partition, 
-                @intCast(doc_id), 
-                line_offset, 
-                0,
-                &term_buffer,
-                );
             doc_id += 1;
         }
     }
@@ -488,7 +531,7 @@ pub fn readFile(
 }
 
 pub fn main() !void {
-    const filename: []const u8 = "../tests/mb.csv";
+    const filename: []const u8 = "../tests/mb_small.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -506,7 +549,4 @@ pub fn main() !void {
         }
         allocator.free(index_partitions);
     }
-
-    std.debug.print("Done\n", .{});
-    std.debug.print("Number of partitions: {d}\n", .{index_partitions.len});
 }
