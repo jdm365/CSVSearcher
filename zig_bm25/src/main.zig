@@ -1,11 +1,11 @@
 const std = @import("std");
-
+const builtin = @import("builtin");
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
 const MAX_NUM_TERMS = 4096;
 const MAX_TERM_LENGTH = 64;
 
-
+const AtomicCounter = std.atomic.Value(u64);
 const token_t = packed struct(u32) {
     term_pos: u8,
     doc_id: u24
@@ -155,9 +155,8 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         ) void {
         allocator.free(self.postings);
-
-        var vocab_iter = self.vocab.iterator();
-        while (vocab_iter.next()) |entry| {
+        var iter = self.vocab.iterator();
+        while (iter.next()) |entry| {
             allocator.free(entry.key_ptr.*);
         }
         self.vocab.deinit();
@@ -215,7 +214,7 @@ const BM25Partition = struct {
         return partition;
     }
 
-    pub fn free(self: *BM25Partition) void {
+    pub fn deinit(self: *BM25Partition) void {
         self.allocator.free(self.line_offsets);
         for (0..self.II.len) |i| {
             self.II[i].deinit(self.allocator);
@@ -223,6 +222,39 @@ const BM25Partition = struct {
         self.allocator.free(self.II);
     }
 };
+
+
+
+fn addTerm(
+    term: []u8,
+    term_len: usize,
+    doc_id: u32,
+    term_pos: u8,
+    index_partition: *BM25Partition,
+    col_idx: usize,
+    token_stream: *TokenStream,
+    terms_seen: *std.bit_set.StaticBitSet(MAX_NUM_TERMS),
+    allocator: std.mem.Allocator,
+) !void {
+    const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..term_len]);
+    if (!gop.found_existing) {
+        const term_copy = try allocator.dupe(u8, term[0..term_len]);
+        errdefer allocator.free(term_copy);
+
+        gop.key_ptr.* = term_copy;
+        gop.value_ptr.* = index_partition.II[col_idx].num_terms;
+        index_partition.II[col_idx].num_terms += 1;
+        try index_partition.II[col_idx].doc_freqs.append(1);
+    } else {
+        if (!terms_seen.isSet(gop.value_ptr.* % MAX_NUM_TERMS)) {
+            index_partition.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
+        }
+    }
+
+    index_partition.II[col_idx].doc_sizes[doc_id] += 1;
+
+    try token_stream.addToken(term_pos, doc_id);
+}
 
 pub fn processDocRfc4180(
     token_stream: *TokenStream,
@@ -267,23 +299,18 @@ pub fn processDocRfc4180(
                     continue;
                 }
 
-                const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..cntr]);
-                if (!gop.found_existing) {
-                    const duped_term = try index_partition.allocator.dupe(u8, term[0..cntr]);
-                    gop.key_ptr.* = duped_term;
-                    gop.value_ptr.* = index_partition.II[col_idx].num_terms;
-                    index_partition.II[col_idx].num_terms += 1;
-                    try index_partition.II[col_idx].doc_freqs.append(1);
-                    terms_seen.set(gop.value_ptr.* % MAX_NUM_TERMS);
-                } else {
-                    if (!terms_seen.isSet(gop.value_ptr.* % MAX_NUM_TERMS)) {
-                        index_partition.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
-                    } else {
-                        terms_seen.set(gop.value_ptr.* % MAX_NUM_TERMS);
-                    }
-                }
+                try addTerm(
+                    term, 
+                    cntr, 
+                    doc_id, 
+                    term_pos, 
+                    index_partition, 
+                    col_idx, 
+                    token_stream, 
+                    &terms_seen,
+                    index_partition.allocator,
+                    );
 
-                try token_stream.addToken(term_pos, doc_id);
                 if (term_pos != 255) {
                     term_pos += 1;
                 }
@@ -295,7 +322,6 @@ pub fn processDocRfc4180(
             term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
             cntr += 1;
             byte_idx.* += 1;
-            index_partition.II[col_idx].doc_sizes[doc_id] += 1;
         }
 
     } else {
@@ -314,27 +340,21 @@ pub fn processDocRfc4180(
                     continue;
                 }
 
-                const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..cntr]);
-                if (!gop.found_existing) {
-                    const duped_term = try index_partition.allocator.dupe(u8, term[0..cntr]);
-                    gop.key_ptr.* = duped_term;
-                    gop.value_ptr.* = index_partition.II[col_idx].num_terms;
-                    index_partition.II[col_idx].num_terms += 1;
-                    try index_partition.II[col_idx].doc_freqs.append(1);
-                    terms_seen.set(gop.value_ptr.* % MAX_NUM_TERMS);
-                } else {
-                    if (!terms_seen.isSet(gop.value_ptr.* % MAX_NUM_TERMS)) {
-                        index_partition.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
-                    } else {
-                        terms_seen.set(gop.value_ptr.* % MAX_NUM_TERMS);
-                    }
-                }
+                try addTerm(
+                    term, 
+                    cntr, 
+                    doc_id, 
+                    term_pos, 
+                    index_partition, 
+                    col_idx, 
+                    token_stream, 
+                    &terms_seen,
+                    index_partition.allocator,
+                    );
 
                 cntr = 0;
                 byte_idx.* += 1;
-                index_partition.II[col_idx].doc_sizes[doc_id] += 1;
 
-                try token_stream.addToken(term_pos, doc_id);
                 if (term_pos != 255) {
                     term_pos += 1;
                 }
@@ -349,144 +369,217 @@ pub fn processDocRfc4180(
 
     if (cntr > 0) {
         std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
-         
-        const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..cntr]);
-        if (!gop.found_existing) {
-            const duped_term = try index_partition.allocator.dupe(u8, term[0..cntr]);
-            gop.key_ptr.* = duped_term;
-            gop.value_ptr.* = index_partition.II[col_idx].num_terms;
-            index_partition.II[col_idx].num_terms += 1;
-            try index_partition.II[col_idx].doc_freqs.append(1);
-        } else {
-            if (!terms_seen.isSet(gop.value_ptr.* % MAX_NUM_TERMS)) {
-                index_partition.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
-            }
-        }
 
-        index_partition.II[col_idx].doc_sizes[doc_id] += 1;
-
-        try token_stream.addToken(term_pos, doc_id);
+        try addTerm(
+            term, 
+            cntr, 
+            doc_id, 
+            term_pos, 
+            index_partition, 
+            col_idx, 
+            token_stream, 
+            &terms_seen,
+            index_partition.allocator,
+            );
     }
 
     byte_idx.* += 1;
 }
 
-pub fn readFile(
+
+const IndexManager = struct {
+    index_partitions: []BM25Partition,
+    input_filename: []const u8,
     allocator: std.mem.Allocator,
-    line_offsets: *std.ArrayList(usize),
-    filename: []const u8,
-    ) ![]BM25Partition {
-    const file = try std.fs.cwd().openFile(filename, .{});
-    defer file.close();
+    search_cols: std.StringArrayHashMap(u16),
+    tmp_dir: []const u8,
 
-    const file_size = try file.getEndPos();
+    fn readCSVHeader(
+        input_filename: []const u8,
+        search_cols: *std.ArrayList([]const u8),
+        allocator: std.mem.Allocator,
+        ) !std.StringArrayHashMap(u16) {
+        var col_map = std.StringArrayHashMap(u16).init(allocator);
+        var col_idx: usize = 0;
 
-    const f_data = try std.posix.mmap(
-        null,
-        file_size,
-        std.posix.PROT.READ,
-        .{ .TYPE = .PRIVATE },
-        file.handle,
-        0
-    );
-    defer std.posix.munmap(f_data);
+        const file = try std.fs.cwd().openFile(input_filename, .{});
+        defer file.close();
 
-    var file_pos: usize = 0;
+        const file_size = try file.getEndPos();
 
-    // Time read.
-    const start_time = std.time.milliTimestamp();
+        const f_data = try std.posix.mmap(
+            null,
+            file_size,
+            std.posix.PROT.READ,
+            .{ .TYPE = .PRIVATE },
+            file.handle,
+            0
+        );
+        defer std.posix.munmap(f_data);
 
-    while (file_pos < file_size - 1) {
+        var term: [MAX_TERM_LENGTH]u8 = undefined;
+        var cntr: usize = 0;
 
-        switch (f_data[file_pos]) {
-            '"' => {
-                // Iter over quote
-                file_pos += 1;
+        var byte_pos: usize = 0;
+        line: while (true) {
+            const is_quoted = f_data[byte_pos] == '"';
+            byte_pos += @intFromBool(is_quoted);
 
-                while (true) {
+            while (true) {
+                if (is_quoted) {
 
-                    if (f_data[file_pos] == '"') {
-                        // Escape quote. Continue to next character.
-                        if (f_data[file_pos + 1] == '"') {
-                            file_pos += 2;
-                            continue;
+                    if (f_data[byte_pos] == '"') {
+                        byte_pos += 2;
+                        if (f_data[byte_pos - 1] != '"') {
+                            // ADD TERM
+                            for (0..search_cols.items.len) |i| {
+                                if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
+                                    try col_map.put(term[0..cntr], @intCast(col_idx));
+                                    break;
+                                }
+                            }
+                            cntr = 0;
+                            byte_pos += 1;
+                            col_idx += 1;
+                            continue :line;
                         }
-
-                        // Iter over quote.
-                        file_pos += 1;
-                        break;
+                    } else {
+                        // Add char.
+                        term[cntr] = std.ascii.toUpper(f_data[byte_pos]);
+                        cntr += 1;
+                        byte_pos += 1;
                     }
 
-                    file_pos += 1;
+                } else {
+
+                    switch (f_data[byte_pos]) {
+                        ',' => {
+                            // ADD TERM.
+                            for (0..search_cols.items.len) |i| {
+                                if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
+                                    try col_map.put(term[0..cntr], @intCast(col_idx));
+                                    break;
+                                }
+                            }
+                            cntr = 0;
+                            byte_pos += 1;
+                            col_idx += 1;
+                            continue :line;
+                        },
+                        '\n' => {
+                            // ADD TERM.
+                            return col_map;
+                        },
+                        else => {
+                            // Add char
+                            term[cntr] = std.ascii.toUpper(f_data[byte_pos]);
+                            cntr += 1;
+                            byte_pos += 1;
+                        }
+                    }
                 }
-            },
-            '\n' => {
-                file_pos += 1;
-                try line_offsets.append(file_pos);
-            },
-            else => file_pos += 1,
+            }
+
+            col_idx += 1;
         }
     }
+        
 
-    const end_time = std.time.milliTimestamp();
-    const execution_time_ms = end_time - start_time;
-    const mb_s: usize = @as(usize, @intFromFloat(0.001 * @as(f32, @floatFromInt(file_size)) / @as(f32, @floatFromInt(execution_time_ms))));
+    pub fn init(
+        input_filename: []const u8,
+        search_cols: *std.ArrayList([]const u8),
+        allocator: std.mem.Allocator,
+        ) !IndexManager {
 
-    std.debug.print("Read {d} lines in {d}ms\n", .{line_offsets.items.len, execution_time_ms});
-    std.debug.print("{d}MB/s\n", .{mb_s});
+        const search_col_map = try readCSVHeader(input_filename, search_cols, allocator);
+        const num_partitions = try std.Thread.getCpuCount();
 
-    const num_lines = line_offsets.items.len;
-    const num_partitions = 1;
-    const chunk_size: usize = num_lines / num_partitions;
-    const final_chunk_size: usize = chunk_size + (num_lines % num_partitions);
+        std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
-    var partition_boundaries = std.ArrayList(usize).init(allocator);
-    defer partition_boundaries.deinit();
+        const file_hash = blk: {
+            var hash: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+            std.crypto.hash.sha2.Sha256.hash(input_filename, &hash, .{});
+            break :blk hash;
+        };
+        const dir_name = try std.fmt.allocPrint(
+            allocator,
+            ".{x:0>32}", .{std.fmt.fmtSliceHexLower(file_hash[0..16])}
+            );
 
-    var index_partitions: []BM25Partition = try allocator.alloc(BM25Partition, num_partitions);
-    errdefer {
-        for (index_partitions) |*partition| {
-            partition.free();
+        try std.fs.cwd().makeDir(dir_name);
+
+        return IndexManager{
+            .index_partitions = try allocator.alloc(BM25Partition, num_partitions),
+            .input_filename = input_filename,
+            .allocator = allocator,
+            .search_cols = search_col_map,
+            .tmp_dir = dir_name,
+        };
+    }
+    
+    pub fn deinit(self: *IndexManager) !void {
+        for (0..self.index_partitions.len) |i| {
+            self.index_partitions[i].deinit();
         }
-        allocator.free(index_partitions);
+        self.search_cols.deinit();
+        self.allocator.free(self.index_partitions);
+
+        try std.fs.cwd().deleteTree(self.tmp_dir);
+        self.allocator.free(self.tmp_dir);
     }
-    // const search_col_idxs: [2]usize = .{6, 8};
-    const search_col_idxs: [1]usize = .{6};
-    const num_cols = search_col_idxs.len;
 
-    for (0..num_partitions) |i| {
-        try partition_boundaries.append(line_offsets.items[i * chunk_size]);
 
-        const current_chunk_size = if (i != num_partitions - 1) chunk_size else final_chunk_size;
+    fn readPartition(
+        self: *IndexManager,
+        partition_idx: usize,
+        chunk_size: usize,
+        final_chunk_size: usize,
+        num_partitions: usize,
+        line_offsets: *const std.ArrayList(usize),
+        partition_boundaries: *const std.ArrayList(usize),
+        num_cols: usize,
+        search_col_idxs: []u16,
+        total_docs_read: *AtomicCounter,
+    ) !void {
+        var timer = try std.time.Timer.start();
+        const interval_ns: u64 = 1_000_000_000 / 15;
 
-        const start = i * chunk_size;
-        const end = start + current_chunk_size;
+        var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
 
-        const partition_line_offsets = try allocator.alloc(usize, current_chunk_size);
-        @memcpy(partition_line_offsets, line_offsets.items[start..end]);
+        const current_chunk_size = switch (partition_idx != num_partitions - 1) {
+            true => chunk_size,
+            false => final_chunk_size,
+        };
 
-        index_partitions[i] = try BM25Partition.init(allocator, num_cols, partition_line_offsets);
-    }
-    try partition_boundaries.append(file_size);
+        const end_pos   = partition_boundaries.items[partition_idx + 1];
+        const start_doc = partition_idx * chunk_size;
+        const end_doc   = start_doc + current_chunk_size;
 
-    std.debug.assert(partition_boundaries.items.len == num_partitions + 1);
+        const output_filename = try std.fmt.allocPrint(
+            self.allocator, 
+            "{s}/output_{d}.bin", 
+            .{self.tmp_dir, partition_idx}
+            );
+        defer self.allocator.free(output_filename);
 
-    // Create FBA
-    var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
-
-    const time_start = std.time.milliTimestamp();
-    for (0..num_partitions) |i| {
-        // const start_pos = partition_boundaries.items[i];
-        const end_pos   = partition_boundaries.items[i + 1];
-
-        var token_stream = try TokenStream.init(filename, "output.bin", allocator);
+        var token_stream = try TokenStream.init(
+            self.input_filename, 
+            output_filename,
+            self.allocator
+            );
         defer token_stream.deinit();
 
-        var doc_id: usize = 0;
-        while (doc_id < line_offsets.items.len) {
+        var last_doc_id: usize = 0;
+        for (0.., start_doc..end_doc) |doc_id, _| {
 
-            if (doc_id % 100_000 == 0) {
-                std.debug.print("Processed {d} documents\n", .{doc_id});
+            if (timer.read() >= interval_ns) {
+                const current_docs_read = total_docs_read.fetchAdd(doc_id - last_doc_id, .monotonic) + (doc_id - last_doc_id);
+                last_doc_id = doc_id;
+                timer.reset();
+
+                if (partition_idx == 0) {
+                    std.debug.print("Read {d}/{d} docs\r", .{current_docs_read, line_offsets.items.len});
+                }
             }
 
             var line_offset = line_offsets.items[doc_id];
@@ -499,7 +592,7 @@ pub fn readFile(
             var search_col_idx: usize = 0;
             var prev_col: usize = 0;
 
-            while (search_col_idx < search_col_idxs.len) {
+            while (search_col_idx < num_cols) {
 
                 for (prev_col..search_col_idxs[search_col_idx]) |_| {
                     try token_stream.iterField(&line_offset);
@@ -508,7 +601,7 @@ pub fn readFile(
                 std.debug.assert(line_offset < next_line_offset);
                 try processDocRfc4180(
                     &token_stream, 
-                    &index_partitions[i],
+                    &self.index_partitions[partition_idx],
                     @intCast(doc_id), 
                     &line_offset, 
                     search_col_idx,
@@ -518,35 +611,175 @@ pub fn readFile(
                 prev_col = search_col_idxs[search_col_idx];
                 search_col_idx += 1;
             }
-
-            doc_id += 1;
         }
-    }
-    const time_end = std.time.milliTimestamp();
-    const time_diff = time_end - time_start;
-    std.debug.print("Processed {d} documents in {d}ms\n", .{line_offsets.items.len, time_diff});
-    std.debug.print("Found {d} unique terms\n", .{index_partitions[0].II[0].num_terms});
 
-    return index_partitions;
-}
+        // Flush remaining tokens.
+        try token_stream.flushTokenStream();
+    }
+
+
+    pub fn readFile(self: *IndexManager) !void {
+        const file = try std.fs.cwd().openFile(self.input_filename, .{});
+        defer file.close();
+
+        const file_size = try file.getEndPos();
+
+        const f_data = try std.posix.mmap(
+            null,
+            file_size,
+            std.posix.PROT.READ,
+            .{ .TYPE = .PRIVATE },
+            file.handle,
+            0
+        );
+        defer std.posix.munmap(f_data);
+
+        var line_offsets = std.ArrayList(usize).init(self.allocator);
+        defer line_offsets.deinit();
+
+        var file_pos: usize = 0;
+
+        // Time read.
+        const start_time = std.time.milliTimestamp();
+
+        while (file_pos < file_size - 1) {
+
+            switch (f_data[file_pos]) {
+                '"' => {
+                    // Iter over quote
+                    file_pos += 1;
+
+                    while (true) {
+
+                        if (f_data[file_pos] == '"') {
+                            // Escape quote. Continue to next character.
+                            if (f_data[file_pos + 1] == '"') {
+                                file_pos += 2;
+                                continue;
+                            }
+
+                            // Iter over quote.
+                            file_pos += 1;
+                            break;
+                        }
+
+                        file_pos += 1;
+                    }
+                },
+                '\n' => {
+                    file_pos += 1;
+                    try line_offsets.append(file_pos);
+                },
+                else => file_pos += 1,
+            }
+        }
+
+        const end_time = std.time.milliTimestamp();
+        const execution_time_ms = end_time - start_time;
+        const mb_s: usize = @as(usize, @intFromFloat(0.001 * @as(f32, @floatFromInt(file_size)) / @as(f32, @floatFromInt(execution_time_ms))));
+
+        std.debug.print("Read {d} lines in {d}ms\n", .{line_offsets.items.len, execution_time_ms});
+        std.debug.print("{d}MB/s\n", .{mb_s});
+
+        const num_lines = line_offsets.items.len;
+        const num_partitions = self.index_partitions.len;
+        const chunk_size: usize = num_lines / num_partitions;
+        const final_chunk_size: usize = chunk_size + (num_lines % num_partitions);
+
+        var partition_boundaries = std.ArrayList(usize).init(self.allocator);
+        defer partition_boundaries.deinit();
+
+        const num_cols = self.search_cols.count();
+
+        for (0..num_partitions) |i| {
+            try partition_boundaries.append(line_offsets.items[i * chunk_size]);
+
+            const current_chunk_size = switch (i != num_partitions - 1) {
+                true => chunk_size,
+                false => final_chunk_size,
+            };
+
+            const start = i * chunk_size;
+            const end = start + current_chunk_size;
+
+            const partition_line_offsets = try self.allocator.alloc(usize, current_chunk_size);
+            @memcpy(partition_line_offsets, line_offsets.items[start..end]);
+
+            self.index_partitions[i] = try BM25Partition.init(
+                self.allocator, 
+                num_cols, 
+                partition_line_offsets
+                );
+        }
+        try partition_boundaries.append(file_size);
+
+        std.debug.assert(partition_boundaries.items.len == num_partitions + 1);
+
+        const search_col_idxs = self.search_cols.values();
+        const time_start = std.time.milliTimestamp();
+
+        var threads = try self.allocator.alloc(std.Thread, num_partitions);
+        defer self.allocator.free(threads);
+
+        var total_docs_read = AtomicCounter.init(0);
+
+        for (0..num_partitions) |partition_idx| {
+
+            threads[partition_idx] = try std.Thread.spawn(
+                .{},
+                readPartition,
+                .{
+                    self,
+                    partition_idx,
+                    chunk_size,
+                    final_chunk_size,
+                    num_partitions,
+                    &line_offsets,
+                    &partition_boundaries,
+                    num_cols,
+                    search_col_idxs,
+                    &total_docs_read
+                    },
+                );
+        }
+
+        for (threads) |thread| {
+            thread.join();
+        }
+
+        const _total_docs_read = total_docs_read.load(.acquire);
+        std.debug.assert(_total_docs_read == line_offsets.items.len);
+        std.debug.print("Read {d}/{d} docs\r", .{_total_docs_read, line_offsets.items.len});
+
+        const time_end = std.time.milliTimestamp();
+        const time_diff = time_end - time_start;
+        std.debug.print("Processed {d} documents in {d}ms\n", .{line_offsets.items.len, time_diff});
+    }
+
+};
+
 
 pub fn main() !void {
-    const filename: []const u8 = "../tests/mb_small.csv";
+    const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer {
-        _ = gpa.deinit();
-    }
-
-    var line_offsets = std.ArrayList(usize).init(allocator);
-    defer line_offsets.deinit();
-
-    const index_partitions = try readFile(allocator, &line_offsets, filename);
-    defer {
-        for (index_partitions) |*partition| {
-            partition.free();
+    const allocator = blk: {
+        if (builtin.mode == .ReleaseFast) {
+            break :blk std.heap.c_allocator;
         }
-        allocator.free(index_partitions);
+        break :blk gpa.allocator();
+    }; 
+
+    var search_cols = std.ArrayList([]const u8).init(allocator);
+    try search_cols.append("TITLE");
+    try search_cols.append("ARTIST");
+
+    var index_manager = try IndexManager.init(filename, &search_cols, allocator);
+    try index_manager.readFile();
+
+    defer {
+        search_cols.deinit();
+        index_manager.deinit() catch {};
+        _ = gpa.deinit();
     }
 }
