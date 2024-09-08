@@ -578,7 +578,7 @@ const IndexManager = struct {
                 timer.reset();
 
                 if (partition_idx == 0) {
-                    std.debug.print("Read {d}/{d} docs\r", .{current_docs_read, line_offsets.items.len});
+                    std.debug.print("Read {d}/{d} Kdocs\r", .{current_docs_read / 1000, line_offsets.items.len / 1000});
                 }
             }
 
@@ -615,6 +615,7 @@ const IndexManager = struct {
 
         // Flush remaining tokens.
         try token_stream.flushTokenStream();
+        _ = total_docs_read.fetchAdd(end_doc - start_doc - last_doc_id, .monotonic);
     }
 
 
@@ -749,7 +750,7 @@ const IndexManager = struct {
 
         const _total_docs_read = total_docs_read.load(.acquire);
         std.debug.assert(_total_docs_read == line_offsets.items.len);
-        std.debug.print("Read {d}/{d} docs\r", .{_total_docs_read, line_offsets.items.len});
+        std.debug.print("Read {d}/{d} Kdocs\n", .{_total_docs_read / 1000, line_offsets.items.len / 1000});
 
         const time_end = std.time.milliTimestamp();
         const time_diff = time_end - time_start;
