@@ -1,97 +1,238 @@
 const std = @import("std");
 
-fn commonPrefixLen(a: []const u8, b: []const u8) usize {
-    const len = @min(a.len, b.len);
-    var i: usize = 0;
-    while (i < len and a[i] == b[i]) : (i += 1) {}
-    return i;
-}
-
-fn commonPrefixLenSS(a: *SmallString, b: []const u8) usize {
-    const len = @min(@as(usize, @intCast(a.len)), b.len);
-    var i: usize = 0;
-    while (i < len and a.ptr[i] == b[i]) : (i += 1) {}
-    return i;
-}
-
 pub const bitfield_u32 = packed struct (u32) {
     terminal: bool,
     value: u31,
 };
 
-pub const SmallString = struct {
-    ptr: [*]const u8,
-    len: u8,
-
-    pub fn init(str: []u8) !SmallString {
-        if (str.len > 255) {
-            return error.StringTooLong;
-        }
-        return SmallString{
-            .ptr = str.ptr,
-            .len = @intCast(str.len),
-        };
-    }
-
-    pub fn initDup(allocator: std.mem.Allocator, str: []const u8) !SmallString {
-        if (str.len > 255) {
-            return error.StringTooLong;
-        }
-        const ptr = try allocator.dupe(u8, str);
-        return SmallString{
-            .ptr = @ptrCast(ptr),
-            .len = @intCast(ptr.len),
-        };
-    }
-
-    pub fn slice(self: SmallString, start: usize, end: usize) SmallString {
-        return SmallString{
-            .ptr = self.ptr + start,
-            .len = @intCast(end - start),
-        };
-    }
-
-    pub fn eql(self: SmallString, other: SmallString) bool {
-        return std.mem.eql(u8, self.slice(), other.slice());
-    }
-
-    pub fn eqlU8(self: SmallString, other: []const u8) bool {
-        // if (self.len != other.len) return false;
-
-        for (0..self.len) |i| {
-            if (self.ptr[i] != other[i]) return false;
-        }
-
-        return true;
-    }
+const InsertPath = enum(u2) {
+    split,
+    make_terminal,
+    traverse,
 };
 
-const Node = struct {
-    prefix: SmallString,
-    value: bitfield_u32,
-    children: std.ArrayList(*Node),
+
+const Node = extern struct {
+    // num_bytes_prefix is the total number of bytes used by the prefix.
+    // Non-byte aligned prefixes are allowed, so to get the differ
+    prefix: SS_ptr,        // 8
+    value: bitfield_u32,   // 12
+    num_bits_prefix: u32,  // 16
+
+    left_child: ?*Node,    // 24
+    right_child: ?*Node,   // 32
+
+    const SS_ptr = extern union {
+        Inline: [8]u8,
+        ptr: [*]u8,
+
+        fn accessPrefix(self: *SS_ptr, index: usize, is_inline: bool) u8 {
+            if (is_inline) return self.Inline[index];
+            return self.ptr[index];
+        }
+    };
 
     fn init(allocator: std.mem.Allocator) !*Node {
         const node = try allocator.create(Node);
         node.* = Node{
-            .prefix = try SmallString.init(&[_]u8{}),
+            .prefix = SS_ptr{
+                .Inline = undefined,
+            },
             .value = bitfield_u32{
                 .terminal = false,
                 .value = 0,
             },
-            .children = std.ArrayList(*Node).init(allocator),
+            .num_bits_prefix = 0,
+            .left_child = null,
+            .right_child = null,
         };
         return node;
     }
 
-    fn deinit(self: *Node) void {
-        self.children.deinit();
+    fn matchPrefix(
+        self: *Node, 
+        prefix: []const u8, 
+        start_bit: *usize,
+        diff_bit: *u8,
+        ) !bool {
+        const self_bits = self.num_bits_prefix;
+        const self_bytes = (self_bits / 8) + @as(u32, @intFromBool(self_bits % 8 != 0));
+
+        var start_byte  = start_bit.* / 8;
+        const shift_len: u3 = @intCast(7 - (start_bit.* % 8));
+
+        const bits_rem_key  = (prefix.len * 8) - start_bit.*;
+
+        const is_inline = (self_bytes > 8);
+
+        if (self_bits > bits_rem_key) {
+            // Key longer than current prefix. Match not possible.
+            // Move start bit to end.
+            start_bit.* = prefix.len * 8;
+            return false;
+        }
+
+        // Must match the entire current node's prefix or return false.
+        var idx: usize = 0;
+        var prefix_byte: u8 = 0;
+        for (0..self_bytes) |_i| {
+            const i = _i + start_byte;
+
+            prefix_byte = if (i == prefix.len - 1) 
+                (prefix[i] << shift_len)
+             else 
+                (prefix[i] << shift_len) | (prefix[i + 1] >> (7 - shift_len));
+
+            if (prefix_byte != self.prefix.accessPrefix(_i, is_inline)) return false;
+
+            idx += 1;
+            start_byte  += 1;
+        }
+
+        start_bit.* += self.num_bits_prefix;
+        diff_bit.* = self.prefix.accessPrefix(idx, is_inline) ^ prefix_byte;
+        return true;
+    }
+
+    fn setPrefix(
+        self: *Node, 
+        allocator: std.mem.Allocator, 
+        prefix: []const u8, 
+        start_bit: usize,
+        num_bits: usize
+        ) !void {
+        const num_bytes = (num_bits / 8) + @intFromBool(num_bits % 8 != 0);
+        const shift_len: u3 = @intCast(7 - start_bit % 8);
+        const start_byte = start_bit / 8;
+        self.num_bits_prefix = @intCast(num_bits);
+
+        if (num_bytes > 8) {
+            self.prefix.ptr = @ptrCast(try allocator.alloc(u8, num_bytes));
+            for (0.., prefix[start_byte..start_byte + num_bytes]) |idx, current_byte| {
+                var next_byte = if (idx == num_bytes - 1) 0 else prefix[idx + 1];
+                if (shift_len != 0) next_byte >>= (7 - shift_len);
+
+                const new_byte: u8 = (current_byte << shift_len) | next_byte;
+                self.prefix.ptr[idx] = new_byte;
+            }
+            return;
+        }
+
+        self.prefix = SS_ptr{
+            .Inline = undefined,
+        };
+
+        const native_endian = @import("builtin").target.cpu.arch.endian();
+        const end_byte = @min(start_byte + 8, prefix.len);
+        for (0.., start_byte..end_byte) |i, byte_idx| {
+            self.prefix.Inline[i] = prefix[byte_idx];
+        }
+
+        var u64_cast_prefix: u64 = std.mem.readInt(
+            u64, 
+            &self.prefix.Inline,
+            native_endian,
+            ) << shift_len;
+        @memcpy(@as([*]u8, @ptrCast(&u64_cast_prefix)), &self.prefix.Inline);
+    }
+
+    fn getDiffBit(
+        self: *Node, 
+        key: []const u8, 
+        start_bit: *usize,
+        diff_bit: *u8,
+        ) InsertPath {
+        const key_size = (key.len * 8) - start_bit.*;
+        var idx: usize = 0;
+
+        const is_inline = (self.num_bits_prefix <= 64);
+        // std.debug.print("NUM BITS PREFIX: {d}\n", .{self.num_bits_prefix});
+
+        if (key_size < self.num_bits_prefix) {
+            // std.debug.print("FIRST\n", .{});
+            const num_bits  = key_size;
+
+            while (idx < num_bits) {
+                const key_byte_idx: u3 = @intCast(start_bit.* / 8);
+                const key_bit_idx: u3  = @intCast(start_bit.* % 8);
+                const key_bit  = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
+
+                const self_byte_idx = idx / 8;
+                const self_bit_idx: u3 = @intCast(idx % 8);
+                const self_bit = self.prefix.accessPrefix(self_byte_idx, is_inline) & (@as(u8, 1) << self_bit_idx);
+
+                if (self_bit != key_bit) {
+                    diff_bit.* = key_bit;
+                    // return InsertPath.traverse;
+
+                    // Partial prefix match. Split node.
+                    return InsertPath.split;
+                }
+
+                start_bit.* += 1;
+                idx         += 1;
+            }
+            // return InsertPath.split;
+
+            // Full prefix match, but current node's prefix not complete. Traverse.
+            return InsertPath.traverse;
+
+        } else if (key_size == self.num_bits_prefix) {
+            // std.debug.print("SECOND\n", .{});
+            const num_bits = key_size;
+
+            while (idx < num_bits) {
+                const key_byte_idx: u3 = @intCast(start_bit.* / 8);
+                const key_bit_idx: u3  = @intCast(start_bit.* % 8);
+                const key_bit  = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
+
+                const self_byte_idx = idx / 8;
+                const self_bit_idx: u3 = @intCast(idx % 8);
+                const self_bit = self.prefix.accessPrefix(self_byte_idx, is_inline) & (@as(u8, 1) << self_bit_idx);
+
+                if (self_bit != key_bit) {
+                    diff_bit.* = key_bit;
+                    return InsertPath.split;
+                }
+
+                start_bit.* += 1;
+                idx         += 1;
+            }
+
+            return InsertPath.make_terminal;
+
+        } else {
+            // std.debug.print("THIRD\n", .{});
+            const num_bits = self.num_bits_prefix;
+
+            while (idx < num_bits) {
+                const key_byte_idx: u3 = @intCast(start_bit.* / 8);
+                const key_bit_idx: u3  = @intCast(start_bit.* % 8);
+                const key_bit  = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
+
+
+                const self_byte_idx = idx / 8;
+                const self_bit_idx: u3 = @intCast(idx % 8);
+                const self_bit = self.prefix.accessPrefix(self_byte_idx, is_inline) & (@as(u8, 1) << self_bit_idx);
+
+                if (self_bit != key_bit) {
+                    diff_bit.* = key_bit;
+                    return InsertPath.split;
+                }
+
+                start_bit.* += 1;
+                idx         += 1;
+            }
+
+            return InsertPath.traverse;
+        }
     }
 };
 
 const PatriciaTrie = struct {
-    root: *Node,
+    root: ?*Node,
     allocator: std.mem.Allocator,
+    mem_usage: usize,
     terminal_count: usize,
 
     pub fn init(allocator: std.mem.Allocator) !PatriciaTrie {
@@ -99,214 +240,133 @@ const PatriciaTrie = struct {
         return PatriciaTrie{
             .root = root,
             .allocator = allocator,
+            .mem_usage = 0,
             .terminal_count = 0,
         };
     }
 
-    pub fn deinit(self: *PatriciaTrie) void {
-        self.root.deinit();
-    }
-
     pub fn insert(self: *PatriciaTrie, key: []const u8, value: u32) !void {
+        // Insert node.
+        // Find first differing bit in key.
+        // Traverse prefix trie.
+        // If new prefix found insert it.
+        // If key is prefix of existing prefix, split node, create new node.
+        // If key is already in trie, make terminal if not and return.
         var current = self.root;
         var i: usize = 0;
 
-        while (i < key.len) {
-            var longest_prefix: usize = 0;
-            var matching_child: *Node = undefined;
-
-            for (current.children.items) |child| {
-
-                std.debug.assert(child.children.items.len <= 256);
-
-                const common_len = commonPrefixLenSS(&child.prefix, key[i..]);
-                if (common_len > longest_prefix) {
-                    longest_prefix = common_len;
-                    matching_child = child;
-                }
-            }
-
-            if (longest_prefix == 0) {
-                // No matching prefix, create a new node
-                var new_node    = try Node.init(self.allocator);
-                new_node.prefix = try SmallString.initDup(self.allocator, key[i..]);
-                new_node.value = bitfield_u32{
-                    .terminal = true,
-                    .value = @intCast(value),
-                };
-                try current.children.append(new_node);
-                self.terminal_count += 1;
-
-                std.debug.assert(new_node.children.items.len <= 256);
-                return;
-            }
-
-            if (longest_prefix < matching_child.prefix.len) {
-                // The key is a prefix of the existing node
-                // Need to split the existing node
-
-                // Create new node for remaining suffix.
-                // Will be child of `matching_child` and contain remaining suffix.
-                var new_node    = try Node.init(self.allocator);
-                new_node.prefix = matching_child.prefix.slice(
-                    longest_prefix,
-                    matching_child.prefix.len,
-                );
-                std.debug.assert(new_node.children.items.len <= 256);
-
-                for (matching_child.children.items) |child| {
-                    try new_node.children.append(child);
-                }
-                new_node.value = matching_child.value;
-
-                try matching_child.children.append(new_node);
-                matching_child.prefix = matching_child.prefix.slice(0, longest_prefix);
-                matching_child.value.terminal = false;
-
-                std.debug.assert(matching_child.children.items.len <= 256);
-
-                if (i + longest_prefix < key.len) {
-                    // Still more unmatched prefix remaining.
-                    // Create new terminal node with remainder of key.
-                    var key_node = try Node.init(self.allocator);
-                    key_node.prefix = try SmallString.initDup(
-                        self.allocator, 
-                        key[i + longest_prefix..]
-                        );
-                    key_node.value = bitfield_u32{
-                        .terminal = true,
-                        .value = @intCast(value),
-                    };
-                    try matching_child.children.append(key_node);
-
-                    std.debug.assert(key_node.children.items.len <= 256);
-                } else if (i + longest_prefix == key.len) {
-                    matching_child.value = bitfield_u32{
-                        .terminal = true,
-                        .value = @intCast(value),
-                    };
-
-                    std.debug.assert(new_node.children.items.len <= 256);
-                } else unreachable;
-
-                self.terminal_count += 1;
-                return;
-            }
-
-            current = matching_child;
-            i += longest_prefix;
+        if (self.terminal_count == 0) {
+            current.?.value = bitfield_u32{
+                .terminal = true,
+                .value = @intCast(value),
+            };
+            self.terminal_count += 1;
+            try current.?.setPrefix(self.allocator, key, 0, key.len * 8);
+            return;
         }
 
-        self.terminal_count += @intFromBool(!current.value.terminal);
-        current.value = bitfield_u32{
-            .terminal = true,
-            .value = @intCast(value),
-        };
-    }
+        // THREE CASES TO HANDLE:
+        // split - If matched entire key and not done with current's prefix. Then split node. return.
+        // make_terminal - If matched entire key and equal to current's prefix. Make terminal. return.
+        // traverse - If matched entire or partial current prefix and not done with key. Change current node to child. If child is null, create new node and continue.
 
-    pub fn search(self: *const PatriciaTrie, key: []const u8) bool {
-        var current = self.root;
-        var i: usize = 0;
+        var diff_bit: u8 = 0;
+        while (i < key.len * 8) {
+            const start_bit = i;
 
-        while (i < key.len) {
-            var longest_prefix: usize = 0;
-            var matching_child: *Node = undefined;
+            switch (current.?.getDiffBit(key, &i, &diff_bit)) {
+                InsertPath.split => {
+                    // std.debug.print("SPLIT\n", .{});
 
-            for (current.children.items) |child| {
-                const common_len = commonPrefixLenSS(&child.prefix, key[i..]);
-                if (common_len > longest_prefix) {
-                    longest_prefix = common_len;
-                    matching_child = child;
-                }
-            }
+                    const matching_bits: u32 = @intCast(i - start_bit);
 
-            if (longest_prefix == 0) {
-                return false;
-            }
+                    // Create new node to replace current node.
+                    // Current node will be new child of this node.
+                    var new_node = Node{
+                        .prefix = undefined,
+                        .value = current.?.value,
+                        .num_bits_prefix = matching_bits,
+                        .left_child = current,
+                        .right_child = null,
+                    };
+                    if (diff_bit == 1) {
+                        new_node.right_child = current;
+                        new_node.left_child  = null;
+                    }
+                    try new_node.setPrefix(self.allocator, key, start_bit, matching_bits);
+                    new_node.value.terminal = true;
 
-            if (i + matching_child.prefix.len > key.len) {
-                // The search key is a prefix of this node's prefix
-                return true;
-            } else if (i + matching_child.prefix.len < key.len) {
-                // We need to continue searching
-                if (!matching_child.prefix.eqlU8(key[i..])) {
-                    return false;
-                }
-                current = matching_child;
-                i += matching_child.prefix.len;
-            } else {
-                // Exact match of the entire key
-                return matching_child.prefix.eqlU8(key[i..]);
+                    current.?.value = bitfield_u32{
+                        .value = @intCast(value),
+                        .terminal = current.?.value.terminal,
+                    };
+
+                    self.mem_usage += 32;
+                    if (key.len > 8) self.mem_usage += key.len + 8;
+                    return;
+                },
+                InsertPath.make_terminal => {
+                    // std.debug.print("MAKE TERMINAL\n", .{});
+
+                    current.?.value = bitfield_u32{
+                        .value = @intCast(value),
+                        .terminal = true,
+                    };
+                    return;
+                },
+                InsertPath.traverse => {
+                    // std.debug.print("TRAVERSE\n", .{});
+
+                    if (diff_bit == 1) {
+                        if (current.?.right_child != null) {
+                            current = current.?.right_child;
+                            continue;
+                        }
+                        current.?.right_child = try Node.init(self.allocator);
+                        current = current.?.right_child;
+                    } else {
+                        if (current.?.left_child != null) {
+                            current = current.?.left_child;
+                            continue;
+                        }
+                        current.?.left_child = try Node.init(self.allocator);
+                        current = current.?.left_child;
+                    }
+
+                    // Create new node with remaining prefix and return.
+                    current.?.value = bitfield_u32{
+                        .value = @intCast(value),
+                        .terminal = true,
+                    };
+                    current.?.num_bits_prefix = @intCast((key.len * 8) - i);
+
+                    try current.?.setPrefix(self.allocator, key, i, current.?.num_bits_prefix);
+                    return;
+                },
             }
         }
-
-        return current.value.terminal;
     }
 
     pub fn get(self: *const PatriciaTrie, key: []const u8) u32 {
-        var current = self.root;
-        var i: usize = 0;
+        var idx: usize = 0;
+        var current: ?*Node = self.root;
+        var diff_bit: u8 = 0;
 
-        while (i < key.len) {
-            var longest_prefix: usize = 0;
-            var matching_child: *Node = undefined;
+        while (idx < key.len * 8) {
+            if (current == null) return std.math.maxInt(u32);
 
-            for (current.children.items) |child| {
-                const common_len = commonPrefixLenSS(&child.prefix, key[i..]);
-                if (common_len > longest_prefix) {
-                    longest_prefix = common_len;
-                    matching_child = child;
-                }
-            }
+            // False means prefix differed from given value. No match.
+            if (!try current.?.matchPrefix(key, &idx, &diff_bit)) return std.math.maxInt(u32);
 
-            if (longest_prefix == 0) {
-                return std.math.maxInt(u32);
-            }
+            if (idx == key.len * 8) break;
 
-            if (i + matching_child.prefix.len > key.len) {
-                // The search key is a prefix of this node's prefix
-                return std.math.maxInt(u32);
-            } else if (i + matching_child.prefix.len < key.len) {
-                // We need to continue searching
-                if (!matching_child.prefix.eqlU8(key[i..])) {
-                    return std.math.maxInt(u32);
-                }
-                current = matching_child;
-                i += matching_child.prefix.len;
-            } else {
-                // Exact match of the entire key
-                if (matching_child.prefix.eqlU8(key[i..])) {
-                    if (matching_child.value.terminal) {
-                        return @intCast(matching_child.value.value);
-                    }
-                    current = matching_child;
-                }
-            }
+            current = if (diff_bit == 1) current.?.right_child else current.?.left_child;
         }
 
-        if (current.value.terminal) {
-            return @intCast(current.value.value);
-        }
+        if (current.?.value.terminal) return current.?.value.value;
         return std.math.maxInt(u32);
     }
 };
-
-pub fn shrinkArena(old_arena: *std.heap.ArenaAllocator, comptime T: type, items: []T) !std.heap.ArenaAllocator {
-    // Create a new arena
-    var new_arena = std.heap.ArenaAllocator.init(old_arena.child_allocator);
-    errdefer new_arena.deinit();
-
-    // Allocate exact space for the items
-    const new_items = try new_arena.allocator().alloc(T, items.len);
-
-    // Copy the items to the new arena
-    @memcpy(new_items, items);
-
-    // Update the slice to point to the new memory
-    items.ptr = new_items.ptr;
-
-    return new_arena;
-}
 
 test "PatriciaTrie basic operations" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -314,7 +374,6 @@ test "PatriciaTrie basic operations" {
     const allocator = arena.allocator();
 
     var trie = try PatriciaTrie.init(allocator);
-    defer trie.deinit();
 
     // Test insertions
     try trie.insert("hello", 0);
@@ -324,54 +383,26 @@ test "PatriciaTrie basic operations" {
 
 
     try std.testing.expectEqual(4, trie.terminal_count);
-    try std.testing.expect(trie.root.children.items.len > 0);
     try trie.insert("helipad", 3);
     try std.testing.expectEqual(4, trie.terminal_count);
     try trie.insert("helipay", 3);
     try std.testing.expectEqual(5, trie.terminal_count);
 
-    // Test successful searches
-    try std.testing.expect(trie.search("hel"));
-    try std.testing.expect(trie.search("hello"));
-    try std.testing.expect(trie.search("helicopter"));
-    try std.testing.expect(trie.search("helipad"));
+    try std.testing.expectEqual(std.math.maxInt(u32), trie.get("hel"));
+    try std.testing.expectEqual(0, trie.get("hello"));
+    try std.testing.expectEqual(2, trie.get("helicopter"));
+    try std.testing.expectEqual(3, trie.get("helipad"));
 
-    try std.testing.expect(3 == trie.get("helipad"));
-    try std.testing.expect(std.math.maxInt(u32) == trie.get("hel"));
-    try std.testing.expect(1 == trie.get("hell"));
+    try std.testing.expectEqual(1, trie.get("hell"));
 
-    // Test unsuccessful searches
-    try std.testing.expect(!trie.search("helium"));
-    try std.testing.expect(!trie.search("help"));
+    try std.testing.expectEqual(std.math.maxInt(u32), trie.get("helium"));
+    try std.testing.expectEqual(std.math.maxInt(u32), trie.get("help"));
     
-    // This line was incorrect before, "he" is a valid prefix
-    try std.testing.expect(trie.search("he"));
+    try std.testing.expectEqual(std.math.maxInt(u32), trie.get(""));
 
-    // Test prefix searches
-    try std.testing.expect(trie.search("heli"));
-    try std.testing.expectEqual(std.math.maxInt(u32), trie.get("heli")); 
-    try std.testing.expect(trie.search("helicopt"));
-
-    // Test empty string
-    try std.testing.expect(!trie.search(""));
-
-    // Insert and test a longer prefix
     try trie.insert("helloworld", 4);
-    try std.testing.expect(trie.search("helloworl"));  // This is also a valid prefix
-    try std.testing.expect(trie.search("helloworld"));
+    try std.testing.expectEqual(std.math.maxInt(u32), trie.get("helloworl"));
     try std.testing.expectEqual(4, trie.get("helloworld"));
-
-    // Insert and test a prefix of an existing word
-    try trie.insert("he", 5);
-    try std.testing.expect(trie.search("he"));
-
-    // Additional tests to verify prefix behavior
-    try std.testing.expect(!trie.search("a"));  // Non-existent prefix
-    try trie.insert("a", 6);
-    try std.testing.expect(trie.search("a"));   // Now "a" exists
-    try std.testing.expect(!trie.search("b"));  // "b" still doesn't exist
-
-    // std.debug.print("\ngetNumMatchingPrefix(\"helicopter\"): {d}\n", .{try trie.getNumMatchingPrefix("helicopter")});
 }
 
 
@@ -384,7 +415,6 @@ test "PatriciaTrie benchmark" {
     defer keys.deinit();
 
     var trie = try PatriciaTrie.init(allocator);
-    defer trie.deinit();
 
     const _N: usize = 10_000_000;
     const num_chars: usize = 6;
@@ -402,9 +432,6 @@ test "PatriciaTrie benchmark" {
 
     const init_bytes: usize = arena.queryCapacity();
 
-    std.debug.print("Sleeping for 10 seconds...\n", .{});
-    std.time.sleep(10_000_000_000);
-
     const start = std.time.milliTimestamp();
     var it = keys.iterator();
     var i: u32 = 0;
@@ -421,10 +448,9 @@ test "PatriciaTrie benchmark" {
     std.debug.print("Insertions per second: {d}\n", .{insertions_per_second});
 
     // Get total bytes allocated
-    const total_bytes: usize = arena.queryCapacity();
+    const total_bytes: usize = trie.mem_usage;
     std.debug.print("Hashmap MB allocated: {d}MB\n", .{(init_bytes) / (1024 * 1024)});
-    std.debug.print("Trie MB allocated:    {d}MB\n", .{(total_bytes - init_bytes) / (1024 * 1024)});
+    std.debug.print("Trie MB allocated:    {d}MB\n", .{total_bytes / (1024 * 1024)});
 
-    std.time.sleep(10_000_000_000);
     try std.testing.expectEqual(N, trie.terminal_count);
 }

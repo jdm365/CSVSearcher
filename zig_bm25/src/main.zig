@@ -506,7 +506,10 @@ const IndexManager = struct {
             ".{x:0>32}", .{std.fmt.fmtSliceHexLower(file_hash[0..16])}
             );
 
-        try std.fs.cwd().makeDir(dir_name);
+        std.fs.cwd().makeDir(dir_name) catch {
+            try std.fs.cwd().deleteTree(dir_name);
+            try std.fs.cwd().makeDir(dir_name);
+        };
 
         return IndexManager{
             .index_partitions = try allocator.alloc(BM25Partition, num_partitions),
