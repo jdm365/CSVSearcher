@@ -1,4 +1,5 @@
 const std = @import("std");
+const progress = @import("progress.zig");
 const builtin = @import("builtin");
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
@@ -394,6 +395,52 @@ const IndexManager = struct {
     search_cols: std.StringArrayHashMap(u16),
     tmp_dir: []const u8,
 
+    pub fn init(
+        input_filename: []const u8,
+        search_cols: *std.ArrayList([]const u8),
+        allocator: std.mem.Allocator,
+        ) !IndexManager {
+
+        const search_col_map = try readCSVHeader(input_filename, search_cols, allocator);
+        const num_partitions = try std.Thread.getCpuCount();
+
+        std.debug.print("Writing {d} partitions\n", .{num_partitions});
+
+        const file_hash = blk: {
+            var hash: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+            std.crypto.hash.sha2.Sha256.hash(input_filename, &hash, .{});
+            break :blk hash;
+        };
+        const dir_name = try std.fmt.allocPrint(
+            allocator,
+            ".{x:0>32}", .{std.fmt.fmtSliceHexLower(file_hash[0..16])}
+            );
+
+        std.fs.cwd().makeDir(dir_name) catch {
+            try std.fs.cwd().deleteTree(dir_name);
+            try std.fs.cwd().makeDir(dir_name);
+        };
+
+        return IndexManager{
+            .index_partitions = try allocator.alloc(BM25Partition, num_partitions),
+            .input_filename = input_filename,
+            .allocator = allocator,
+            .search_cols = search_col_map,
+            .tmp_dir = dir_name,
+        };
+    }
+    
+    pub fn deinit(self: *IndexManager) !void {
+        for (0..self.index_partitions.len) |i| {
+            self.index_partitions[i].deinit();
+        }
+        self.search_cols.deinit();
+        self.allocator.free(self.index_partitions);
+
+        try std.fs.cwd().deleteTree(self.tmp_dir);
+        self.allocator.free(self.tmp_dir);
+    }
+
     fn readCSVHeader(
         input_filename: []const u8,
         search_cols: *std.ArrayList([]const u8),
@@ -485,52 +532,6 @@ const IndexManager = struct {
     }
         
 
-    pub fn init(
-        input_filename: []const u8,
-        search_cols: *std.ArrayList([]const u8),
-        allocator: std.mem.Allocator,
-        ) !IndexManager {
-
-        const search_col_map = try readCSVHeader(input_filename, search_cols, allocator);
-        const num_partitions = try std.Thread.getCpuCount();
-
-        std.debug.print("Writing {d} partitions\n", .{num_partitions});
-
-        const file_hash = blk: {
-            var hash: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
-            std.crypto.hash.sha2.Sha256.hash(input_filename, &hash, .{});
-            break :blk hash;
-        };
-        const dir_name = try std.fmt.allocPrint(
-            allocator,
-            ".{x:0>32}", .{std.fmt.fmtSliceHexLower(file_hash[0..16])}
-            );
-
-        std.fs.cwd().makeDir(dir_name) catch {
-            try std.fs.cwd().deleteTree(dir_name);
-            try std.fs.cwd().makeDir(dir_name);
-        };
-
-        return IndexManager{
-            .index_partitions = try allocator.alloc(BM25Partition, num_partitions),
-            .input_filename = input_filename,
-            .allocator = allocator,
-            .search_cols = search_col_map,
-            .tmp_dir = dir_name,
-        };
-    }
-    
-    pub fn deinit(self: *IndexManager) !void {
-        for (0..self.index_partitions.len) |i| {
-            self.index_partitions[i].deinit();
-        }
-        self.search_cols.deinit();
-        self.allocator.free(self.index_partitions);
-
-        try std.fs.cwd().deleteTree(self.tmp_dir);
-        self.allocator.free(self.tmp_dir);
-    }
-
 
     fn readPartition(
         self: *IndexManager,
@@ -543,9 +544,10 @@ const IndexManager = struct {
         num_cols: usize,
         search_col_idxs: []u16,
         total_docs_read: *AtomicCounter,
+        progress_bar: *progress.ProgressBar,
     ) !void {
         var timer = try std.time.Timer.start();
-        const interval_ns: u64 = 1_000_000_000 / 15;
+        const interval_ns: u64 = 1_000_000_000 / 30;
 
         var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
 
@@ -581,7 +583,8 @@ const IndexManager = struct {
                 timer.reset();
 
                 if (partition_idx == 0) {
-                    std.debug.print("Read {d}/{d} Kdocs\r", .{current_docs_read / 1000, line_offsets.items.len / 1000});
+                    // std.debug.print("Read {d}/{d} Kdocs\r", .{current_docs_read / 1000, line_offsets.items.len / 1000});
+                    progress_bar.update(current_docs_read);
                 }
             }
 
@@ -726,6 +729,7 @@ const IndexManager = struct {
         defer self.allocator.free(threads);
 
         var total_docs_read = AtomicCounter.init(0);
+        var progress_bar = progress.ProgressBar.init(line_offsets.items.len);
 
         for (0..num_partitions) |partition_idx| {
 
@@ -742,7 +746,8 @@ const IndexManager = struct {
                     &partition_boundaries,
                     num_cols,
                     search_col_idxs,
-                    &total_docs_read
+                    &total_docs_read,
+                    &progress_bar,
                     },
                 );
         }
@@ -753,7 +758,8 @@ const IndexManager = struct {
 
         const _total_docs_read = total_docs_read.load(.acquire);
         std.debug.assert(_total_docs_read == line_offsets.items.len);
-        std.debug.print("Read {d}/{d} Kdocs\n", .{_total_docs_read / 1000, line_offsets.items.len / 1000});
+        // std.debug.print("Read {d}/{d} Kdocs\n", .{_total_docs_read / 1000, line_offsets.items.len / 1000});
+        progress_bar.update(_total_docs_read);
 
         const time_end = std.time.milliTimestamp();
         const time_diff = time_end - time_start;
