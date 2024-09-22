@@ -1,5 +1,6 @@
 const std = @import("std");
 const progress = @import("progress.zig");
+const sorted_array = @import("sorted_array.zig");
 const builtin = @import("builtin");
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
@@ -171,24 +172,24 @@ const InvertedIndex = struct {
         self: *InvertedIndex,
         allocator: std.mem.Allocator,
         ) !void {
-        self.num_terms = self.doc_freqs.items.len;
+        self.num_terms = @intCast(self.doc_freqs.items.len);
         self.term_offsets = try allocator.alloc(u32, self.num_terms);
 
         // Num terms is now known.
         var postings_size: usize = 0;
-        for (0.., self.doc_freqs) |i, doc_freq| {
-            self.term_offsets[i] = postings_size;
+        for (0.., self.doc_freqs.items) |i, doc_freq| {
+            self.term_offsets[i] = @intCast(postings_size);
             postings_size += doc_freq;
         }
-        self.term_offsets[self.num_terms - 1] = postings_size;
+        self.term_offsets[self.num_terms - 1] = @intCast(postings_size);
         self.postings = try allocator.alloc(token_t, postings_size);
 
         var avg_doc_size: f64 = 0.0;
         for (self.doc_sizes) |doc_size| {
-            avg_doc_size += doc_size;
+            avg_doc_size += @floatFromInt(doc_size);
         }
-        avg_doc_size /= self.num_docs;
-        self.avg_doc_size = @as(f32, avg_doc_size);
+        avg_doc_size /= @floatFromInt(self.num_docs);
+        self.avg_doc_size = @floatCast(avg_doc_size);
     }
 };
 
@@ -221,6 +222,14 @@ const BM25Partition = struct {
             self.II[i].deinit(self.allocator);
         }
         self.allocator.free(self.II);
+    }
+
+    pub fn constructFromTokenStream(
+        self: *BM25Partition
+        ) !void {
+        for (self.II) |*II| {
+            try II.resizePostings(self.allocator);
+        }
     }
 };
 
@@ -560,30 +569,41 @@ const IndexManager = struct {
         const start_doc = partition_idx * chunk_size;
         const end_doc   = start_doc + current_chunk_size;
 
-        const output_filename = try std.fmt.allocPrint(
-            self.allocator, 
-            "{s}/output_{d}.bin", 
-            .{self.tmp_dir, partition_idx}
-            );
-        defer self.allocator.free(output_filename);
+        var output_filenames = std.ArrayList([]const u8).init(self.allocator);
+        var token_streams    = try self.allocator.alloc(TokenStream, num_cols);
 
-        var token_stream = try TokenStream.init(
-            self.input_filename, 
-            output_filename,
-            self.allocator
+        for (0..num_cols) |col_idx| {
+            try output_filenames.append(try std.fmt.allocPrint(
+                self.allocator, 
+                "{s}/output_{d}_{d}.bin", 
+                .{self.tmp_dir, partition_idx, col_idx}
+                ));
+            token_streams[col_idx] = try TokenStream.init(
+                self.input_filename,
+                output_filenames.items[col_idx],
+                self.allocator,
             );
-        defer token_stream.deinit();
+        }
+        defer {
+            for (0..num_cols) |col_idx| {
+                token_streams[col_idx].deinit();
+            }
+            self.allocator.free(token_streams);
+            output_filenames.deinit();
+        }
 
         var last_doc_id: usize = 0;
         for (0.., start_doc..end_doc) |doc_id, _| {
 
             if (timer.read() >= interval_ns) {
-                const current_docs_read = total_docs_read.fetchAdd(doc_id - last_doc_id, .monotonic) + (doc_id - last_doc_id);
+                const current_docs_read = total_docs_read.fetchAdd(
+                    doc_id - last_doc_id, 
+                    .monotonic
+                    ) + (doc_id - last_doc_id);
                 last_doc_id = doc_id;
                 timer.reset();
 
                 if (partition_idx == 0) {
-                    // std.debug.print("Read {d}/{d} Kdocs\r", .{current_docs_read / 1000, line_offsets.items.len / 1000});
                     progress_bar.update(current_docs_read);
                 }
             }
@@ -601,12 +621,12 @@ const IndexManager = struct {
             while (search_col_idx < num_cols) {
 
                 for (prev_col..search_col_idxs[search_col_idx]) |_| {
-                    try token_stream.iterField(&line_offset);
+                    try token_streams[0].iterField(&line_offset);
                 }
 
                 std.debug.assert(line_offset < next_line_offset);
                 try processDocRfc4180(
-                    &token_stream, 
+                    &token_streams[search_col_idx],
                     &self.index_partitions[partition_idx],
                     @intCast(doc_id), 
                     &line_offset, 
@@ -620,7 +640,9 @@ const IndexManager = struct {
         }
 
         // Flush remaining tokens.
-        try token_stream.flushTokenStream();
+        for (token_streams) |*stream| {
+            try stream.flushTokenStream();
+        }
         _ = total_docs_read.fetchAdd(end_doc - start_doc - last_doc_id, .monotonic);
     }
 
@@ -758,19 +780,148 @@ const IndexManager = struct {
 
         const _total_docs_read = total_docs_read.load(.acquire);
         std.debug.assert(_total_docs_read == line_offsets.items.len);
-        // std.debug.print("Read {d}/{d} Kdocs\n", .{_total_docs_read / 1000, line_offsets.items.len / 1000});
         progress_bar.update(_total_docs_read);
 
         const time_end = std.time.milliTimestamp();
         const time_diff = time_end - time_start;
         std.debug.print("Processed {d} documents in {d}ms\n", .{line_offsets.items.len, time_diff});
+
+        // Create II's
+        for (0..num_partitions) |partition_idx| {
+
+            threads[partition_idx] = try std.Thread.spawn(
+                .{},
+                BM25Partition.constructFromTokenStream,
+                .{
+                    &self.index_partitions[partition_idx]
+                },
+            );
+        }
+
+        for (threads) |thread| {
+            thread.join();
+        }
+
     }
 
+
+    pub fn queryPartition(
+        self: *const IndexManager,
+        queries: std.StringHashMap([]const u8),
+        k: usize,
+        boost_factors: std.ArrayList(f32),
+        partition_idx: usize,
+    ) !std.ArrayList(u32) {
+        const num_cols = self.search_cols.len;
+
+        // Tokenize query.
+        var tokens: []std.ArrayList(u32) = self.allocator.alloc(
+            std.ArrayList(u32), 
+            num_cols
+            );
+
+        var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
+
+        var empty_query = true; 
+
+        const query_it = queries.iterator();
+        for (query_it.next()) |entry| {
+            const _col_idx = self.search_cols.get(entry.key_ptr);
+            if (_col_idx == null) continue;
+            const col_idx = _col_idx.value_ptr.*;
+
+            var term_len: usize = 0;
+
+            for (entry.value_ptr) |c| {
+                if (c == ' ') {
+                    if (term_len == 0) continue;
+
+                    const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(tokens[0..term_len]);
+                    if (token != null) {
+                        tokens[col_idx].append(token.value_ptr.*);
+                        empty_query = false;
+                    }
+                    term_len = 0;
+                    continue;
+                }
+
+                term_buffer[term_len] = std.ascii.toUpper(c);
+                term_len += 1;
+
+                if (term_len == MAX_TERM_LENGTH) {
+                    const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(tokens[0..term_len]);
+                    if (token != null) {
+                        tokens[col_idx].append(token.value_ptr.*);
+                        empty_query = false;
+                    }
+                    term_len = 0;
+                }
+            }
+
+            if (term_len > 0) {
+                const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(tokens[0..term_len]);
+                if (token != null) {
+                    tokens[col_idx].append(token.value_ptr.*);
+                    empty_query = false;
+                }
+            }
+        }
+
+        var result_idxs = std.ArrayList(u32).initCapacity(self.allocator, k);
+        if (empty_query) return result_idxs;
+
+        // For each token in each II, get relevant docs and add to score.
+        var doc_scores = std.ArrayHashMap(u32, f32).init(self.allocator);
+
+        for (0.., tokens) |col_idx, col_tokens| {
+            const II = self.index_partitions[partition_idx].II[col_idx];
+
+            for (col_tokens) |token| {
+                const idf: f32 = 1 + std.math.log2(II.num_docs, II.doc_freqs[token]);
+
+                // TODO: Handle last element.
+                for (II.postings[II.term_offsets[token]..II.term_offsets[token + 1]]) |doc_token| {
+                    const score = idf * boost_factors[col_idx];
+
+                    const doc_id:   u32 = @intCast(doc_token.doc_id);
+                    // const term_pos: u32 = @intCast(doc_token.term_pos);
+
+                    const result = doc_scores.getOrPut(doc_id);
+                    if (result.found_existing) {
+                        result.value_ptr.* += score;
+                    } else {
+                        result.key_ptr.* = doc_id;
+                        result.value_ptr.* = score;
+                    }
+                }
+            }
+        }
+
+        const num_results = @min(k, doc_scores.len);
+        const sorted_arr = sorted_array.SortedScoreArray.init(self.allocator, num_results);
+        defer sorted_arr.deinit();
+
+        const score_it = doc_scores.iterator();
+        for (score_it.next()) |entry| {
+            const score_pair = sorted_array.ScorePair{
+                .doc_id = entry.key_ptr.*,
+                .score = entry.value_ptr.*,
+            };
+            sorted_arr.insert(score_pair);
+        }
+
+        // Take resulting doc_ids as topk.
+        for (0..num_results) |idx| {
+            result_idxs.items[idx] = sorted_arr.items[idx].doc_id;
+        }
+
+        return result_idxs;
+    }
 };
 
 
 pub fn main() !void {
-    const filename: []const u8 = "../tests/mb.csv";
+    const filename: []const u8 = "../tests/mb_small.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = blk: {
