@@ -9,7 +9,8 @@ const MAX_TERM_LENGTH = 64;
 
 const AtomicCounter = std.atomic.Value(u64);
 const token_t = packed struct(u32) {
-    term_pos: u8,
+    new_doc: u1,
+    term_pos: u7,
     doc_id: u24
 };
 
@@ -57,11 +58,13 @@ const TokenStream = struct {
     
     pub fn addToken(
         self: *TokenStream,
+        new_doc: bool,
         term_pos: u8,
         doc_id: u32,
     ) !void {
         self.tokens[self.num_terms] = token_t{
-            .term_pos = term_pos,
+            .new_doc = @intFromBool(new_doc),
+            .term_pos = @truncate(term_pos),
             .doc_id = @intCast(doc_id),
         };
         self.num_terms += 1;
@@ -73,6 +76,9 @@ const TokenStream = struct {
 
     pub fn flushTokenStream(self: *TokenStream) !void {
         const bytes_to_write = @sizeOf(token_t) * self.num_terms;
+        _ = try self.output_file.write(
+            std.mem.asBytes(&self.num_terms),
+            );
         const bytes_written = try self.output_file.write(
             std.mem.sliceAsBytes(self.tokens[0..self.num_terms])
             );
@@ -182,7 +188,7 @@ const InvertedIndex = struct {
             postings_size += doc_freq;
         }
         self.term_offsets[self.num_terms - 1] = @intCast(postings_size);
-        self.postings = try allocator.alloc(token_t, postings_size);
+        self.postings = try allocator.alloc(token_t, postings_size + 1);
 
         var avg_doc_size: f64 = 0.0;
         for (self.doc_sizes) |doc_size| {
@@ -225,11 +231,69 @@ const BM25Partition = struct {
     }
 
     pub fn constructFromTokenStream(
-        self: *BM25Partition
+        self: *BM25Partition,
+        token_streams: *[]TokenStream,
         ) !void {
-        for (self.II) |*II| {
+
+        for (0.., self.II) |col_idx, *II| {
             try II.resizePostings(self.allocator);
+            var term_offsets = try self.allocator.alloc(usize, II.num_terms);
+            @memset(term_offsets, 0);
+
+            // Create index.
+            const ts = token_streams.*[col_idx];
+            try ts.output_file.seekTo(0);
+
+            var bytes_read: usize = 0;
+
+            var num_tokens: usize = TOKEN_STREAM_CAPACITY;
+            var current_doc_id: usize = 0;
+
+            while (num_tokens == TOKEN_STREAM_CAPACITY) {
+                var _num_tokens: [4]u8 = undefined;
+                _ = try ts.output_file.read(std.mem.asBytes(&_num_tokens));
+                const endianness = builtin.cpu.arch.endian();
+                num_tokens = std.mem.readInt(u32, &_num_tokens, endianness);
+
+                bytes_read = try ts.output_file.read(
+                    std.mem.sliceAsBytes(ts.tokens[0..num_tokens])
+                    );
+                std.debug.assert(bytes_read == 4 * num_tokens);
+
+                var token_count: usize = 0;
+                for (token_count..token_count + num_tokens) |idx| {
+                    const new_doc  = ts.tokens[idx].new_doc;
+                    const term_pos = ts.tokens[idx].term_pos;
+                    const term_id: usize = @intCast(ts.tokens[idx].doc_id);
+
+                    current_doc_id += @intCast(new_doc);
+
+                    const token = token_t{
+                        .new_doc = 0,
+                        .term_pos = term_pos,
+                        .doc_id = @intCast(current_doc_id),
+                    };
+
+                    const postings_offset = II.term_offsets[term_id] + term_offsets[term_id];
+                    std.debug.assert(postings_offset < II.postings.len);
+
+                    term_offsets[term_id] += 1;
+
+                    II.postings[postings_offset] = token;
+                }
+
+                token_count += num_tokens;
+
+                _ = try ts.output_file.read(std.mem.asBytes(&_num_tokens));
+                num_tokens = std.mem.readInt(u32, &_num_tokens, endianness);
+
+                bytes_read = try ts.output_file.read(
+                    std.mem.sliceAsBytes(ts.tokens[0..num_tokens])
+                    );
+                }
         }
+
+        
     }
 };
 
@@ -245,6 +309,7 @@ fn addTerm(
     token_stream: *TokenStream,
     terms_seen: *std.bit_set.StaticBitSet(MAX_NUM_TERMS),
     allocator: std.mem.Allocator,
+    new_doc: *bool,
 ) !void {
     const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..term_len]);
     if (!gop.found_existing) {
@@ -255,15 +320,16 @@ fn addTerm(
         gop.value_ptr.* = index_partition.II[col_idx].num_terms;
         index_partition.II[col_idx].num_terms += 1;
         try index_partition.II[col_idx].doc_freqs.append(1);
+        try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
     } else {
         if (!terms_seen.isSet(gop.value_ptr.* % MAX_NUM_TERMS)) {
             index_partition.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
+            try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
         }
     }
 
     index_partition.II[col_idx].doc_sizes[doc_id] += 1;
-
-    try token_stream.addToken(term_pos, doc_id);
+    new_doc.* = false;
 }
 
 pub fn processDocRfc4180(
@@ -280,6 +346,7 @@ pub fn processDocRfc4180(
     byte_idx.* += @intFromBool(is_quoted);
 
     var cntr: usize = 0;
+    var new_doc = (doc_id != 0);
 
     var terms_seen: std.bit_set.StaticBitSet(MAX_NUM_TERMS) = undefined;
 
@@ -319,6 +386,7 @@ pub fn processDocRfc4180(
                     token_stream, 
                     &terms_seen,
                     index_partition.allocator,
+                    &new_doc,
                     );
 
                 if (term_pos != 255) {
@@ -360,6 +428,7 @@ pub fn processDocRfc4180(
                     token_stream, 
                     &terms_seen,
                     index_partition.allocator,
+                    &new_doc,
                     );
 
                 cntr = 0;
@@ -390,6 +459,7 @@ pub fn processDocRfc4180(
             token_stream, 
             &terms_seen,
             index_partition.allocator,
+            &new_doc,
             );
     }
 
@@ -411,7 +481,8 @@ const IndexManager = struct {
         ) !IndexManager {
 
         const search_col_map = try readCSVHeader(input_filename, search_cols, allocator);
-        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -644,6 +715,9 @@ const IndexManager = struct {
             try stream.flushTokenStream();
         }
         _ = total_docs_read.fetchAdd(end_doc - start_doc - last_doc_id, .monotonic);
+
+        // Construct II
+        try self.index_partitions[partition_idx].constructFromTokenStream(&token_streams);
     }
 
 
@@ -785,23 +859,6 @@ const IndexManager = struct {
         const time_end = std.time.milliTimestamp();
         const time_diff = time_end - time_start;
         std.debug.print("Processed {d} documents in {d}ms\n", .{line_offsets.items.len, time_diff});
-
-        // Create II's
-        for (0..num_partitions) |partition_idx| {
-
-            threads[partition_idx] = try std.Thread.spawn(
-                .{},
-                BM25Partition.constructFromTokenStream,
-                .{
-                    &self.index_partitions[partition_idx]
-                },
-            );
-        }
-
-        for (threads) |thread| {
-            thread.join();
-        }
-
     }
 
 
