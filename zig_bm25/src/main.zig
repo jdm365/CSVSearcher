@@ -987,10 +987,10 @@ const IndexManager = struct {
     pub fn queryPartition(
         self: *const IndexManager,
         queries: std.StringHashMap([]const u8),
-        k: usize,
         boost_factors: std.ArrayList(f32),
         partition_idx: usize,
-    ) !std.ArrayList(u32) {
+        query_results: *sorted_array.SortedScoreArray(QueryResult),
+    ) !void {
         const num_search_cols = self.search_cols.len;
 
         // Tokenize query.
@@ -1046,9 +1046,6 @@ const IndexManager = struct {
             }
         }
 
-        var result_idxs = std.ArrayList(u32).initCapacity(self.allocator, k);
-        if (empty_query) return result_idxs;
-
         // For each token in each II, get relevant docs and add to score.
         var doc_scores = std.ArrayHashMap(u32, f32).init(self.allocator);
 
@@ -1080,10 +1077,6 @@ const IndexManager = struct {
             }
         }
 
-        const num_results = @min(k, doc_scores.len);
-        const sorted_arr = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, num_results);
-        defer sorted_arr.deinit();
-
         const score_it = doc_scores.iterator();
         for (score_it.next()) |entry| {
             const score_pair = QueryResult{
@@ -1091,15 +1084,8 @@ const IndexManager = struct {
                 .score = entry.value_ptr.*,
                 .partition_idx = partition_idx,
             };
-            sorted_arr.insert(score_pair);
+            query_results.insert(score_pair);
         }
-
-        // Take resulting doc_ids as topk.
-        for (0..num_results) |idx| {
-            result_idxs.items[idx] = sorted_arr.items[idx].doc_id;
-        }
-
-        return result_idxs;
     }
 
 
@@ -1119,30 +1105,46 @@ const IndexManager = struct {
         var threads = try self.allocator.alloc(std.Thread, num_partitions);
         defer self.allocator.free(threads);
 
+        var thread_results = try self.allocator.alloc(
+            sorted_array.SortedScoreArray(QueryResult), 
+            num_partitions
+            );
+        defer {
+            for (thread_results) |*res| {
+                res.deinit();
+            }
+            self.allocator.free(thread_results);
+        }
+
         for (0..num_partitions) |partition_idx| {
+            thread_results[partition_idx] = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, k);
             threads[partition_idx] = try std.Thread.spawn(
                 .{},
                 queryPartition,
                 .{
                     self,
                     queries,
-                    k,
                     boost_factors,
                     partition_idx,
+                    &thread_results[partition_idx],
                 },
-                );
+            );
         }
 
-        var results = sorted_array.SortedScoreArray(QueryResult).init(self.allocator, k);
+        var results = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, k);
         defer results.deinit();
+
         for (threads) |thread| {
-            const result = thread.join();
-            for (result) |item| {
-                results.insert(item);
+            thread.join();
+        }
+
+        for (thread_results) |*tr| {
+            for (tr.items) |r| {
+                results.insert(r);
             }
         }
 
-        for (0.., results) |idx, result| {
+        for (0.., results.items) |idx, *result| {
             threads[result.partition_idx] = try std.Thread.spawn(
                 .{},
                 BM25Partition.fetchRecords,
@@ -1150,7 +1152,7 @@ const IndexManager = struct {
                     self.index_partitions[result.partition_idx],
                     self.result_positions[idx],
                     &self.file_handles[result.partition_idx],
-                    &results[idx],
+                    result,
                     &self.result_strings[idx],
                 },
             );
@@ -1187,7 +1189,7 @@ pub fn main() !void {
         _ = gpa.deinit();
     }
 
-    const query_map = std.StringHashMap([]const u8).init(allocator);
+    var query_map = std.StringHashMap([]const u8).init(allocator);
     defer query_map.deinit();
 
     try query_map.put("TITLE", "UNDER MY SKIN");
@@ -1199,9 +1201,9 @@ pub fn main() !void {
     try boost_factors.append(2.0);
     try boost_factors.append(1.0);
 
-    index_manager.query(
+    try index_manager.query(
         &query_map,
         10,
-        &boost_factors,
+        boost_factors,
         );
 }
