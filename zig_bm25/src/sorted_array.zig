@@ -47,8 +47,25 @@ const SortedScoreArray = struct {
         return low;
     }
 
+    fn linearSearch(self: *SortedScoreArray, item: ScorePair) usize {
+        for (0.., self.items[0..self.count]) |idx, val| {
+            if (!cmp(val, item)) {
+                return idx;
+            }
+        }
+        return self.count;
+    }
+
+    fn search(self: *SortedScoreArray, item: ScorePair) usize {
+        if (self.count <= 64) {
+            return self.linearSearch(item);
+        } else {
+            return self.binarySearch(item);
+        }
+    }
+
     pub fn insert(self: *SortedScoreArray, item: ScorePair) void {
-        const insert_idx = self.binarySearch(item);
+        const insert_idx = self.search(item);
 
         self.count = @min(self.count + 1, self.items.len - 1);
 
