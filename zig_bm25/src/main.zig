@@ -366,6 +366,7 @@ const BM25Partition = struct {
         query_result: QueryResult,
         record_string: *std.ArrayList(u8),
     ) !void {
+        std.debug.print("\n\n\n\nQuerying documents\n\n\n\n", .{});
         const doc_id: usize = @intCast(query_result.doc_id);
         const byte_offset = self.line_offsets[doc_id];
         const next_byte_offset = self.line_offsets[doc_id + 1];
@@ -603,10 +604,7 @@ const IndexManager = struct {
         // init file handles
         const file_handles = try allocator.alloc(std.fs.File, num_partitions);
         for (0..num_partitions) |idx| {
-            file_handles[idx] = try std.fs.cwd().openFile(
-                try std.fmt.allocPrint(allocator, "{s}", .{input_filename}),
-                .{},
-                );
+            file_handles[idx] = try std.fs.cwd().openFile(input_filename, .{});
         }
 
         var result_positions: [MAX_NUM_RESULTS][]TermPos = undefined;
@@ -634,11 +632,19 @@ const IndexManager = struct {
             self.index_partitions[i].deinit();
             self.file_handles[i].close();
         }
-        self.search_cols.deinit();
+        self.allocator.free(self.file_handles);
         self.allocator.free(self.index_partitions);
+
+        self.search_cols.deinit();
 
         try std.fs.cwd().deleteTree(self.tmp_dir);
         self.allocator.free(self.tmp_dir);
+
+        for (0..MAX_NUM_RESULTS) |idx| {
+            self.allocator.free(self.result_positions[idx]);
+            self.result_strings[idx].deinit();
+        }
+
     }
 
     fn readCSVHeader(
@@ -671,6 +677,7 @@ const IndexManager = struct {
 
         var byte_pos: usize = 0;
         line: while (true) {
+            std.debug.assert(byte_pos < file_size);
             const is_quoted = f_data[byte_pos] == '"';
             byte_pos += @intFromBool(is_quoted);
 
@@ -764,18 +771,18 @@ const IndexManager = struct {
         const start_doc = partition_idx * chunk_size;
         const end_doc   = start_doc + current_chunk_size;
 
-        var output_filenames = std.ArrayList([]const u8).init(self.allocator);
-        var token_streams    = try self.allocator.alloc(TokenStream, num_cols);
+        var token_streams = try self.allocator.alloc(TokenStream, num_cols);
 
         for (0..num_cols) |col_idx| {
-            try output_filenames.append(try std.fmt.allocPrint(
+            const output_filename = try std.fmt.allocPrint(
                 self.allocator, 
                 "{s}/output_{d}_{d}.bin", 
                 .{self.tmp_dir, partition_idx, col_idx}
-                ));
+                );
+            defer self.allocator.free(output_filename);
             token_streams[col_idx] = try TokenStream.init(
                 self.input_filename,
-                output_filenames.items[col_idx],
+                output_filename,
                 self.allocator,
             );
         }
@@ -784,7 +791,6 @@ const IndexManager = struct {
                 token_streams[col_idx].deinit();
             }
             self.allocator.free(token_streams);
-            output_filenames.deinit();
         }
 
         var last_doc_id: usize = 0;
@@ -1001,6 +1007,15 @@ const IndexManager = struct {
             std.ArrayList(u32), 
             num_search_cols
             );
+        for (tokens) |*t| {
+            t.* = std.ArrayList(u32).init(self.allocator);
+        }
+        defer {
+            for (tokens) |*t| {
+                t.deinit();
+            }
+            self.allocator.free(tokens);
+        }
 
         var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
 
@@ -1061,7 +1076,12 @@ const IndexManager = struct {
             col += 1;
         }
 
-        if (empty_query) return;
+        // if (empty_query) return;
+        if (empty_query) {
+            std.debug.print("Empty query\n", .{});
+            std.debug.assert(query_results.count == 0);
+            return;
+        }
 
         // For each token in each II, get relevant docs and add to score.
         var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
@@ -1152,12 +1172,18 @@ const IndexManager = struct {
         }
 
         for (thread_results) |*tr| {
-            for (tr.items) |r| {
+            for (tr.items[0..tr.count]) |r| {
                 results.insert(r);
             }
         }
 
-        for (0.., results.items) |idx, result| {
+        if (results.count == 0) return self.result_strings;
+
+        for (0..results.count) |idx| {
+            const result = results.items[idx];
+
+            std.debug.print("partition_idx: {d}\n", .{result.partition_idx});
+
             threads[result.partition_idx] = try std.Thread.spawn(
                 .{},
                 BM25Partition.fetchRecords,
@@ -1169,6 +1195,10 @@ const IndexManager = struct {
                     @constCast(&self.result_strings[idx]),
                 },
             );
+        }
+
+        for (threads) |thread| {
+            thread.join();
         }
 
         return self.result_strings;
@@ -1217,4 +1247,6 @@ pub fn main() !void {
         10,
         boost_factors,
         );
+
+    std.debug.print("Query complete\n", .{});
 }
