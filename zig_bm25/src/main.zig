@@ -4,10 +4,10 @@ const sorted_array = @import("sorted_array.zig");
 const builtin = @import("builtin");
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
-const MAX_LINE_LENGTH = 1_048_576;
-const MAX_NUM_TERMS = 4096;
-const MAX_TERM_LENGTH = 64;
-const MAX_NUM_RESULTS = 1000;
+const MAX_LINE_LENGTH       = 1_048_576;
+const MAX_NUM_TERMS         = 4096;
+const MAX_TERM_LENGTH       = 64;
+const MAX_NUM_RESULTS       = 1000;
 
 const AtomicCounter = std.atomic.Value(u64);
 const token_t = packed struct(u32) {
@@ -994,6 +994,7 @@ const IndexManager = struct {
         query_results: *sorted_array.SortedScoreArray(QueryResult),
     ) !void {
         const num_search_cols = self.search_cols.count();
+        std.debug.assert(num_search_cols > 0);
 
         // Tokenize query.
         var tokens: []std.ArrayList(u32) = try self.allocator.alloc(
@@ -1005,11 +1006,15 @@ const IndexManager = struct {
 
         var empty_query = true; 
 
+        var col: usize = 0;
+
         var query_it = queries.iterator();
         while (query_it.next()) |entry| {
             const _col_idx = self.search_cols.get(entry.key_ptr.*);
             if (_col_idx == null) continue;
             const col_idx = _col_idx.?;
+
+            // tokens[col] = try std.ArrayList(u32).init(self.allocator);
 
             var term_len: usize = 0;
 
@@ -1052,7 +1057,11 @@ const IndexManager = struct {
                     empty_query = false;
                 }
             }
+
+            col += 1;
         }
+
+        if (empty_query) return;
 
         // For each token in each II, get relevant docs and add to score.
         var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
