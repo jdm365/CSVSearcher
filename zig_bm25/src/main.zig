@@ -27,6 +27,12 @@ const QueryResult = struct {
     partition_idx: usize,
 };
 
+const Column = struct {
+    csv_idx: usize,
+    II_idx: usize,
+};
+
+
 pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
     // Iterate to next field in compliance with RFC 4180.
     const is_quoted = buffer[byte_pos.*] == '"';
@@ -366,7 +372,6 @@ const BM25Partition = struct {
         query_result: QueryResult,
         record_string: *std.ArrayList(u8),
     ) !void {
-        std.debug.print("\n\n\n\nQuerying documents\n\n\n\n", .{});
         const doc_id: usize = @intCast(query_result.doc_id);
         const byte_offset = self.line_offsets[doc_id];
         const next_byte_offset = self.line_offsets[doc_id + 1];
@@ -560,7 +565,7 @@ const IndexManager = struct {
     index_partitions: []BM25Partition,
     input_filename: []const u8,
     allocator: std.mem.Allocator,
-    search_cols: std.StringArrayHashMap(u16),
+    search_cols: std.StringArrayHashMap(Column),
     num_cols: usize,
     file_handles: []std.fs.File,
     tmp_dir: []const u8,
@@ -652,8 +657,9 @@ const IndexManager = struct {
         search_cols: *std.ArrayList([]const u8),
         num_cols: *usize,
         allocator: std.mem.Allocator,
-        ) !std.StringArrayHashMap(u16) {
-        var col_map = std.StringArrayHashMap(u16).init(allocator);
+        ) !std.StringArrayHashMap(Column) {
+
+        var col_map = std.StringArrayHashMap(Column).init(allocator);
         var col_idx: usize = 0;
         num_cols.* = 0;
 
@@ -677,7 +683,6 @@ const IndexManager = struct {
 
         var byte_pos: usize = 0;
         line: while (true) {
-            std.debug.assert(byte_pos < file_size);
             const is_quoted = f_data[byte_pos] == '"';
             byte_pos += @intFromBool(is_quoted);
 
@@ -690,7 +695,14 @@ const IndexManager = struct {
                             // ADD TERM
                             for (0..search_cols.items.len) |i| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
-                                    try col_map.put(term[0..cntr], @intCast(col_idx));
+                                    const copy_term = try allocator.dupe(u8, term[0..cntr]);
+                                    try col_map.put(
+                                        copy_term, 
+                                        Column{
+                                            .csv_idx = col_idx,
+                                            .II_idx = col_map.count(),
+                                            },
+                                        );
                                     break;
                                 }
                             }
@@ -713,7 +725,14 @@ const IndexManager = struct {
                             // ADD TERM.
                             for (0..search_cols.items.len) |i| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
-                                    try col_map.put(term[0..cntr], @intCast(col_idx));
+                                    const copy_term = try allocator.dupe(u8, term[0..cntr]);
+                                    try col_map.put(
+                                        copy_term, 
+                                        Column{
+                                            .csv_idx = col_idx,
+                                            .II_idx = col_map.count(),
+                                            },
+                                        );
                                     break;
                                 }
                             }
@@ -753,7 +772,7 @@ const IndexManager = struct {
         line_offsets: *const std.ArrayList(usize),
         partition_boundaries: *const std.ArrayList(usize),
         num_cols: usize,
-        search_col_idxs: []u16,
+        search_col_idxs: []usize,
         total_docs_read: *AtomicCounter,
         progress_bar: *progress.ProgressBar,
     ) !void {
@@ -948,7 +967,16 @@ const IndexManager = struct {
 
         std.debug.assert(partition_boundaries.items.len == num_partitions + 1);
 
-        const search_col_idxs = self.search_cols.values();
+        const search_col_idxs = try self.allocator.alloc(usize, num_search_cols);
+        defer self.allocator.free(search_col_idxs);
+        
+        var map_it = self.search_cols.iterator();
+        var idx: usize = 0;
+        while (map_it.next()) |*item| {
+            search_col_idxs[idx] = item.value_ptr.csv_idx;
+            idx += 1;
+        }
+
         const time_start = std.time.milliTimestamp();
 
         var threads = try self.allocator.alloc(std.Thread, num_partitions);
@@ -1021,15 +1049,11 @@ const IndexManager = struct {
 
         var empty_query = true; 
 
-        var col: usize = 0;
-
         var query_it = queries.iterator();
         while (query_it.next()) |entry| {
             const _col_idx = self.search_cols.get(entry.key_ptr.*);
             if (_col_idx == null) continue;
-            const col_idx = _col_idx.?;
-
-            // tokens[col] = try std.ArrayList(u32).init(self.allocator);
+            const col_idx = _col_idx.?.II_idx;
 
             var term_len: usize = 0;
 
@@ -1072,8 +1096,6 @@ const IndexManager = struct {
                     empty_query = false;
                 }
             }
-
-            col += 1;
         }
 
         // if (empty_query) return;
@@ -1086,11 +1108,13 @@ const IndexManager = struct {
         // For each token in each II, get relevant docs and add to score.
         var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
 
-        for (0.., tokens) |col_idx, col_tokens| {
-            const II = self.index_partitions[partition_idx].II[col_idx];
+        for (0.., tokens) |col_idx, *col_tokens| {
+            const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
 
             for (col_tokens.items) |token| {
-                const idf: f32 = 1 + @as(f32, @floatFromInt(std.math.log2(II.num_docs / II.doc_freqs.items[token])));
+                std.debug.print("Token: {d}\n", .{token});
+                const idf: f32 = 1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])));
+                std.debug.print("idf: {d}\n", .{idf});
 
                 const last_offset = if (token == II.num_terms - 1) II.postings.len else II.term_offsets[token + 1];
                 for (II.postings[II.term_offsets[token]..last_offset]) |doc_token| {
@@ -1182,8 +1206,6 @@ const IndexManager = struct {
         for (0..results.count) |idx| {
             const result = results.items[idx];
 
-            std.debug.print("partition_idx: {d}\n", .{result.partition_idx});
-
             threads[result.partition_idx] = try std.Thread.spawn(
                 .{},
                 BM25Partition.fetchRecords,
@@ -1242,11 +1264,11 @@ pub fn main() !void {
     try boost_factors.append(2.0);
     try boost_factors.append(1.0);
 
-    _ = try index_manager.query(
+    const str_result = try index_manager.query(
         query_map,
         10,
         boost_factors,
         );
 
-    std.debug.print("Query complete\n", .{});
+    std.debug.print("Result: {s}\n", .{str_result[0].items});
 }
