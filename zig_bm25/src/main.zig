@@ -34,6 +34,8 @@ const Column = struct {
 
 
 pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
+    const start_pos = byte_pos.*;
+
     // Iterate to next field in compliance with RFC 4180.
     const is_quoted = buffer[byte_pos.*] == '"';
     byte_pos.* += @intFromBool(is_quoted);
@@ -58,6 +60,8 @@ pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
                     return;
                 },
                 '\n' => {
+                    // TODO: Only error if not last column.
+                    std.debug.print("Line: {s}\n", .{buffer[start_pos..byte_pos.*]});
                     return error.UnexpectedNewline;
                 },
                 else => {
@@ -374,13 +378,11 @@ const BM25Partition = struct {
 
         std.debug.assert(bytes_to_read < MAX_LINE_LENGTH);
 
-        _ = try file_handle.seekTo(byte_offset);
+        try file_handle.seekTo(byte_offset);
         if (bytes_to_read > record_string.capacity) {
             try record_string.resize(bytes_to_read);
         }
-        _ = try file_handle.read(
-            std.mem.asBytes(record_string.items[0..bytes_to_read])
-            );
+        _ = try file_handle.read(record_string.items[0..bytes_to_read]);
 
         try parseRecordCSV(record_string.items[0..bytes_to_read], result_positions);
     }
@@ -417,8 +419,8 @@ const IndexManager = struct {
             allocator,
             string_arena.allocator(),
             );
-        // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 1;
+        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -442,6 +444,7 @@ const IndexManager = struct {
         for (0..num_partitions) |idx| {
             file_handles[idx] = try std.fs.cwd().openFile(input_filename, .{});
         }
+        std.debug.assert(num_cols > 0);
 
         var result_positions: [MAX_NUM_RESULTS][]TermPos = undefined;
         var result_strings: [MAX_NUM_RESULTS]std.ArrayList(u8) = undefined;
@@ -753,6 +756,8 @@ const IndexManager = struct {
                         },
                         '\n' => {
                             // ADD TERM.
+                            num_cols.* = col_idx + 1;
+                            std.debug.print("Num cols: {d}\n", .{num_cols.*});
                             return col_map;
                         },
                         else => {
@@ -1112,12 +1117,7 @@ const IndexManager = struct {
             }
         }
 
-        // if (empty_query) return;
-        if (empty_query) {
-            std.debug.print("Empty query\n", .{});
-            std.debug.assert(query_results.count == 0);
-            return;
-        }
+        if (empty_query) return;
 
         // For each token in each II, get relevant docs and add to score.
         var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
@@ -1217,6 +1217,12 @@ const IndexManager = struct {
 
         if (results.count == 0) return self.result_strings;
 
+        var thread_arraylist = try std.ArrayList(std.Thread).initCapacity(
+            self.allocator, 
+            num_partitions
+            );
+        defer thread_arraylist.deinit();
+
         for (0..results.count) |idx| {
             const result = results.items[idx];
 
@@ -1231,9 +1237,10 @@ const IndexManager = struct {
                     @constCast(&self.result_strings[idx]),
                 },
             );
+            try thread_arraylist.append(threads[result.partition_idx]);
         }
 
-        for (threads) |thread| {
+        for (thread_arraylist.items) |thread| {
             thread.join();
         }
 
@@ -1285,4 +1292,11 @@ pub fn main() !void {
         );
 
     std.debug.print("Result: {s}\n", .{str_result[0].items});
+    for (index_manager.result_positions[0]) |pos| {
+        const start_byte = pos.start_pos;
+        const end_byte   = start_byte + pos.field_len;
+        std.debug.print("Start: {d}, End: {d}\n", .{start_byte, end_byte});
+
+        std.debug.print("Result: {s}\n", .{str_result[0].items[start_byte..end_byte]});
+    }
 }
