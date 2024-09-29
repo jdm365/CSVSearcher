@@ -231,10 +231,6 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         ) void {
         allocator.free(self.postings);
-        var iter = self.vocab.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-        }
         self.vocab.deinit();
 
         allocator.free(self.term_offsets);
@@ -392,184 +388,6 @@ const BM25Partition = struct {
 
 
 
-fn addTerm(
-    term: []u8,
-    term_len: usize,
-    doc_id: u32,
-    term_pos: u8,
-    index_partition: *BM25Partition,
-    col_idx: usize,
-    token_stream: *TokenStream,
-    terms_seen: *std.bit_set.StaticBitSet(MAX_NUM_TERMS),
-    allocator: std.mem.Allocator,
-    new_doc: *bool,
-) !void {
-    const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..term_len]);
-    if (!gop.found_existing) {
-        const term_copy = try allocator.dupe(u8, term[0..term_len]);
-        errdefer allocator.free(term_copy);
-
-        gop.key_ptr.* = term_copy;
-        gop.value_ptr.* = index_partition.II[col_idx].num_terms;
-        index_partition.II[col_idx].num_terms += 1;
-        try index_partition.II[col_idx].doc_freqs.append(1);
-        try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
-    } else {
-        if (!terms_seen.isSet(gop.value_ptr.* % MAX_NUM_TERMS)) {
-            index_partition.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
-            try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
-        }
-    }
-
-    index_partition.II[col_idx].doc_sizes[doc_id] += 1;
-    new_doc.* = false;
-}
-
-pub fn processDocRfc4180(
-    token_stream: *TokenStream,
-    index_partition: *BM25Partition,
-    doc_id: u32,
-    byte_idx: *usize,
-    col_idx: usize,
-    term: *[MAX_TERM_LENGTH]u8,
-    max_byte: usize,
-) !void {
-    var term_pos: u8 = 0;
-    const is_quoted  = (token_stream.f_data[byte_idx.*] == '"');
-    byte_idx.* += @intFromBool(is_quoted);
-
-    var cntr: usize = 0;
-    var new_doc: bool = (doc_id != 0);
-
-    var terms_seen = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
-
-    if (is_quoted) {
-
-        while (true) {
-            std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
-            std.debug.assert(byte_idx.* < max_byte);
-
-            if (token_stream.f_data[byte_idx.*] == '"') {
-                byte_idx.* += 1;
-
-                if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
-                    break;
-                }
-
-                // Double quote means escaped quote. Opt not to include in token for now.
-                if (token_stream.f_data[byte_idx.*] == '"') {
-                    byte_idx.* += 1;
-                    continue;
-                }
-            }
-
-            if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
-                if (cntr == 0) {
-                    byte_idx.* += 1;
-                    continue;
-                }
-
-                try addTerm(
-                    term, 
-                    cntr, 
-                    doc_id, 
-                    term_pos, 
-                    index_partition, 
-                    col_idx, 
-                    token_stream, 
-                    &terms_seen,
-                    index_partition.allocator,
-                    &new_doc,
-                    );
-
-                if (term_pos != 255) {
-                    term_pos += 1;
-                }
-                cntr = 0;
-                byte_idx.* += 1;
-                continue;
-            }
-
-            term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
-            cntr += 1;
-            byte_idx.* += 1;
-        }
-
-    } else {
-
-        while (true) {
-            std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
-            std.debug.assert(byte_idx.* < max_byte);
-
-            if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
-                break;
-            }
-
-            if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
-                if (cntr == 0) {
-                    byte_idx.* += 1;
-                    continue;
-                }
-
-                try addTerm(
-                    term, 
-                    cntr, 
-                    doc_id, 
-                    term_pos, 
-                    index_partition, 
-                    col_idx, 
-                    token_stream, 
-                    &terms_seen,
-                    index_partition.allocator,
-                    &new_doc,
-                    );
-
-                cntr = 0;
-                byte_idx.* += 1;
-
-                if (term_pos != 255) {
-                    term_pos += 1;
-                }
-                continue;
-            }
-
-            term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
-            cntr += 1;
-            byte_idx.* += 1;
-        }
-    }
-
-    if (cntr > 0) {
-        std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
-
-        try addTerm(
-            term, 
-            cntr, 
-            doc_id, 
-            term_pos, 
-            index_partition, 
-            col_idx, 
-            token_stream, 
-            &terms_seen,
-            index_partition.allocator,
-            &new_doc,
-            );
-    }
-
-    if (new_doc) {
-        // No terms found. Add null token.
-        try token_stream.addToken(
-            true,
-            std.math.maxInt(u7),
-            std.math.maxInt(u24),
-        );
-    }
-
-
-    byte_idx.* += 1;
-}
-
-
 const IndexManager = struct {
     index_partitions: []BM25Partition,
     input_filename: []const u8,
@@ -667,6 +485,181 @@ const IndexManager = struct {
 
         self.string_arena.deinit();
     }
+
+    fn addTerm(
+        self: *IndexManager,
+        term: []u8,
+        term_len: usize,
+        doc_id: u32,
+        term_pos: u8,
+        index_partition: *BM25Partition,
+        col_idx: usize,
+        token_stream: *TokenStream,
+        terms_seen: *std.bit_set.StaticBitSet(MAX_NUM_TERMS),
+        new_doc: *bool,
+    ) !void {
+        const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..term_len]);
+        if (!gop.found_existing) {
+            const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
+
+            gop.key_ptr.* = term_copy;
+            gop.value_ptr.* = index_partition.II[col_idx].num_terms;
+            index_partition.II[col_idx].num_terms += 1;
+            try index_partition.II[col_idx].doc_freqs.append(1);
+            try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
+        } else {
+            if (!terms_seen.isSet(gop.value_ptr.* % MAX_NUM_TERMS)) {
+                index_partition.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
+                try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
+            }
+        }
+
+        index_partition.II[col_idx].doc_sizes[doc_id] += 1;
+        new_doc.* = false;
+    }
+
+    pub fn processDocRfc4180(
+        self: *IndexManager,
+        token_stream: *TokenStream,
+        index_partition: *BM25Partition,
+        doc_id: u32,
+        byte_idx: *usize,
+        col_idx: usize,
+        term: *[MAX_TERM_LENGTH]u8,
+        max_byte: usize,
+    ) !void {
+        var term_pos: u8 = 0;
+        const is_quoted  = (token_stream.f_data[byte_idx.*] == '"');
+        byte_idx.* += @intFromBool(is_quoted);
+
+        var cntr: usize = 0;
+        var new_doc: bool = (doc_id != 0);
+
+        var terms_seen = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
+
+        if (is_quoted) {
+
+            while (true) {
+                std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+                std.debug.assert(byte_idx.* < max_byte);
+
+                if (token_stream.f_data[byte_idx.*] == '"') {
+                    byte_idx.* += 1;
+
+                    if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
+                        break;
+                    }
+
+                    // Double quote means escaped quote. Opt not to include in token for now.
+                    if (token_stream.f_data[byte_idx.*] == '"') {
+                        byte_idx.* += 1;
+                        continue;
+                    }
+                }
+
+                if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
+                    if (cntr == 0) {
+                        byte_idx.* += 1;
+                        continue;
+                    }
+
+                    try self.addTerm(
+                        term, 
+                        cntr, 
+                        doc_id, 
+                        term_pos, 
+                        index_partition, 
+                        col_idx, 
+                        token_stream, 
+                        &terms_seen,
+                        &new_doc,
+                        );
+
+                    if (term_pos != 255) {
+                        term_pos += 1;
+                    }
+                    cntr = 0;
+                    byte_idx.* += 1;
+                    continue;
+                }
+
+                term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
+                cntr += 1;
+                byte_idx.* += 1;
+            }
+
+        } else {
+
+            while (true) {
+                std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+                std.debug.assert(byte_idx.* < max_byte);
+
+                if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
+                    break;
+                }
+
+                if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
+                    if (cntr == 0) {
+                        byte_idx.* += 1;
+                        continue;
+                    }
+
+                    try self.addTerm(
+                        term, 
+                        cntr, 
+                        doc_id, 
+                        term_pos, 
+                        index_partition, 
+                        col_idx, 
+                        token_stream, 
+                        &terms_seen,
+                        &new_doc,
+                        );
+
+                    cntr = 0;
+                    byte_idx.* += 1;
+
+                    if (term_pos != 255) {
+                        term_pos += 1;
+                    }
+                    continue;
+                }
+
+                term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
+                cntr += 1;
+                byte_idx.* += 1;
+            }
+        }
+
+        if (cntr > 0) {
+            std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+
+            try self.addTerm(
+                term, 
+                cntr, 
+                doc_id, 
+                term_pos, 
+                index_partition, 
+                col_idx, 
+                token_stream, 
+                &terms_seen,
+                &new_doc,
+                );
+        }
+
+        if (new_doc) {
+            // No terms found. Add null token.
+            try token_stream.addToken(
+                true,
+                std.math.maxInt(u7),
+                std.math.maxInt(u24),
+            );
+        }
+
+
+        byte_idx.* += 1;
+    }
+
 
     fn readCSVHeader(
         input_filename: []const u8,
@@ -862,7 +855,7 @@ const IndexManager = struct {
                 }
 
                 std.debug.assert(line_offset < next_line_offset);
-                try processDocRfc4180(
+                try self.processDocRfc4180(
                     &token_streams[search_col_idx],
                     &self.index_partitions[partition_idx],
                     @intCast(doc_id), 
@@ -1128,6 +1121,7 @@ const IndexManager = struct {
 
         // For each token in each II, get relevant docs and add to score.
         var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
+        defer doc_scores.deinit();
 
         for (0.., tokens) |col_idx, *col_tokens| {
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
