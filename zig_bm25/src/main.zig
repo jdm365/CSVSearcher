@@ -145,7 +145,7 @@ const TokenStream = struct {
     }
 
     pub fn flushTokenStream(self: *TokenStream) !void {
-        const bytes_to_write = @sizeOf(token_t) * self.num_terms;
+        const bytes_to_write = @sizeOf(u32) * self.num_terms;
         _ = try self.output_file.write(
             std.mem.asBytes(&self.num_terms),
             );
@@ -153,9 +153,7 @@ const TokenStream = struct {
             std.mem.sliceAsBytes(self.tokens[0..self.num_terms])
             );
         
-        if (bytes_written != bytes_to_write) {
-            return error.WriteError;
-        }
+        std.debug.assert(bytes_written == bytes_to_write);
 
         self.num_terms = 0;
     }
@@ -333,9 +331,16 @@ const BM25Partition = struct {
 
                 var token_count: usize = 0;
                 for (token_count..token_count + num_tokens) |idx| {
+                    if (@as(*u32, @ptrCast(&ts.tokens[idx])).* == std.math.maxInt(u32)) {
+                        // Null token.
+                        current_doc_id += 1;
+                        continue;
+                    }
+
                     const new_doc  = ts.tokens[idx].new_doc;
                     const term_pos = ts.tokens[idx].term_pos;
                     const term_id: usize = @intCast(ts.tokens[idx].doc_id);
+
 
                     current_doc_id += @intCast(new_doc);
 
@@ -347,6 +352,7 @@ const BM25Partition = struct {
 
                     const postings_offset = II.term_offsets[term_id] + term_offsets[term_id];
                     std.debug.assert(postings_offset < II.postings.len);
+                    std.debug.assert(current_doc_id < II.num_docs);
 
                     term_offsets[term_id] += 1;
 
@@ -354,14 +360,7 @@ const BM25Partition = struct {
                 }
 
                 token_count += num_tokens;
-
-                _ = try ts.output_file.read(std.mem.asBytes(&_num_tokens));
-                num_tokens = std.mem.readInt(u32, &_num_tokens, endianness);
-
-                bytes_read = try ts.output_file.read(
-                    std.mem.sliceAsBytes(ts.tokens[0..num_tokens])
-                    );
-                }
+            }
         }
     }
 
@@ -377,17 +376,17 @@ const BM25Partition = struct {
         const next_byte_offset = self.line_offsets[doc_id + 1];
         const bytes_to_read = next_byte_offset - byte_offset;
 
+        std.debug.assert(bytes_to_read < MAX_LINE_LENGTH);
+
         _ = try file_handle.seekTo(byte_offset);
         if (bytes_to_read > record_string.capacity) {
-            try record_string.ensureTotalCapacity(bytes_to_read);
+            try record_string.resize(bytes_to_read);
         }
-        const bytes_read = try file_handle.read(
+        _ = try file_handle.read(
             std.mem.asBytes(record_string.items[0..bytes_to_read])
             );
 
-        std.debug.assert(bytes_read == bytes_to_read);
-
-        try parseRecordCSV(record_string.items[0..bytes_read], result_positions);
+        try parseRecordCSV(record_string.items[0..bytes_to_read], result_positions);
     }
 };
 
@@ -440,9 +439,9 @@ pub fn processDocRfc4180(
     byte_idx.* += @intFromBool(is_quoted);
 
     var cntr: usize = 0;
-    var new_doc = (doc_id != 0);
+    var new_doc: bool = (doc_id != 0);
 
-    var terms_seen: std.bit_set.StaticBitSet(MAX_NUM_TERMS) = undefined;
+    var terms_seen = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
 
     if (is_quoted) {
 
@@ -557,6 +556,16 @@ pub fn processDocRfc4180(
             );
     }
 
+    if (new_doc) {
+        // No terms found. Add null token.
+        try token_stream.addToken(
+            true,
+            std.math.maxInt(u7),
+            std.math.maxInt(u24),
+        );
+    }
+
+
     byte_idx.* += 1;
 }
 
@@ -565,6 +574,7 @@ const IndexManager = struct {
     index_partitions: []BM25Partition,
     input_filename: []const u8,
     allocator: std.mem.Allocator,
+    string_arena: std.heap.ArenaAllocator,
     search_cols: std.StringArrayHashMap(Column),
     num_cols: usize,
     file_handles: []std.fs.File,
@@ -578,6 +588,8 @@ const IndexManager = struct {
         allocator: std.mem.Allocator,
         ) !IndexManager {
 
+        var string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+
         var num_cols: usize = 0;
 
         const search_col_map = try readCSVHeader(
@@ -585,6 +597,7 @@ const IndexManager = struct {
             search_cols, 
             &num_cols,
             allocator,
+            string_arena.allocator(),
             );
         // const num_partitions = try std.Thread.getCpuCount();
         const num_partitions = 1;
@@ -617,12 +630,14 @@ const IndexManager = struct {
         for (0..MAX_NUM_RESULTS) |idx| {
             result_positions[idx] = try allocator.alloc(TermPos, num_cols);
             result_strings[idx] = try std.ArrayList(u8).initCapacity(allocator, 4096);
+            try result_strings[idx].resize(4096);
         }
 
         return IndexManager{
             .index_partitions = try allocator.alloc(BM25Partition, num_partitions),
             .input_filename = input_filename,
             .allocator = allocator,
+            .string_arena = string_arena,
             .search_cols = search_col_map,
             .num_cols = num_cols,
             .tmp_dir = dir_name,
@@ -650,6 +665,7 @@ const IndexManager = struct {
             self.result_strings[idx].deinit();
         }
 
+        self.string_arena.deinit();
     }
 
     fn readCSVHeader(
@@ -657,6 +673,7 @@ const IndexManager = struct {
         search_cols: *std.ArrayList([]const u8),
         num_cols: *usize,
         allocator: std.mem.Allocator,
+        string_arena: std.mem.Allocator,
         ) !std.StringArrayHashMap(Column) {
 
         var col_map = std.StringArrayHashMap(Column).init(allocator);
@@ -695,7 +712,7 @@ const IndexManager = struct {
                             // ADD TERM
                             for (0..search_cols.items.len) |i| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
-                                    const copy_term = try allocator.dupe(u8, term[0..cntr]);
+                                    const copy_term = try string_arena.dupe(u8, term[0..cntr]);
                                     try col_map.put(
                                         copy_term, 
                                         Column{
@@ -725,7 +742,7 @@ const IndexManager = struct {
                             // ADD TERM.
                             for (0..search_cols.items.len) |i| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
-                                    const copy_term = try allocator.dupe(u8, term[0..cntr]);
+                                    const copy_term = try string_arena.dupe(u8, term[0..cntr]);
                                     try col_map.put(
                                         copy_term, 
                                         Column{
@@ -854,6 +871,7 @@ const IndexManager = struct {
                     &term_buffer,
                     next_line_offset,
                     );
+
                 prev_col = search_col_idxs[search_col_idx];
                 search_col_idx += 1;
             }
@@ -1057,12 +1075,13 @@ const IndexManager = struct {
 
             var term_len: usize = 0;
 
-            for (0.., entry.value_ptr.*) |idx, c| {
+            for (entry.value_ptr.*) |c| {
                 if (c == ' ') {
                     if (term_len == 0) continue;
 
                     const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(
-                        entry.key_ptr.*[idx-term_len..idx]
+                        // entry.key_ptr.*[idx-term_len..idx]
+                        term_buffer[0..term_len]
                         );
                     if (token != null) {
                         try tokens[col_idx].append(token.?);
@@ -1077,7 +1096,8 @@ const IndexManager = struct {
 
                 if (term_len == MAX_TERM_LENGTH) {
                     const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(
-                        entry.key_ptr.*[idx-term_len..idx]
+                        // entry.key_ptr.*[idx-term_len..idx]
+                        term_buffer[0..term_len]
                         );
                     if (token != null) {
                         try tokens[col_idx].append(token.?);
@@ -1089,7 +1109,8 @@ const IndexManager = struct {
 
             if (term_len > 0) {
                 const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(
-                    entry.key_ptr.*[entry.key_ptr.*.len-term_len..entry.key_ptr.*.len]
+                    // entry.key_ptr.*[entry.key_ptr.*.len-term_len..entry.key_ptr.*.len]
+                    term_buffer[0..term_len]
                     );
                 if (token != null) {
                     try tokens[col_idx].append(token.?);
@@ -1112,9 +1133,7 @@ const IndexManager = struct {
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
 
             for (col_tokens.items) |token| {
-                std.debug.print("Token: {d}\n", .{token});
                 const idf: f32 = 1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])));
-                std.debug.print("idf: {d}\n", .{idf});
 
                 const last_offset = if (token == II.num_terms - 1) II.postings.len else II.term_offsets[token + 1];
                 for (II.postings[II.term_offsets[token]..last_offset]) |doc_token| {
@@ -1122,6 +1141,7 @@ const IndexManager = struct {
 
                     const doc_id:   u32 = @intCast(doc_token.doc_id);
                     // const term_pos: u32 = @intCast(doc_token.term_pos);
+                    std.debug.assert(doc_id < self.index_partitions[partition_idx].II[col_idx].num_docs);
 
                     const result = try doc_scores.getOrPut(doc_id);
                     if (result.found_existing) {
