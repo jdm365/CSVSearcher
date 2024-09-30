@@ -34,6 +34,8 @@ const Column = struct {
 
 
 pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
+    std.debug.print("Line: {s}\n", .{buffer[byte_pos.*..]});
+
     // Iterate to next field in compliance with RFC 4180.
     const is_quoted = buffer[byte_pos.*] == '"';
     byte_pos.* += @intFromBool(is_quoted);
@@ -59,6 +61,7 @@ pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
                 },
                 '\n' => {
                     // TODO: Only error if not last column.
+                    byte_pos.* += 1;
                     return;
                 },
                 else => {
@@ -398,6 +401,7 @@ const IndexManager = struct {
     tmp_dir: []const u8,
     result_positions: [MAX_NUM_RESULTS][]TermPos,
     result_strings: [MAX_NUM_RESULTS]std.ArrayList(u8),
+    header_bytes: usize,
 
     pub fn init(
         input_filename: []const u8,
@@ -408,6 +412,7 @@ const IndexManager = struct {
         var string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
         var num_cols: usize = 0;
+        var header_bytes: usize = 0;
 
         const search_col_map = try readCSVHeader(
             input_filename, 
@@ -415,9 +420,10 @@ const IndexManager = struct {
             &num_cols,
             allocator,
             string_arena.allocator(),
+            &header_bytes,
             );
         // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 1;
+        const num_partitions = 2;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -462,6 +468,7 @@ const IndexManager = struct {
             .file_handles = file_handles,
             .result_positions = result_positions,
             .result_strings = result_strings,
+            .header_bytes = header_bytes,
         };
     }
     
@@ -667,6 +674,7 @@ const IndexManager = struct {
         num_cols: *usize,
         allocator: std.mem.Allocator,
         string_arena: std.mem.Allocator,
+        num_bytes: *usize,
         ) !std.StringArrayHashMap(Column) {
 
         var col_map = std.StringArrayHashMap(Column).init(allocator);
@@ -754,7 +762,6 @@ const IndexManager = struct {
                         '\n' => {
                             // ADD TERM.
                             num_cols.* = col_idx + 1;
-                            std.debug.print("Num cols: {d}\n", .{num_cols.*});
                             return col_map;
                         },
                         else => {
@@ -770,7 +777,8 @@ const IndexManager = struct {
             col_idx += 1;
         }
 
-        num_cols.* = col_idx;
+        num_cols.*  = col_idx;
+        num_bytes.* = byte_pos;
     }
         
 
@@ -782,7 +790,6 @@ const IndexManager = struct {
         final_chunk_size: usize,
         num_partitions: usize,
         line_offsets: *const std.ArrayList(usize),
-        partition_boundaries: *const std.ArrayList(usize),
         num_cols: usize,
         search_col_idxs: []usize,
         total_docs_read: *AtomicCounter,
@@ -798,7 +805,6 @@ const IndexManager = struct {
             false => final_chunk_size,
         };
 
-        const end_pos   = partition_boundaries.items[partition_idx + 1];
         const start_doc = partition_idx * chunk_size;
         const end_doc   = start_doc + current_chunk_size;
 
@@ -841,11 +847,7 @@ const IndexManager = struct {
             }
 
             var line_offset = line_offsets.items[doc_id];
-
-            const next_line_offset = switch (doc_id == line_offsets.items.len - 1) {
-                true => end_pos,
-                false => line_offsets.items[doc_id + 1],
-            };
+            const next_line_offset = line_offsets.items[doc_id + 1];
 
             var search_col_idx: usize = 0;
             var prev_col: usize = 0;
@@ -876,7 +878,7 @@ const IndexManager = struct {
         for (token_streams) |*stream| {
             try stream.flushTokenStream();
         }
-        _ = total_docs_read.fetchAdd(end_doc - start_doc - last_doc_id, .monotonic);
+        _ = total_docs_read.fetchAdd(end_doc - (start_doc + last_doc_id), .monotonic);
 
         // Construct II
         try self.index_partitions[partition_idx].constructFromTokenStream(&token_streams);
@@ -902,11 +904,12 @@ const IndexManager = struct {
         var line_offsets = std.ArrayList(usize).init(self.allocator);
         defer line_offsets.deinit();
 
-        var file_pos: usize = 0;
+        var file_pos: usize = self.header_bytes;
 
         // Time read.
         const start_time = std.time.milliTimestamp();
 
+        try line_offsets.append(file_pos);
         while (file_pos < file_size - 1) {
 
             switch (f_data[file_pos]) {
@@ -938,16 +941,18 @@ const IndexManager = struct {
                 else => file_pos += 1,
             }
         }
+        try line_offsets.append(file_size);
 
         const end_time = std.time.milliTimestamp();
         const execution_time_ms = end_time - start_time;
         const mb_s: usize = @as(usize, @intFromFloat(0.001 * @as(f32, @floatFromInt(file_size)) / @as(f32, @floatFromInt(execution_time_ms))));
 
-        std.debug.print("Read {d} lines in {d}ms\n", .{line_offsets.items.len, execution_time_ms});
+        const num_lines = line_offsets.items.len - 2;
+        const num_partitions = self.index_partitions.len;
+
+        std.debug.print("Read {d} lines in {d}ms\n", .{num_lines, execution_time_ms});
         std.debug.print("{d}MB/s\n", .{mb_s});
 
-        const num_lines = line_offsets.items.len;
-        const num_partitions = self.index_partitions.len;
         const chunk_size: usize = num_lines / num_partitions;
         const final_chunk_size: usize = chunk_size + (num_lines % num_partitions);
 
@@ -965,9 +970,9 @@ const IndexManager = struct {
             };
 
             const start = i * chunk_size;
-            const end = start + current_chunk_size;
+            const end   = start + current_chunk_size + 1;
 
-            const partition_line_offsets = try self.allocator.alloc(usize, current_chunk_size);
+            const partition_line_offsets = try self.allocator.alloc(usize, current_chunk_size + 1);
             @memcpy(partition_line_offsets, line_offsets.items[start..end]);
 
             self.index_partitions[i] = try BM25Partition.init(
@@ -1010,7 +1015,6 @@ const IndexManager = struct {
                     final_chunk_size,
                     num_partitions,
                     &line_offsets,
-                    &partition_boundaries,
                     num_search_cols,
                     search_col_idxs,
                     &total_docs_read,
@@ -1024,7 +1028,8 @@ const IndexManager = struct {
         }
 
         const _total_docs_read = total_docs_read.load(.acquire);
-        std.debug.assert(_total_docs_read == line_offsets.items.len);
+        std.debug.print("Processed {d} documents\n", .{_total_docs_read});
+        std.debug.assert(_total_docs_read == line_offsets.items.len - 2);
         progress_bar.update(_total_docs_read);
 
         const time_end = std.time.milliTimestamp();
