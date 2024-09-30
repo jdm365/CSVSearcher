@@ -1,5 +1,6 @@
-# BlooM25 (In Development)
-BM25F based FTS engine using bloom filters in inverted index to allow fast querying of high-df tokens.
+# (In Development) - Currently Porting to Zig and making breaking changes.
+## Much of what's below is outdated and will be updated soon.
+FTS engine with a focus on fast indexing of csv files.
 
 ## Install
 ```bash
