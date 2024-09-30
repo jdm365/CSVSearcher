@@ -34,8 +34,6 @@ const Column = struct {
 
 
 pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
-    const start_pos = byte_pos.*;
-
     // Iterate to next field in compliance with RFC 4180.
     const is_quoted = buffer[byte_pos.*] == '"';
     byte_pos.* += @intFromBool(is_quoted);
@@ -61,8 +59,7 @@ pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
                 },
                 '\n' => {
                     // TODO: Only error if not last column.
-                    std.debug.print("Line: {s}\n", .{buffer[start_pos..byte_pos.*]});
-                    return error.UnexpectedNewline;
+                    return;
                 },
                 else => {
                     byte_pos.* += 1;
@@ -83,7 +80,7 @@ pub fn parseRecordCSV(
         try iterField(buffer, &byte_pos);
         result_positions[idx] = TermPos{
             .start_pos = @intCast(start_pos),
-            .field_len = @intCast(byte_pos - start_pos),
+            .field_len = @intCast(byte_pos - start_pos - 1),
         };
     }
 }
@@ -419,8 +416,8 @@ const IndexManager = struct {
             allocator,
             string_arena.allocator(),
             );
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -1078,7 +1075,6 @@ const IndexManager = struct {
                     if (term_len == 0) continue;
 
                     const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(
-                        // entry.key_ptr.*[idx-term_len..idx]
                         term_buffer[0..term_len]
                         );
                     if (token != null) {
@@ -1094,7 +1090,6 @@ const IndexManager = struct {
 
                 if (term_len == MAX_TERM_LENGTH) {
                     const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(
-                        // entry.key_ptr.*[idx-term_len..idx]
                         term_buffer[0..term_len]
                         );
                     if (token != null) {
@@ -1107,7 +1102,6 @@ const IndexManager = struct {
 
             if (term_len > 0) {
                 const token = self.index_partitions[partition_idx].II[col_idx].vocab.get(
-                    // entry.key_ptr.*[entry.key_ptr.*.len-term_len..entry.key_ptr.*.len]
                     term_buffer[0..term_len]
                     );
                 if (token != null) {
@@ -1244,6 +1238,7 @@ const IndexManager = struct {
             thread.join();
         }
 
+        std.debug.print("Top score: {d}\n", .{results.items[0].score});
         return self.result_strings;
     }
 };
