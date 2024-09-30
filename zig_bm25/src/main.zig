@@ -34,8 +34,6 @@ const Column = struct {
 
 
 pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
-    std.debug.print("Line: {s}\n", .{buffer[byte_pos.*..]});
-
     // Iterate to next field in compliance with RFC 4180.
     const is_quoted = buffer[byte_pos.*] == '"';
     byte_pos.* += @intFromBool(is_quoted);
@@ -422,8 +420,8 @@ const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-        // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 2;
+        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 24;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -491,6 +489,25 @@ const IndexManager = struct {
         }
 
         self.string_arena.deinit();
+    }
+
+    fn printDebugInfo(self: *const IndexManager) void {
+        std.debug.print("\n=====================================================\n", .{});
+
+        for (0..self.index_partitions.len) |i| {
+            std.debug.print("Partition {d}\n", .{i});
+            std.debug.print("---------------------------------------\n", .{});
+
+            for (0..self.index_partitions[i].II.len) |j| {
+                const II = self.index_partitions[i].II[j];
+
+                std.debug.print("Column {d}\n", .{j});
+                std.debug.print("Num terms: {d}\n", .{II.num_terms});
+                std.debug.print("Num docs: {d}\n", .{II.num_docs});
+                std.debug.print("Avg doc size: {d}\n\n", .{II.avg_doc_size});
+            }
+        }
+        std.debug.print("=====================================================\n\n\n\n", .{});
     }
 
     fn addTerm(
@@ -789,7 +806,6 @@ const IndexManager = struct {
         chunk_size: usize,
         final_chunk_size: usize,
         num_partitions: usize,
-        line_offsets: *const std.ArrayList(usize),
         num_cols: usize,
         search_col_idxs: []usize,
         total_docs_read: *AtomicCounter,
@@ -846,8 +862,8 @@ const IndexManager = struct {
                 }
             }
 
-            var line_offset = line_offsets.items[doc_id];
-            const next_line_offset = line_offsets.items[doc_id + 1];
+            var line_offset = self.index_partitions[partition_idx].line_offsets[doc_id];
+            const next_line_offset = self.index_partitions[partition_idx].line_offsets[doc_id + 1];
 
             var search_col_idx: usize = 0;
             var prev_col: usize = 0;
@@ -1001,7 +1017,7 @@ const IndexManager = struct {
         defer self.allocator.free(threads);
 
         var total_docs_read = AtomicCounter.init(0);
-        var progress_bar = progress.ProgressBar.init(line_offsets.items.len);
+        var progress_bar = progress.ProgressBar.init(num_lines);
 
         for (0..num_partitions) |partition_idx| {
 
@@ -1014,7 +1030,6 @@ const IndexManager = struct {
                     chunk_size,
                     final_chunk_size,
                     num_partitions,
-                    &line_offsets,
                     num_search_cols,
                     search_col_idxs,
                     &total_docs_read,
@@ -1028,13 +1043,12 @@ const IndexManager = struct {
         }
 
         const _total_docs_read = total_docs_read.load(.acquire);
-        std.debug.print("Processed {d} documents\n", .{_total_docs_read});
         std.debug.assert(_total_docs_read == line_offsets.items.len - 2);
         progress_bar.update(_total_docs_read);
 
         const time_end = std.time.milliTimestamp();
         const time_diff = time_end - time_start;
-        std.debug.print("Processed {d} documents in {d}ms\n", .{line_offsets.items.len, time_diff});
+        std.debug.print("Processed {d} documents in {d}ms\n", .{_total_docs_read, time_diff});
     }
 
 
@@ -1128,7 +1142,7 @@ const IndexManager = struct {
             for (col_tokens.items) |token| {
                 const idf: f32 = 1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])));
 
-                const last_offset = if (token == II.num_terms - 1) II.postings.len else II.term_offsets[token + 1];
+                const last_offset = II.term_offsets[token + 1];
                 for (II.postings[II.term_offsets[token]..last_offset]) |doc_token| {
                     const score = idf * boost_factors.items[col_idx];
 
@@ -1216,31 +1230,43 @@ const IndexManager = struct {
 
         if (results.count == 0) return self.result_strings;
 
-        var thread_arraylist = try std.ArrayList(std.Thread).initCapacity(
-            self.allocator, 
-            num_partitions
-            );
-        defer thread_arraylist.deinit();
+        // var thread_arraylist = try std.ArrayList(std.Thread).initCapacity(
+            // self.allocator, 
+            // num_partitions
+            // );
+        // defer thread_arraylist.deinit();
+
+        // Overwriting work.
+        // for (0..results.count) |idx| {
+            // const result = results.items[idx];
+
+            // threads[result.partition_idx] = try std.Thread.spawn(
+                // .{},
+                // BM25Partition.fetchRecords,
+                // .{
+                    // &self.index_partitions[result.partition_idx],
+                    // self.result_positions[idx],
+                    // &self.file_handles[result.partition_idx],
+                    // result,
+                    // @constCast(&self.result_strings[idx]),
+                // },
+            // );
+            // try thread_arraylist.append(threads[result.partition_idx]);
+        // }
+
+        // for (thread_arraylist.items) |thread| {
+            // thread.join();
+        // }
 
         for (0..results.count) |idx| {
             const result = results.items[idx];
 
-            threads[result.partition_idx] = try std.Thread.spawn(
-                .{},
-                BM25Partition.fetchRecords,
-                .{
-                    &self.index_partitions[result.partition_idx],
-                    self.result_positions[idx],
-                    &self.file_handles[result.partition_idx],
-                    result,
-                    @constCast(&self.result_strings[idx]),
-                },
+            try self.index_partitions[result.partition_idx].fetchRecords(
+                self.result_positions[idx],
+                &self.file_handles[result.partition_idx],
+                result,
+                @constCast(&self.result_strings[idx]),
             );
-            try thread_arraylist.append(threads[result.partition_idx]);
-        }
-
-        for (thread_arraylist.items) |thread| {
-            thread.join();
         }
 
         std.debug.print("Top score: {d}\n", .{results.items[0].score});
@@ -1267,6 +1293,8 @@ pub fn main() !void {
     var index_manager = try IndexManager.init(filename, &search_cols, allocator);
     try index_manager.readFile();
 
+    // index_manager.printDebugInfo();
+
     defer {
         search_cols.deinit();
         index_manager.deinit() catch {};
@@ -1291,12 +1319,9 @@ pub fn main() !void {
         boost_factors,
         );
 
-    std.debug.print("Result: {s}\n", .{str_result[0].items});
     for (index_manager.result_positions[0]) |pos| {
         const start_byte = pos.start_pos;
         const end_byte   = start_byte + pos.field_len;
-        std.debug.print("Start: {d}, End: {d}\n", .{start_byte, end_byte});
-
-        std.debug.print("Result: {s}\n", .{str_result[0].items[start_byte..end_byte]});
+        std.debug.print("{s},", .{str_result[0].items[start_byte..end_byte]});
     }
 }
