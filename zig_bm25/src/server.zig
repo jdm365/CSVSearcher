@@ -1,5 +1,6 @@
 const std = @import("std");
 const parseRecordCSV = @import("main.zig").parseRecordCSV;
+const zap = @import("zap");
 
 
 pub const TermPos = struct {
@@ -31,12 +32,6 @@ pub fn csvLineToJson(
     return std.json.Value{
         .object = json_object,
     };
-}
-
-pub fn serve() void {
-    const read_buffer: [4096]u8 = undefined;
-    const conn   = std.http.Connection;
-    const server = std.http.Server.init(conn, read_buffer);
 }
 
 
@@ -87,4 +82,32 @@ test "csv_parse" {
         const field_value = json_object.object.get(column_name).?.string;
         std.debug.print("Column: {s}, Value: {s}\n", .{column_name, field_value});
     }
+}
+
+fn on_request(r: zap.Request) void {
+    if (r.path) |the_path| {
+        std.debug.print("PATH: {s}\n", .{the_path});
+    }
+
+    if (r.query) |the_query| {
+        std.debug.print("QUERY: {s}\n", .{the_query});
+    }
+    r.sendBody("<html><body><h1>Hello from ZAP!!!</h1></body></html>") catch return;
+}
+
+test "client" {
+    var listener = zap.HttpListener.init(.{
+        .port = 5000,
+        .on_request = on_request,
+        .log = true,
+    });
+    try listener.listen();
+
+    std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
+
+    // start worker threads
+    zap.start(.{
+        .threads = 1,
+        .workers = 1,
+    });
 }
