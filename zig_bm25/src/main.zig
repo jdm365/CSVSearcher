@@ -2,6 +2,7 @@ const std = @import("std");
 const progress = @import("progress.zig");
 const sorted_array = @import("sorted_array.zig");
 const builtin = @import("builtin");
+const TermPos = @import("server.zig").TermPos;
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
 const MAX_LINE_LENGTH       = 1_048_576;
@@ -14,11 +15,6 @@ const token_t = packed struct(u32) {
     new_doc: u1,
     term_pos: u7,
     doc_id: u24
-};
-
-const TermPos = struct {
-    start_pos: u32,
-    field_len: u32,
 };
 
 const QueryResult = struct {
@@ -1198,6 +1194,13 @@ const IndexManager = struct {
                 res.deinit();
             }
             self.allocator.free(thread_results);
+        }
+
+        // TODO: Tokenize here, not in queryPartition.
+        // First aggregate dfs and calculate idf.
+        var df_sum: f32 = 0.0;
+        for (0..num_partitions) |partition_idx| {
+            df_sum += @as(f32, @floatFromInt(self.index_partitions[partition_idx].II[0].num_docs));
         }
 
         for (0..num_partitions) |partition_idx| {
