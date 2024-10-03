@@ -3,6 +3,7 @@ const progress = @import("progress.zig");
 const sorted_array = @import("sorted_array.zig");
 const builtin = @import("builtin");
 const TermPos = @import("server.zig").TermPos;
+const zap = @import("zap");
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
 const MAX_LINE_LENGTH       = 1_048_576;
@@ -1278,6 +1279,68 @@ const IndexManager = struct {
 };
 
 
+pub const QueryHandler = struct {
+    query_map: std.StringHashMap([]const u8),
+    allocator: std.mem.Allocator,
+
+    fn on_request(
+        self: *QueryHandler,
+        r: zap.Request,
+        ) !void {
+        if (r.query) |query| {
+            std.debug.print("QUERY: {s}\n", .{query});
+
+            try parse_keys(
+                query,
+                self.query_map,
+                self.allocator,
+            );
+
+            const iterator = self.query_map.iterator();
+            while (iterator) |item| {
+                std.debug.print("KEY: {s}\n", .{item.key});
+                std.debug.print("VALUE: {s}\n", .{item.value});
+            }
+
+            r.sendBody("\n\n\n\nDOOOING FOOOKIN SEARCH BROOOOO\n\n\n\n\n") catch return;
+        }
+    }
+
+    fn parse_keys(
+        raw_string: []const u8,
+        query_map: std.StringHashMap([]const u8),
+        allocator: std.mem.Allocator,
+    ) !void {
+        // Format key=value&key=value
+        var scratch_buffer: [4096]u8 = undefined;
+        var count: usize = 0;
+        var idx: usize = 0;
+
+        while (idx < raw_string.len) {
+            if (scratch_buffer[count] == '=') {
+                var result = query_map.getPtr(scratch_buffer[0..count]);
+
+                count = 0;
+                while ((idx < raw_string.len) and (raw_string[idx] != '&')) {
+                    scratch_buffer[count] = std.ascii.toUpper(raw_string[idx]);
+                    count += 1;
+                    idx   += 1;
+                }
+                if (result != null) {
+                    const value_copy = try allocator.dupe(u8, scratch_buffer[0..count]);
+                    result.? = @constCast(&value_copy);
+                }
+                count = 0;
+                idx += 1;
+                continue;
+            }
+            scratch_buffer[count] = std.ascii.toUpper(raw_string[idx]);
+            count += 1;
+            idx   += 1;
+        }
+    }
+};
+
 pub fn main() !void {
     const filename: []const u8 = "../tests/mb_small.csv";
 
@@ -1327,4 +1390,30 @@ pub fn main() !void {
         const end_byte   = start_byte + pos.field_len;
         std.debug.print("{s},", .{str_result[0].items[start_byte..end_byte]});
     }
+
+    var query_handler = QueryHandler{
+        .query_map = query_map,
+        .allocator = allocator,
+    };
+
+    var simpleRouter = zap.Router.init(allocator, .{});
+
+    try simpleRouter.handle_func("/search", &query_handler, &QueryHandler.on_request);
+
+    defer simpleRouter.deinit();
+    var listener = zap.HttpListener.init(.{
+        .port = 5000,
+        .on_request = simpleRouter.on_request_handler(),
+        .log = true,
+    });
+    try listener.listen();
+
+
+    std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
+
+    // start worker threads
+    zap.start(.{
+        .threads = 1,
+        .workers = 1,
+    });
 }
