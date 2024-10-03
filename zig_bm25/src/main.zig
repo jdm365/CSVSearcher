@@ -1296,10 +1296,10 @@ pub const QueryHandler = struct {
                 self.allocator,
             );
 
-            const iterator = self.query_map.iterator();
-            while (iterator) |item| {
-                std.debug.print("KEY: {s}\n", .{item.key});
-                std.debug.print("VALUE: {s}\n", .{item.value});
+            var iterator = self.query_map.iterator();
+            while (iterator.next()) |item| {
+                std.debug.print("KEY: {s}\n", .{item.key_ptr.*});
+                std.debug.print("VALUE: {s}\n", .{item.value_ptr.*});
             }
 
             r.sendBody("\n\n\n\nDOOOING FOOOKIN SEARCH BROOOOO\n\n\n\n\n") catch return;
@@ -1317,8 +1317,10 @@ pub const QueryHandler = struct {
         var idx: usize = 0;
 
         while (idx < raw_string.len) {
-            if (scratch_buffer[count] == '=') {
-                var result = query_map.getPtr(scratch_buffer[0..count]);
+            if (raw_string[idx] == '=') {
+                idx += 1;
+
+                const result = query_map.getPtr(scratch_buffer[0..count]);
 
                 count = 0;
                 while ((idx < raw_string.len) and (raw_string[idx] != '&')) {
@@ -1328,7 +1330,7 @@ pub const QueryHandler = struct {
                 }
                 if (result != null) {
                     const value_copy = try allocator.dupe(u8, scratch_buffer[0..count]);
-                    result.? = @constCast(&value_copy);
+                    result.?.* = value_copy;
                 }
                 count = 0;
                 idx += 1;
