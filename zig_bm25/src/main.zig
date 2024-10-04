@@ -56,7 +56,6 @@ pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
                     return;
                 },
                 '\n' => {
-                    // TODO: Only error if not last column.
                     byte_pos.* += 1;
                     return;
                 },
@@ -395,6 +394,7 @@ const IndexManager = struct {
     input_filename: []const u8,
     allocator: std.mem.Allocator,
     string_arena: std.heap.ArenaAllocator,
+    thread_safe_arena_allocator: std.heap.ThreadSafeAllocator,
     search_cols: std.StringHashMap(Column),
     cols: std.ArrayList([]const u8),
     file_handles: []std.fs.File,
@@ -412,6 +412,10 @@ const IndexManager = struct {
         var string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         var cols = std.ArrayList([]const u8).init(allocator);
 
+        const thread_safe_arena_allocator = std.heap.ThreadSafeAllocator{
+            .child_allocator = string_arena.allocator(),
+            };
+
         var header_bytes: usize = 0;
 
         const search_col_map = try readCSVHeader(
@@ -422,8 +426,8 @@ const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-        // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 1;
+        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -462,6 +466,7 @@ const IndexManager = struct {
             .input_filename = input_filename,
             .allocator = allocator,
             .string_arena = string_arena,
+            .thread_safe_arena_allocator = thread_safe_arena_allocator,
             .search_cols = search_col_map,
             .cols = cols,
             .tmp_dir = dir_name,
@@ -528,7 +533,8 @@ const IndexManager = struct {
 
         const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..term_len]);
         if (!gop.found_existing) {
-            const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
+            // const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
+            const term_copy = try self.thread_safe_arena_allocator.allocator().dupe(u8, term[0..term_len]);
 
             gop.key_ptr.* = term_copy;
             gop.value_ptr.* = index_partition.II[col_idx].num_terms;
