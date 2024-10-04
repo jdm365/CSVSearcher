@@ -1241,7 +1241,11 @@ const IndexManager = struct {
             }
         }
 
-        if (results.count == 0) return;
+        if (results.count == 0) {
+            std.debug.print("No results\n", .{});
+            return;
+        }
+        std.debug.print("Top Score: {d}\n", .{results.items[0].score});
 
         for (0..results.count) |idx| {
             const result = results.items[idx];
@@ -1291,6 +1295,9 @@ pub const QueryHandler = struct {
         r: zap.Request,
         ) !void {
         r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+
+        self.output_buffer.clearRetainingCapacity();
+        self.json_objects.clearRetainingCapacity();
 
         const start = std.time.milliTimestamp();
 
@@ -1344,7 +1351,7 @@ pub const QueryHandler = struct {
                 self.output_buffer.writer(),
             ) catch unreachable;
 
-            r.sendBody(self.output_buffer.items) catch {};
+            r.sendJson(self.output_buffer.items) catch return;
         }
     }
 
@@ -1383,7 +1390,7 @@ pub const QueryHandler = struct {
             self.output_buffer.writer(),
         ) catch unreachable;
 
-        r.sendBody(self.output_buffer.items) catch {};
+        r.sendJson(self.output_buffer.items) catch return;
     }
 
     fn get_search_columns(
@@ -1423,7 +1430,7 @@ pub const QueryHandler = struct {
             self.output_buffer.writer(),
         ) catch unreachable;
 
-        r.sendBody(self.output_buffer.items) catch {};
+        r.sendJson(self.output_buffer.items) catch return;
     }
 
     fn healthcheck(r: zap.Request) void {
@@ -1451,6 +1458,12 @@ pub const QueryHandler = struct {
 
                 count = 0;
                 while ((idx < raw_string.len) and (raw_string[idx] != '&')) {
+                    if (raw_string[idx] == '+') {
+                        scratch_buffer[count] = ' ';
+                        count += 1;
+                        idx += 1;
+                        continue;
+                    }
                     scratch_buffer[count] = std.ascii.toUpper(raw_string[idx]);
                     count += 1;
                     idx   += 1;
@@ -1494,10 +1507,6 @@ pub fn main() !void {
         search_cols.deinit();
         index_manager.deinit() catch {};
         _ = gpa.deinit();
-    }
-
-    for (0.., index_manager.cols.items) |idx, col| {
-        std.debug.print("COL: {d} - {s}\n", .{idx, col});
     }
 
     var query_map = std.StringHashMap([]const u8).init(allocator);
