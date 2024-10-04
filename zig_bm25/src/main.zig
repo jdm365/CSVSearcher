@@ -280,7 +280,7 @@ const BM25Partition = struct {
         };
 
         for (0..num_search_cols) |idx| {
-            partition.II[idx] = try InvertedIndex.init(allocator, line_offsets.len);
+            partition.II[idx] = try InvertedIndex.init(allocator, line_offsets.len - 1);
         }
 
         return partition;
@@ -555,7 +555,7 @@ const IndexManager = struct {
         byte_idx.* += @intFromBool(is_quoted);
 
         var cntr: usize = 0;
-        var new_doc: bool = (doc_id != 0) and (col_idx == 0);
+        var new_doc: bool = (doc_id != 0);
 
         var terms_seen = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
 
@@ -786,6 +786,7 @@ const IndexManager = struct {
                             try cols.append(
                                 try string_arena.dupe(u8, term[0..cntr])
                                 );
+                            num_bytes.* = byte_pos + 1;
                             return col_map;
                         },
                         else => {
@@ -812,7 +813,7 @@ const IndexManager = struct {
         chunk_size: usize,
         final_chunk_size: usize,
         num_partitions: usize,
-        num_cols: usize,
+        num_search_cols: usize,
         search_col_idxs: []usize,
         total_docs_read: *AtomicCounter,
         progress_bar: *progress.ProgressBar,
@@ -830,9 +831,9 @@ const IndexManager = struct {
         const start_doc = partition_idx * chunk_size;
         const end_doc   = start_doc + current_chunk_size;
 
-        var token_streams = try self.allocator.alloc(TokenStream, num_cols);
+        var token_streams = try self.allocator.alloc(TokenStream, num_search_cols);
 
-        for (0..num_cols) |col_idx| {
+        for (0..num_search_cols) |col_idx| {
             const output_filename = try std.fmt.allocPrint(
                 self.allocator, 
                 "{s}/output_{d}_{d}.bin", 
@@ -846,7 +847,7 @@ const IndexManager = struct {
             );
         }
         defer {
-            for (0..num_cols) |col_idx| {
+            for (0..num_search_cols) |col_idx| {
                 token_streams[col_idx].deinit();
             }
             self.allocator.free(token_streams);
@@ -874,7 +875,7 @@ const IndexManager = struct {
             var search_col_idx: usize = 0;
             var prev_col: usize = 0;
 
-            while (search_col_idx < num_cols) {
+            while (search_col_idx < num_search_cols) {
 
                 for (prev_col..search_col_idxs[search_col_idx]) |_| {
                     try token_streams[0].iterField(&line_offset);
@@ -891,7 +892,8 @@ const IndexManager = struct {
                     next_line_offset,
                     );
 
-                prev_col = search_col_idxs[search_col_idx];
+                // Add one because we just iterated over the last field.
+                prev_col = search_col_idxs[search_col_idx] + 1;
                 search_col_idx += 1;
             }
         }
@@ -1515,7 +1517,7 @@ pub fn main() !void {
     var index_manager = try IndexManager.init(filename, &search_cols, allocator);
     try index_manager.readFile();
 
-    // index_manager.printDebugInfo();
+    index_manager.printDebugInfo();
 
     defer {
         search_cols.deinit();
