@@ -55,12 +55,17 @@ async function get_search_columns() {
 	}
 }
 
-async function waitForPort(port, retryInterval = 1000, maxRetries = 60) {
+async function waitForPort(port, retryInterval = 10000, maxRetries = 60) {
+	return;
     let retries = 0;
     while (retries < maxRetries) {
         try {
             // Attempt to fetch a resource from the server on the specified port
-            const response = await fetch(`http://localhost:${port}/healthcheck`, { method: 'HEAD' });
+            const response = await fetch(
+				`http://localhost:${port}/healthcheck`, 
+				// Make no-cors request to avoid CORS policy blocking the request
+				{ method: 'HEAD' }
+			);
             if (response.ok) {
                 // Port is available
                 console.log(`Server is up on port ${port}`);

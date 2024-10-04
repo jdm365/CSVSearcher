@@ -3,6 +3,7 @@ const progress = @import("progress.zig");
 const sorted_array = @import("sorted_array.zig");
 const builtin = @import("builtin");
 const TermPos = @import("server.zig").TermPos;
+const csvLineToJson = @import("server.zig").csvLineToJson;
 const zap = @import("zap");
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
@@ -378,7 +379,6 @@ const BM25Partition = struct {
             try record_string.resize(bytes_to_read);
         }
         _ = try file_handle.read(record_string.items[0..bytes_to_read]);
-
         try parseRecordCSV(record_string.items[0..bytes_to_read], result_positions);
     }
 };
@@ -391,7 +391,7 @@ const IndexManager = struct {
     allocator: std.mem.Allocator,
     string_arena: std.heap.ArenaAllocator,
     search_cols: std.StringArrayHashMap(Column),
-    num_cols: usize,
+    cols: std.ArrayList([]const u8),
     file_handles: []std.fs.File,
     tmp_dir: []const u8,
     result_positions: [MAX_NUM_RESULTS][]TermPos,
@@ -405,14 +405,14 @@ const IndexManager = struct {
         ) !IndexManager {
 
         var string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var cols = std.ArrayList([]const u8).init(allocator);
 
-        var num_cols: usize = 0;
         var header_bytes: usize = 0;
 
         const search_col_map = try readCSVHeader(
             input_filename, 
             search_cols, 
-            &num_cols,
+            &cols,
             allocator,
             string_arena.allocator(),
             &header_bytes,
@@ -442,12 +442,12 @@ const IndexManager = struct {
         for (0..num_partitions) |idx| {
             file_handles[idx] = try std.fs.cwd().openFile(input_filename, .{});
         }
-        std.debug.assert(num_cols > 0);
+        std.debug.assert(cols.items.len > 0);
 
         var result_positions: [MAX_NUM_RESULTS][]TermPos = undefined;
         var result_strings: [MAX_NUM_RESULTS]std.ArrayList(u8) = undefined;
         for (0..MAX_NUM_RESULTS) |idx| {
-            result_positions[idx] = try allocator.alloc(TermPos, num_cols);
+            result_positions[idx] = try allocator.alloc(TermPos, cols.items.len);
             result_strings[idx] = try std.ArrayList(u8).initCapacity(allocator, 4096);
             try result_strings[idx].resize(4096);
         }
@@ -458,7 +458,7 @@ const IndexManager = struct {
             .allocator = allocator,
             .string_arena = string_arena,
             .search_cols = search_col_map,
-            .num_cols = num_cols,
+            .cols = cols,
             .tmp_dir = dir_name,
             .file_handles = file_handles,
             .result_positions = result_positions,
@@ -476,6 +476,7 @@ const IndexManager = struct {
         self.allocator.free(self.index_partitions);
 
         self.search_cols.deinit();
+        self.cols.deinit();
 
         try std.fs.cwd().deleteTree(self.tmp_dir);
         self.allocator.free(self.tmp_dir);
@@ -685,7 +686,7 @@ const IndexManager = struct {
     fn readCSVHeader(
         input_filename: []const u8,
         search_cols: *std.ArrayList([]const u8),
-        num_cols: *usize,
+        cols: *std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
         string_arena: std.mem.Allocator,
         num_bytes: *usize,
@@ -693,7 +694,6 @@ const IndexManager = struct {
 
         var col_map = std.StringArrayHashMap(Column).init(allocator);
         var col_idx: usize = 0;
-        num_cols.* = 0;
 
         const file = try std.fs.cwd().openFile(input_filename, .{});
         defer file.close();
@@ -725,6 +725,10 @@ const IndexManager = struct {
                         byte_pos += 2;
                         if (f_data[byte_pos - 1] != '"') {
                             // ADD TERM
+                            try cols.append(
+                                try string_arena.dupe(u8, term[0..cntr])
+                                );
+
                             for (0..search_cols.items.len) |i| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
                                     const copy_term = try string_arena.dupe(u8, term[0..cntr]);
@@ -755,6 +759,10 @@ const IndexManager = struct {
                     switch (f_data[byte_pos]) {
                         ',' => {
                             // ADD TERM.
+                            try cols.append(
+                                try string_arena.dupe(u8, term[0..cntr])
+                                );
+
                             for (0..search_cols.items.len) |i| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
                                     const copy_term = try string_arena.dupe(u8, term[0..cntr]);
@@ -775,7 +783,9 @@ const IndexManager = struct {
                         },
                         '\n' => {
                             // ADD TERM.
-                            num_cols.* = col_idx + 1;
+                            try cols.append(
+                                try string_arena.dupe(u8, term[0..cntr])
+                                );
                             return col_map;
                         },
                         else => {
@@ -791,7 +801,6 @@ const IndexManager = struct {
             col_idx += 1;
         }
 
-        num_cols.*  = col_idx;
         num_bytes.* = byte_pos;
     }
         
@@ -1175,7 +1184,7 @@ const IndexManager = struct {
         queries: std.StringHashMap([]const u8),
         k: usize,
         boost_factors: std.ArrayList(f32),
-    ) ![MAX_NUM_RESULTS]std.ArrayList(u8) {
+    ) !void {
         if (k > MAX_NUM_RESULTS) {
             std.debug.print("k must be less than or equal to {d}\n", .{MAX_NUM_RESULTS});
             return error.InvalidArgument;
@@ -1232,35 +1241,7 @@ const IndexManager = struct {
             }
         }
 
-        if (results.count == 0) return self.result_strings;
-
-        // var thread_arraylist = try std.ArrayList(std.Thread).initCapacity(
-            // self.allocator, 
-            // num_partitions
-            // );
-        // defer thread_arraylist.deinit();
-
-        // Overwriting work.
-        // for (0..results.count) |idx| {
-            // const result = results.items[idx];
-
-            // threads[result.partition_idx] = try std.Thread.spawn(
-                // .{},
-                // BM25Partition.fetchRecords,
-                // .{
-                    // &self.index_partitions[result.partition_idx],
-                    // self.result_positions[idx],
-                    // &self.file_handles[result.partition_idx],
-                    // result,
-                    // @constCast(&self.result_strings[idx]),
-                // },
-            // );
-            // try thread_arraylist.append(threads[result.partition_idx]);
-        // }
-
-        // for (thread_arraylist.items) |thread| {
-            // thread.join();
-        // }
+        if (results.count == 0) return;
 
         for (0..results.count) |idx| {
             const result = results.items[idx];
@@ -1272,24 +1253,48 @@ const IndexManager = struct {
                 @constCast(&self.result_strings[idx]),
             );
         }
-
-        std.debug.print("Top score: {d}\n", .{results.items[0].score});
-        return self.result_strings;
     }
 };
 
 
 pub const QueryHandler = struct {
+    index_manager: *IndexManager,
+    boost_factors: std.ArrayList(f32),
     query_map: std.StringHashMap([]const u8),
     allocator: std.mem.Allocator,
+    json_objects: std.ArrayList(std.json.Value),
+    output_buffer: std.ArrayList(u8),
+
+    pub fn init(
+        index_manager: *IndexManager,
+        boost_factors: std.ArrayList(f32),
+        query_map: std.StringHashMap([]const u8),
+        allocator: std.mem.Allocator,
+    ) !QueryHandler {
+        return QueryHandler{
+            .index_manager = index_manager,
+            .boost_factors = boost_factors,
+            .query_map = query_map,
+            .allocator = allocator,
+            .json_objects = try std.ArrayList(std.json.Value).initCapacity(allocator, MAX_NUM_RESULTS),
+            .output_buffer = try std.ArrayList(u8).initCapacity(allocator, 16384),
+        };
+    }
+
+    pub fn deinit(self: *QueryHandler) !void {
+        self.json_objects.deinit();
+        self.ouput_buffer.deinit();
+    }
 
     fn on_request(
         self: *QueryHandler,
         r: zap.Request,
         ) !void {
-        if (r.query) |query| {
-            std.debug.print("QUERY: {s}\n", .{query});
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
 
+        const start = std.time.milliTimestamp();
+
+        if (r.query) |query| {
             try parse_keys(
                 query,
                 self.query_map,
@@ -1298,12 +1303,134 @@ pub const QueryHandler = struct {
 
             var iterator = self.query_map.iterator();
             while (iterator.next()) |item| {
-                std.debug.print("KEY: {s}\n", .{item.key_ptr.*});
+                std.debug.print("KEY: {s}\n",   .{item.key_ptr.*});
                 std.debug.print("VALUE: {s}\n", .{item.value_ptr.*});
             }
 
-            r.sendBody("\n\n\n\nDOOOING FOOOKIN SEARCH BROOOOO\n\n\n\n\n") catch return;
+            // Do search.
+            try self.index_manager.query(
+                self.query_map,
+                10,
+                self.boost_factors,
+                );
+
+            for (0..10) |idx| {
+                try self.json_objects.append(try csvLineToJson(
+                    self.allocator,
+                    self.index_manager.result_strings[idx].items,
+                    self.index_manager.result_positions[idx],
+                    self.index_manager.cols,
+                    ));
+            }
+            const end = std.time.milliTimestamp();
+            const time_taken_ms = end - start;
+
+            var response = std.json.Value{
+                .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
+            };
+
+            try response.object.put(
+                "results",
+                std.json.Value{ .array = self.json_objects },
+            );
+            try response.object.put(
+                "time_taken_ms",
+                std.json.Value{ .integer = time_taken_ms },
+            );
+
+            std.json.stringify(
+                response,
+                .{},
+                self.output_buffer.writer(),
+            ) catch unreachable;
+
+            r.sendBody(self.output_buffer.items) catch {};
         }
+    }
+
+    fn get_columns(
+        self: *QueryHandler,
+        r: zap.Request,
+    ) !void {
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+
+        self.output_buffer.clearRetainingCapacity();
+
+        var response = std.json.Value{
+            .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
+        };
+
+        var json_cols = try std.ArrayList(std.json.Value).initCapacity(
+            self.allocator, 
+            self.index_manager.cols.items.len
+            );
+        defer json_cols.deinit();
+
+        for (self.index_manager.cols.items) |col| {
+            try json_cols.append(std.json.Value{
+                .string = col,
+            });
+        }
+
+        try response.object.put(
+            "columns",
+            std.json.Value{ .array = json_cols },
+        );
+
+        std.json.stringify(
+            response,
+            .{},
+            self.output_buffer.writer(),
+        ) catch unreachable;
+
+        r.sendBody(self.output_buffer.items) catch {};
+    }
+
+    fn get_search_columns(
+        self: *QueryHandler,
+        r: zap.Request,
+    ) !void {
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+
+        self.output_buffer.clearRetainingCapacity();
+
+        var response = std.json.Value{
+            .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
+        };
+
+        var json_cols = try std.ArrayList(std.json.Value).initCapacity(
+            self.allocator, 
+            self.index_manager.search_cols.count(),
+            );
+        defer json_cols.deinit();
+
+        var iterator = self.index_manager.search_cols.iterator();
+        while (iterator.next()) |item| {
+            try json_cols.append(std.json.Value{
+                .string = item.key_ptr.*,
+            });
+        }
+
+
+        try response.object.put(
+            "columns",
+            std.json.Value{ .array = json_cols },
+        );
+
+        std.json.stringify(
+            response,
+            .{},
+            self.output_buffer.writer(),
+        ) catch unreachable;
+
+        r.sendBody(self.output_buffer.items) catch {};
+    }
+
+    fn healthcheck(r: zap.Request) void {
+        r.setStatus(zap.StatusCode.ok);
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        // r.markAsFinished(true);
+        r.sendBody("") catch {};
     }
 
     fn parse_keys(
@@ -1369,6 +1496,10 @@ pub fn main() !void {
         _ = gpa.deinit();
     }
 
+    for (0.., index_manager.cols.items) |idx, col| {
+        std.debug.print("COL: {d} - {s}\n", .{idx, col});
+    }
+
     var query_map = std.StringHashMap([]const u8).init(allocator);
     defer query_map.deinit();
 
@@ -1381,7 +1512,7 @@ pub fn main() !void {
     try boost_factors.append(2.0);
     try boost_factors.append(1.0);
 
-    const str_result = try index_manager.query(
+    try index_manager.query(
         query_map,
         10,
         boost_factors,
@@ -1390,22 +1521,27 @@ pub fn main() !void {
     for (index_manager.result_positions[0]) |pos| {
         const start_byte = pos.start_pos;
         const end_byte   = start_byte + pos.field_len;
-        std.debug.print("{s},", .{str_result[0].items[start_byte..end_byte]});
+        std.debug.print("{s},", .{index_manager.result_strings[0].items[start_byte..end_byte]});
     }
 
-    var query_handler = QueryHandler{
-        .query_map = query_map,
-        .allocator = allocator,
-    };
+    var query_handler = QueryHandler.init(
+        &index_manager,
+        boost_factors,
+        query_map,
+        allocator,
+    );
 
-    var simpleRouter = zap.Router.init(allocator, .{});
+    var simple_router = zap.Router.init(allocator, .{});
 
-    try simpleRouter.handle_func("/search", &query_handler, &QueryHandler.on_request);
+    try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
+    try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
+    try simple_router.handle_func("/get_search_columns", &query_handler, &QueryHandler.get_search_columns);
+    try simple_router.handle_func("/healthcheck", &query_handler, &QueryHandler.healthcheck);
 
-    defer simpleRouter.deinit();
+    defer simple_router.deinit();
     var listener = zap.HttpListener.init(.{
         .port = 5000,
-        .on_request = simpleRouter.on_request_handler(),
+        .on_request = simple_router.on_request_handler(),
         .log = true,
     });
     try listener.listen();
