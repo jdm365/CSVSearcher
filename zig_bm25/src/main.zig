@@ -197,7 +197,7 @@ const TokenStream = struct {
 
 const InvertedIndex = struct {
     postings: []token_t,
-    vocab: std.StringArrayHashMap(u32),
+    vocab: std.StringHashMap(u32),
     term_offsets: []u32,
     doc_freqs: std.ArrayList(u32),
     doc_sizes: []u16,
@@ -212,7 +212,7 @@ const InvertedIndex = struct {
         ) !InvertedIndex {
         const II = InvertedIndex{
             .postings = &[_]token_t{},
-            .vocab = std.StringArrayHashMap(u32).init(allocator),
+            .vocab = std.StringHashMap(u32).init(allocator),
             .term_offsets = &[_]u32{},
             .doc_freqs = try std.ArrayList(u32).initCapacity(
                 allocator, @as(usize, @intFromFloat(@as(f32, @floatFromInt(num_docs)) * 0.1))
@@ -390,7 +390,7 @@ const IndexManager = struct {
     input_filename: []const u8,
     allocator: std.mem.Allocator,
     string_arena: std.heap.ArenaAllocator,
-    search_cols: std.StringArrayHashMap(Column),
+    search_cols: std.StringHashMap(Column),
     cols: std.ArrayList([]const u8),
     file_handles: []std.fs.File,
     tmp_dir: []const u8,
@@ -417,8 +417,8 @@ const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-        // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 1;
+        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -510,7 +510,7 @@ const IndexManager = struct {
 
     fn addTerm(
         self: *IndexManager,
-        term: []u8,
+        term: *[MAX_TERM_LENGTH]u8,
         term_len: usize,
         doc_id: u32,
         term_pos: u8,
@@ -549,6 +549,7 @@ const IndexManager = struct {
         col_idx: usize,
         term: *[MAX_TERM_LENGTH]u8,
         max_byte: usize,
+        terms_seen: *std.bit_set.StaticBitSet(MAX_NUM_TERMS),
     ) !void {
         var term_pos: u8 = 0;
         const is_quoted  = (token_stream.f_data[byte_idx.*] == '"');
@@ -557,7 +558,13 @@ const IndexManager = struct {
         var cntr: usize = 0;
         var new_doc: bool = (doc_id != 0);
 
-        var terms_seen = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
+        terms_seen.setRangeValue(
+            std.bit_set.Range{
+                .start = 0,
+                .end = MAX_NUM_TERMS,
+            },
+            false
+            );
 
         if (is_quoted) {
 
@@ -593,13 +600,11 @@ const IndexManager = struct {
                         index_partition, 
                         col_idx, 
                         token_stream, 
-                        &terms_seen,
+                        terms_seen,
                         &new_doc,
                         );
 
-                    if (term_pos != 255) {
-                        term_pos += 1;
-                    }
+                    term_pos += @intFromBool(term_pos != 255);
                     cntr = 0;
                     byte_idx.* += 1;
                     continue;
@@ -616,40 +621,55 @@ const IndexManager = struct {
                 std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
                 std.debug.assert(byte_idx.* < max_byte);
 
-                if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
-                    break;
-                }
+                switch (token_stream.f_data[byte_idx.*]) {
+                    ',' => break,
+                    '\n' => break,
+                    ' ' => {
+                        if (cntr == 0) {
+                            byte_idx.* += 1;
+                            continue;
+                        }
 
-                if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
-                    if (cntr == 0) {
+                        try self.addTerm(
+                            term, 
+                            cntr, 
+                            doc_id, 
+                            term_pos, 
+                            index_partition, 
+                            col_idx, 
+                            token_stream, 
+                            terms_seen,
+                            &new_doc,
+                            );
+
+                        term_pos += @intFromBool(term_pos != 255);
+                        cntr = 0;
                         byte_idx.* += 1;
-                        continue;
+                    },
+                    else => {
+                        if (cntr == MAX_TERM_LENGTH - 1) {
+                            try self.addTerm(
+                                term, 
+                                cntr, 
+                                doc_id, 
+                                term_pos, 
+                                index_partition, 
+                                col_idx, 
+                                token_stream, 
+                                terms_seen,
+                                &new_doc,
+                                );
+
+                            term_pos += @intFromBool(term_pos != 255);
+                            cntr = 0;
+                            byte_idx.* += 1;
+                            continue;
+                        }
+                        term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
+                        cntr += 1;
+                        byte_idx.* += 1;
                     }
-
-                    try self.addTerm(
-                        term, 
-                        cntr, 
-                        doc_id, 
-                        term_pos, 
-                        index_partition, 
-                        col_idx, 
-                        token_stream, 
-                        &terms_seen,
-                        &new_doc,
-                        );
-
-                    cntr = 0;
-                    byte_idx.* += 1;
-
-                    if (term_pos != 255) {
-                        term_pos += 1;
-                    }
-                    continue;
                 }
-
-                term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
-                cntr += 1;
-                byte_idx.* += 1;
             }
         }
 
@@ -664,7 +684,7 @@ const IndexManager = struct {
                 index_partition, 
                 col_idx, 
                 token_stream, 
-                &terms_seen,
+                terms_seen,
                 &new_doc,
                 );
         }
@@ -690,9 +710,9 @@ const IndexManager = struct {
         allocator: std.mem.Allocator,
         string_arena: std.mem.Allocator,
         num_bytes: *usize,
-        ) !std.StringArrayHashMap(Column) {
+        ) !std.StringHashMap(Column) {
 
-        var col_map = std.StringArrayHashMap(Column).init(allocator);
+        var col_map = std.StringHashMap(Column).init(allocator);
         var col_idx: usize = 0;
 
         const file = try std.fs.cwd().openFile(input_filename, .{});
@@ -853,6 +873,8 @@ const IndexManager = struct {
             self.allocator.free(token_streams);
         }
 
+        var terms_seen_bitset = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
+
         var last_doc_id: usize = 0;
         for (0.., start_doc..end_doc) |doc_id, _| {
 
@@ -890,6 +912,7 @@ const IndexManager = struct {
                     search_col_idx,
                     &term_buffer,
                     next_line_offset,
+                    &terms_seen_bitset,
                     );
 
                 // Add one because we just iterated over the last field.
@@ -1500,13 +1523,17 @@ pub const QueryHandler = struct {
 };
 
 pub fn main() !void {
-    const filename: []const u8 = "../tests/mb_small.csv";
+    // const filename: []const u8 = "../tests/mb_small.csv";
+    const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = blk: {
         if (builtin.mode == .ReleaseFast) {
-            break :blk std.heap.c_allocator;
+            std.debug.print("Using C allocator\n", .{});
+            break :blk std.heap.raw_c_allocator;
+            // break :blk gpa.allocator();
         }
+        std.debug.print("Using GeneralPurposeAllocator\n", .{});
         break :blk gpa.allocator();
     }; 
 
@@ -1516,8 +1543,6 @@ pub fn main() !void {
 
     var index_manager = try IndexManager.init(filename, &search_cols, allocator);
     try index_manager.readFile();
-
-    index_manager.printDebugInfo();
 
     defer {
         search_cols.deinit();
