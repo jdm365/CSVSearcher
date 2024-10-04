@@ -210,9 +210,14 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         num_docs: usize,
         ) !InvertedIndex {
+        var vocab = std.StringHashMap(u32).init(allocator);
+
+        // Guess capacity
+        try vocab.ensureTotalCapacity(@intCast(num_docs / 25));
+
         const II = InvertedIndex{
             .postings = &[_]token_t{},
-            .vocab = std.StringHashMap(u32).init(allocator),
+            .vocab = vocab,
             .term_offsets = &[_]u32{},
             .doc_freqs = try std.ArrayList(u32).initCapacity(
                 allocator, @as(usize, @intFromFloat(@as(f32, @floatFromInt(num_docs)) * 0.1))
@@ -343,7 +348,7 @@ const BM25Partition = struct {
                     const token = token_t{
                         .new_doc = 0,
                         .term_pos = term_pos,
-                        .doc_id = @intCast(current_doc_id),
+                        .doc_id = @truncate(current_doc_id),
                     };
 
                     const postings_offset = II.term_offsets[term_id] + term_offsets[term_id];
@@ -417,8 +422,8 @@ const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -520,6 +525,7 @@ const IndexManager = struct {
         terms_seen: *std.bit_set.StaticBitSet(MAX_NUM_TERMS),
         new_doc: *bool,
     ) !void {
+
         const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..term_len]);
         if (!gop.found_existing) {
             const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
@@ -841,8 +847,6 @@ const IndexManager = struct {
         var timer = try std.time.Timer.start();
         const interval_ns: u64 = 1_000_000_000 / 30;
 
-        var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
-
         const current_chunk_size = switch (partition_idx != num_partitions - 1) {
             true => chunk_size,
             false => final_chunk_size,
@@ -860,6 +864,7 @@ const IndexManager = struct {
                 .{self.tmp_dir, partition_idx, col_idx}
                 );
             defer self.allocator.free(output_filename);
+
             token_streams[col_idx] = try TokenStream.init(
                 self.input_filename,
                 output_filename,
@@ -873,6 +878,7 @@ const IndexManager = struct {
             self.allocator.free(token_streams);
         }
 
+        var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
         var terms_seen_bitset = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
 
         var last_doc_id: usize = 0;
@@ -1530,8 +1536,8 @@ pub fn main() !void {
     const allocator = blk: {
         if (builtin.mode == .ReleaseFast) {
             std.debug.print("Using C allocator\n", .{});
-            break :blk std.heap.raw_c_allocator;
-            // break :blk gpa.allocator();
+            // break :blk std.heap.raw_c_allocator;
+            break :blk gpa.allocator();
         }
         std.debug.print("Using GeneralPurposeAllocator\n", .{});
         break :blk gpa.allocator();
