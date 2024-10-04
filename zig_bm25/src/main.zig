@@ -417,8 +417,8 @@ const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 24;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -555,7 +555,7 @@ const IndexManager = struct {
         byte_idx.* += @intFromBool(is_quoted);
 
         var cntr: usize = 0;
-        var new_doc: bool = (doc_id != 0);
+        var new_doc: bool = (doc_id != 0) and (col_idx == 0);
 
         var terms_seen = std.bit_set.StaticBitSet(MAX_NUM_TERMS).initEmpty();
 
@@ -729,8 +729,8 @@ const IndexManager = struct {
                                 try string_arena.dupe(u8, term[0..cntr])
                                 );
 
-                            for (0..search_cols.items.len) |i| {
-                                if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
+                            for (0..search_cols.items.len) |idx| {
+                                if (std.mem.eql(u8, term[0..cntr], search_cols.items[idx])) {
                                     const copy_term = try string_arena.dupe(u8, term[0..cntr]);
                                     try col_map.put(
                                         copy_term, 
@@ -763,8 +763,8 @@ const IndexManager = struct {
                                 try string_arena.dupe(u8, term[0..cntr])
                                 );
 
-                            for (0..search_cols.items.len) |i| {
-                                if (std.mem.eql(u8, term[0..cntr], search_cols.items[i])) {
+                            for (0..search_cols.items.len) |idx| {
+                                if (std.mem.eql(u8, term[0..cntr], search_cols.items[idx])) {
                                     const copy_term = try string_arena.dupe(u8, term[0..cntr]);
                                     try col_map.put(
                                         copy_term, 
@@ -1146,11 +1146,16 @@ const IndexManager = struct {
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
 
             for (col_tokens.items) |token| {
-                const idf: f32 = 1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])));
+                const boost_weighted_idf: f32 = (
+                    1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])))
+                    ) * boost_factors.items[col_idx];
+                // std.debug.print("Column: {d} - Doc Freq: {d}\n", .{col_idx, II.doc_freqs.items[token]});
 
+                const offset      = II.term_offsets[token];
                 const last_offset = II.term_offsets[token + 1];
-                for (II.postings[II.term_offsets[token]..last_offset]) |doc_token| {
-                    const score = idf * boost_factors.items[col_idx];
+
+                for (II.postings[offset..last_offset]) |doc_token| {
+                    const score = boost_weighted_idf;
 
                     const doc_id:   u32 = @intCast(doc_token.doc_id);
                     // const term_pos: u32 = @intCast(doc_token.term_pos);
@@ -1206,12 +1211,7 @@ const IndexManager = struct {
             self.allocator.free(thread_results);
         }
 
-        // TODO: Tokenize here, not in queryPartition.
-        // First aggregate dfs and calculate idf.
-        var df_sum: f32 = 0.0;
-        for (0..num_partitions) |partition_idx| {
-            df_sum += @as(f32, @floatFromInt(self.index_partitions[partition_idx].II[0].num_docs));
-        }
+        // TODO: Aggregate dfs and calculate idf.
 
         for (0..num_partitions) |partition_idx| {
             thread_results[partition_idx] = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, k);
@@ -1245,7 +1245,10 @@ const IndexManager = struct {
             std.debug.print("No results\n", .{});
             return;
         }
-        std.debug.print("Top Score: {d}\n", .{results.items[0].score});
+        for (0..10) |idx| {
+            std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
+        }
+        std.debug.print("\n", .{});
 
         for (0..results.count) |idx| {
             const result = results.items[idx];
@@ -1377,6 +1380,17 @@ pub const QueryHandler = struct {
             try json_cols.append(std.json.Value{
                 .string = col,
             });
+        }
+
+        // Swap search_cols to be first.
+        var cntr: usize = 0;
+        var iterator = self.index_manager.search_cols.iterator();
+        while (iterator.next()) |item| {
+            const csv_idx = item.value_ptr.*.csv_idx;
+            const tmp = json_cols.items[csv_idx];
+            json_cols.items[csv_idx] = json_cols.items[cntr];
+            json_cols.items[cntr] = tmp;
+            cntr += 1;
         }
 
         try response.object.put(
@@ -1512,7 +1526,7 @@ pub fn main() !void {
     var query_map = std.StringHashMap([]const u8).init(allocator);
     defer query_map.deinit();
 
-    try query_map.put("TITLE", "UNDER MY SKIN");
+    try query_map.put("TITLE", "FRANK SINATRA");
     try query_map.put("ARTIST", "FRANK SINATRA");
 
     var boost_factors = std.ArrayList(f32).init(allocator);
