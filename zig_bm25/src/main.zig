@@ -351,7 +351,7 @@ const BM25Partition = struct {
         new_doc: *bool,
     ) !void {
 
-        var gop = try self.II[col_idx].vocab.getOrPut(term[0..term_len]);
+        const gop = try self.II[col_idx].vocab.getOrPut(term[0..term_len]);
 
         if (!gop.found_existing) {
             const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
@@ -362,10 +362,10 @@ const BM25Partition = struct {
             try self.II[col_idx].doc_freqs.append(1);
             try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
         } else {
-            std.debug.print("Value address: {*}\n", .{gop.value_ptr});
-            std.debug.print("Entry address: {*}\n", .{&gop});
-            std.debug.print("Offset: {}\n", .{@intFromPtr(gop.value_ptr) - @intFromPtr(&gop)}); 
-            @breakpoint();
+            // std.debug.print("Value address: {*}\n", .{gop.value_ptr});
+            // std.debug.print("Entry address: {*}\n", .{&gop});
+            // std.debug.print("Offset: {}\n", .{@intFromPtr(gop.value_ptr) - @intFromPtr(&gop)}); 
+            // @breakpoint();
 
             if (!terms_seen.checkOrInsert(gop.value_ptr.*)) {
                 self.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
