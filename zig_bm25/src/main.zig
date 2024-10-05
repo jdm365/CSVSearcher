@@ -653,8 +653,8 @@ pub const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-        // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 1;
+        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 1;
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
@@ -1035,7 +1035,7 @@ pub const IndexManager = struct {
         const execution_time_ms = end_time - start_time;
         const mb_s: usize = @as(usize, @intFromFloat(0.001 * @as(f32, @floatFromInt(file_size)) / @as(f32, @floatFromInt(execution_time_ms))));
 
-        const num_lines = line_offsets.items.len - 2;
+        const num_lines = line_offsets.items.len - 1;
         const num_partitions = self.index_partitions.len;
 
         std.debug.print("Read {d} lines in {d}ms\n", .{num_lines, execution_time_ms});
@@ -1115,7 +1115,7 @@ pub const IndexManager = struct {
         }
 
         const _total_docs_read = total_docs_read.load(.acquire);
-        std.debug.assert(_total_docs_read == line_offsets.items.len - 2);
+        std.debug.assert(_total_docs_read == line_offsets.items.len - 1);
         progress_bar.update(_total_docs_read);
 
         const time_end = std.time.milliTimestamp();
@@ -1564,10 +1564,10 @@ pub const QueryHandler = struct {
 };
 
 pub fn main() !void {
-    const API = false;
+    const API = true;
 
     // const filename: []const u8 = "../tests/mb_small.csv";
-    const filename: []const u8 = "../tests/mb.csv";
+   const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();

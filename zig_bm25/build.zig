@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     // link libc
-    exe.linkLibC();
+    // exe.linkLibC();
     exe.root_module.addImport("zap", zap.module("zap"));
 
     b.installArtifact(exe);

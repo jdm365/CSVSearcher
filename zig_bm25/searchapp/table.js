@@ -115,13 +115,16 @@ document.addEventListener("DOMContentLoaded", function() {
 	})();
 });
 
+const escapeMap = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+};
+
 function escapeHtml(text) {
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+    return text.replace(/[&<>"']/g, m => escapeMap[m]);
 }
 
 function highlightMatchingText(row, cell, value, columnDef, dataContext) {
@@ -141,7 +144,7 @@ function highlightMatchingText(row, cell, value, columnDef, dataContext) {
 	// Only do first 6 tokens
 	tokens = tokens.slice(0, 6);
 
-	var result = escapeHtml(value);
+	var result = value;
 	tokens.forEach(token => {
 		// Token must contain at least one alphanumeric character
 		if (!/[a-z0-9]/i.test(token)) {
