@@ -271,6 +271,7 @@ const BM25Partition = struct {
     II: []InvertedIndex,
     line_offsets: []usize,
     allocator: std.mem.Allocator,
+    string_arena: std.heap.ArenaAllocator,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -281,6 +282,7 @@ const BM25Partition = struct {
             .II = try allocator.alloc(InvertedIndex, num_search_cols),
             .line_offsets = line_offsets,
             .allocator = allocator,
+            .string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
         };
 
         for (0..num_search_cols) |idx| {
@@ -296,6 +298,7 @@ const BM25Partition = struct {
             self.II[i].deinit(self.allocator);
         }
         self.allocator.free(self.II);
+        self.string_arena.deinit();
     }
 
     pub fn constructFromTokenStream(
@@ -389,12 +392,11 @@ const BM25Partition = struct {
 
 
 
-const IndexManager = struct {
+pub const IndexManager = struct {
     index_partitions: []BM25Partition,
     input_filename: []const u8,
     allocator: std.mem.Allocator,
     string_arena: std.heap.ArenaAllocator,
-    thread_safe_arena_allocator: std.heap.ThreadSafeAllocator,
     search_cols: std.StringHashMap(Column),
     cols: std.ArrayList([]const u8),
     file_handles: []std.fs.File,
@@ -411,10 +413,6 @@ const IndexManager = struct {
 
         var string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         var cols = std.ArrayList([]const u8).init(allocator);
-
-        const thread_safe_arena_allocator = std.heap.ThreadSafeAllocator{
-            .child_allocator = string_arena.allocator(),
-            };
 
         var header_bytes: usize = 0;
 
@@ -466,7 +464,6 @@ const IndexManager = struct {
             .input_filename = input_filename,
             .allocator = allocator,
             .string_arena = string_arena,
-            .thread_safe_arena_allocator = thread_safe_arena_allocator,
             .search_cols = search_col_map,
             .cols = cols,
             .tmp_dir = dir_name,
@@ -519,7 +516,6 @@ const IndexManager = struct {
     }
 
     fn addTerm(
-        self: *IndexManager,
         term: *[MAX_TERM_LENGTH]u8,
         term_len: usize,
         doc_id: u32,
@@ -533,8 +529,7 @@ const IndexManager = struct {
 
         const gop = try index_partition.II[col_idx].vocab.getOrPut(term[0..term_len]);
         if (!gop.found_existing) {
-            // const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
-            const term_copy = try self.thread_safe_arena_allocator.allocator().dupe(u8, term[0..term_len]);
+            const term_copy = try index_partition.string_arena.allocator().dupe(u8, term[0..term_len]);
 
             gop.key_ptr.* = term_copy;
             gop.value_ptr.* = index_partition.II[col_idx].num_terms;
@@ -553,7 +548,6 @@ const IndexManager = struct {
     }
 
     pub fn processDocRfc4180(
-        self: *IndexManager,
         token_stream: *TokenStream,
         index_partition: *BM25Partition,
         doc_id: u32,
@@ -604,7 +598,7 @@ const IndexManager = struct {
                         continue;
                     }
 
-                    try self.addTerm(
+                    try IndexManager.addTerm(
                         term, 
                         cntr, 
                         doc_id, 
@@ -642,7 +636,7 @@ const IndexManager = struct {
                             continue;
                         }
 
-                        try self.addTerm(
+                        try IndexManager.addTerm(
                             term, 
                             cntr, 
                             doc_id, 
@@ -660,7 +654,7 @@ const IndexManager = struct {
                     },
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
-                            try self.addTerm(
+                            try IndexManager.addTerm(
                                 term, 
                                 cntr, 
                                 doc_id, 
@@ -688,7 +682,7 @@ const IndexManager = struct {
         if (cntr > 0) {
             std.debug.assert(index_partition.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
 
-            try self.addTerm(
+            try IndexManager.addTerm(
                 term, 
                 cntr, 
                 doc_id, 
@@ -916,7 +910,7 @@ const IndexManager = struct {
                 }
 
                 std.debug.assert(line_offset < next_line_offset);
-                try self.processDocRfc4180(
+                try IndexManager.processDocRfc4180(
                     &token_streams[search_col_idx],
                     &self.index_partitions[partition_idx],
                     @intCast(doc_id), 
@@ -1535,8 +1529,10 @@ pub const QueryHandler = struct {
 };
 
 pub fn main() !void {
-    // const filename: []const u8 = "../tests/mb_small.csv";
-    const filename: []const u8 = "../tests/mb.csv";
+    const API = true;
+
+    const filename: []const u8 = "../tests/mb_small.csv";
+    // const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = blk: {
@@ -1552,6 +1548,7 @@ pub fn main() !void {
     var search_cols = std.ArrayList([]const u8).init(allocator);
     try search_cols.append("TITLE");
     try search_cols.append("ARTIST");
+    try search_cols.append("ALBUM");
 
     var index_manager = try IndexManager.init(filename, &search_cols, allocator);
     try index_manager.readFile();
@@ -1567,11 +1564,13 @@ pub fn main() !void {
 
     try query_map.put("TITLE", "FRANK SINATRA");
     try query_map.put("ARTIST", "FRANK SINATRA");
+    try query_map.put("ALBUM", "FRANK SINATRA");
 
     var boost_factors = std.ArrayList(f32).init(allocator);
     defer boost_factors.deinit();
 
     try boost_factors.append(2.0);
+    try boost_factors.append(1.0);
     try boost_factors.append(1.0);
 
     try index_manager.query(
@@ -1586,34 +1585,36 @@ pub fn main() !void {
         std.debug.print("{s},", .{index_manager.result_strings[0].items[start_byte..end_byte]});
     }
 
-    var query_handler = QueryHandler.init(
-        &index_manager,
-        boost_factors,
-        query_map,
-        allocator,
-    );
+    if (API) {
+        var query_handler = QueryHandler.init(
+            &index_manager,
+            boost_factors,
+            query_map,
+            allocator,
+        );
 
-    var simple_router = zap.Router.init(allocator, .{});
+        var simple_router = zap.Router.init(allocator, .{});
 
-    try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
-    try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
-    try simple_router.handle_func("/get_search_columns", &query_handler, &QueryHandler.get_search_columns);
-    try simple_router.handle_func("/healthcheck", &query_handler, &QueryHandler.healthcheck);
+        try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
+        try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
+        try simple_router.handle_func("/get_search_columns", &query_handler, &QueryHandler.get_search_columns);
+        try simple_router.handle_func("/healthcheck", &query_handler, &QueryHandler.healthcheck);
 
-    defer simple_router.deinit();
-    var listener = zap.HttpListener.init(.{
-        .port = 5000,
-        .on_request = simple_router.on_request_handler(),
-        .log = true,
-    });
-    try listener.listen();
+        defer simple_router.deinit();
+        var listener = zap.HttpListener.init(.{
+            .port = 5000,
+            .on_request = simple_router.on_request_handler(),
+            .log = true,
+        });
+        try listener.listen();
 
+    
+        std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
 
-    std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
-
-    // start worker threads
-    zap.start(.{
-        .threads = 1,
-        .workers = 1,
-    });
+        // start worker threads
+        zap.start(.{
+            .threads = 1,
+            .workers = 1,
+        });
+    }
 }
