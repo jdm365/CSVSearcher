@@ -653,10 +653,7 @@ pub const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
 
-        std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
         const file_hash = blk: {
             var hash: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
@@ -673,11 +670,6 @@ pub const IndexManager = struct {
             try std.fs.cwd().makeDir(dir_name);
         };
 
-        // init file handles
-        const file_handles = try allocator.alloc(std.fs.File, num_partitions);
-        for (0..num_partitions) |idx| {
-            file_handles[idx] = try std.fs.cwd().openFile(input_filename, .{});
-        }
         std.debug.assert(cols.items.len > 0);
 
         var result_positions: [MAX_NUM_RESULTS][]TermPos = undefined;
@@ -689,14 +681,14 @@ pub const IndexManager = struct {
         }
 
         return IndexManager{
-            .index_partitions = try allocator.alloc(BM25Partition, num_partitions),
+            .index_partitions = undefined,
             .input_filename = input_filename,
             .allocator = allocator,
             .string_arena = string_arena,
             .search_cols = search_col_map,
             .cols = cols,
             .tmp_dir = dir_name,
-            .file_handles = file_handles,
+            .file_handles = undefined,
             .result_positions = result_positions,
             .result_strings = result_strings,
             .header_bytes = header_bytes,
@@ -704,9 +696,9 @@ pub const IndexManager = struct {
     }
     
     pub fn deinit(self: *IndexManager) !void {
-        for (0..self.index_partitions.len) |i| {
-            self.index_partitions[i].deinit();
-            self.file_handles[i].close();
+        for (0..self.index_partitions.len) |idx| {
+            self.index_partitions[idx].deinit();
+            self.file_handles[idx].close();
         }
         self.allocator.free(self.file_handles);
         self.allocator.free(self.index_partitions);
@@ -728,14 +720,14 @@ pub const IndexManager = struct {
     fn printDebugInfo(self: *const IndexManager) void {
         std.debug.print("\n=====================================================\n", .{});
 
-        for (0..self.index_partitions.len) |i| {
-            std.debug.print("Partition {d}\n", .{i});
+        for (0..self.index_partitions.len) |idx| {
+            std.debug.print("Partition {d}\n", .{idx});
             std.debug.print("---------------------------------------\n", .{});
 
-            for (0..self.index_partitions[i].II.len) |j| {
-                const II = self.index_partitions[i].II[j];
+            for (0..self.index_partitions[idx].II.len) |jdx| {
+                const II = self.index_partitions[idx].II[jdx];
 
-                std.debug.print("Column {d}\n", .{j});
+                std.debug.print("Column {d}\n", .{jdx});
                 std.debug.print("Num terms: {d}\n", .{II.num_terms});
                 std.debug.print("Num docs: {d}\n", .{II.num_docs});
                 std.debug.print("Avg doc size: {d}\n\n", .{II.avg_doc_size});
@@ -1036,7 +1028,17 @@ pub const IndexManager = struct {
         const mb_s: usize = @as(usize, @intFromFloat(0.001 * @as(f32, @floatFromInt(file_size)) / @as(f32, @floatFromInt(execution_time_ms))));
 
         const num_lines = line_offsets.items.len - 1;
-        const num_partitions = self.index_partitions.len;
+
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
+
+        self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
+        self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
+        for (0..num_partitions) |idx| {
+            self.file_handles[idx] = try std.fs.cwd().openFile(self.input_filename, .{});
+        }
+
+        std.debug.print("Writing {d} partitions\n", .{num_partitions});
 
         std.debug.print("Read {d} lines in {d}ms\n", .{num_lines, execution_time_ms});
         std.debug.print("{d}MB/s\n", .{mb_s});
@@ -1564,7 +1566,7 @@ pub const QueryHandler = struct {
 };
 
 pub fn main() !void {
-    const API = true;
+    const API = false;
 
     // const filename: []const u8 = "../tests/mb_small.csv";
    const filename: []const u8 = "../tests/mb.csv";

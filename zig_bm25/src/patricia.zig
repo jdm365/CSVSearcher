@@ -9,17 +9,18 @@ const InsertPath = enum(u2) {
     split,
     make_terminal,
     traverse,
+    create,
 };
 
 
 const Node = extern struct {
     // num_bytes_prefix is the total number of bytes used by the prefix.
     // Non-byte aligned prefixes are allowed, so to get the differ
-    prefix: SS_ptr,        // 8
-    value: bitfield_u32,   // 12
-    num_bits_prefix: u32,  // 16
+    value: bitfield_u32,   // 4
+    num_bits_prefix: u32,  // 8
+    prefix: SS_ptr,        // 16
 
-    left_child: ?*Node,    // 24
+    left_child:  ?*Node,   // 24
     right_child: ?*Node,   // 32
 
     const SS_ptr = extern union {
@@ -35,14 +36,14 @@ const Node = extern struct {
     fn init(allocator: std.mem.Allocator) !*Node {
         const node = try allocator.create(Node);
         node.* = Node{
-            .prefix = SS_ptr{
-                .Inline = undefined,
-            },
             .value = bitfield_u32{
                 .terminal = false,
                 .value = 0,
             },
             .num_bits_prefix = 0,
+            .prefix = SS_ptr{
+                .Inline = undefined,
+            },
             .left_child = null,
             .right_child = null,
         };
@@ -210,6 +211,30 @@ const Node = extern struct {
         start_bit: *usize,
         diff_bit: *u8,
         ) InsertPath {
+
+        ///////////////////////////////////////////////////////////////////////////////////
+        // FOUR CASES TO HANDLE:
+        // 1. Matched entire key, value not finished.
+        //    - If matching child (0|1) exists, traverse. Set current node to child.
+        //    - If no matching child, create new node. Write Value. RETURN.
+        //    - SWITCH LABEL(s): traverse / create
+        //
+        // 2. Matched entire key, value finished.
+        //    - Matched node. Overwrite Value. RETURN.
+        //    - SWITCH LABEL(s): make_terminal
+        //
+        // 3. Matched entire value, key not finished.
+        //    - Split node. 
+        //    - Create new child node with remaining prefix.
+        //    - SWITCH LABEL(s): create
+        //
+        // 4. Matched partial value, key not finished.
+        //    - Split node.
+        //    - Truncate current node's prefix to bit before differing value.
+        //    - Create new child node with remaining prefix.
+        //    - SWITCH LABEL(s): split
+        ///////////////////////////////////////////////////////////////////////////////////
+
         const key_size = (key.len * 8) - start_bit.*;
         var idx: usize = 0;
 
@@ -217,9 +242,8 @@ const Node = extern struct {
 
         const is_inline = (self.num_bits_prefix <= 64);
 
-        // std.debug.print("KEY SIZE: {d}\n", .{key.len * 8});
-        // std.debug.print("PREFIX SIZE: {d}\n\n", .{self.num_bits_prefix});
         if (key_size < self.num_bits_prefix) {
+            // Only (2. make_terminal) and (3. split) possible.
             const num_bits = key_size;
 
             while (idx < num_bits) {
@@ -246,6 +270,7 @@ const Node = extern struct {
             return InsertPath.split;
 
         } else if (key_size == self.num_bits_prefix) {
+            // Only (2. make_terminal) and (3. split) possible.
             const num_bits = key_size;
 
             while (idx < num_bits) {
@@ -259,7 +284,6 @@ const Node = extern struct {
 
                 if (self_bit != key_bit) {
                     diff_bit.* = key_bit;
-                    std.debug.print("MATCHING BITS GDB: \n", .{});
                     return InsertPath.split;
                 }
 
@@ -340,11 +364,6 @@ const PatriciaTrie = struct {
             try current.?.setPrefix(self.allocator, key, 0, key.len * 8);
             return;
         }
-
-        // THREE CASES TO HANDLE:
-        // split - If matched entire key and not done with current's prefix. Then split node. return.
-        // make_terminal - If matched entire key and equal to current's prefix. Make terminal. return.
-        // traverse - If matched entire or partial current prefix and not done with key. Change current node to child. If child is null, create new node and continue.
 
         var diff_bit: u8 = 0;
         while (i < key.len * 8) {
@@ -527,7 +546,7 @@ test "bench" {
 
     var trie = try PatriciaTrie.init(allocator);
 
-    const _N: usize = 1000;
+    const _N: usize = 1;
     const num_chars: usize = 6;
     const rand = std.crypto.random;
     for (0.._N) |i| {
