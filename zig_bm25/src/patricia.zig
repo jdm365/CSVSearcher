@@ -243,7 +243,7 @@ const Node = extern struct {
         const is_inline = (self.num_bits_prefix <= 64);
 
         if (key_size < self.num_bits_prefix) {
-            // Only (2. make_terminal) and (3. split) possible.
+            // (1), (3), and (4) possible.
             const num_bits = key_size;
 
             while (idx < num_bits) {
@@ -270,7 +270,7 @@ const Node = extern struct {
             return InsertPath.split;
 
         } else if (key_size == self.num_bits_prefix) {
-            // Only (2. make_terminal) and (3. split) possible.
+            // Only time where (2. make_terminal) is possible.
             const num_bits = key_size;
 
             while (idx < num_bits) {
@@ -294,6 +294,7 @@ const Node = extern struct {
             return InsertPath.make_terminal;
 
         } else {
+            // (3) and (4) possible.
             const num_bits = self.num_bits_prefix;
 
             while (idx < num_bits) {
