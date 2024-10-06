@@ -302,6 +302,8 @@ const InvertedIndex = struct {
         }
         avg_doc_size /= @floatFromInt(self.num_docs);
         self.avg_doc_size = @floatCast(avg_doc_size);
+
+        std.debug.print("Total postings size: {d}MB\n", .{postings_size * 4 / 1_048_576});
     }
 };
 
