@@ -110,7 +110,6 @@ const Node = extern struct {
         xor = prefix_byte ^ self_byte;
         const leading_zeroes = @clz(xor);
         start_bit.* += leading_zeroes;
-        // diff_bit.* = xor & (@as(u8, 1) << (7 - bit_idx));
         diff_bit.* = xor & (@as(u8, 1) << @intCast(leading_zeroes % 8));
 
         return (xor == 0);
@@ -235,30 +234,40 @@ const Node = extern struct {
         //    - SWITCH LABEL(s): split
         ///////////////////////////////////////////////////////////////////////////////////
 
-        const key_size = (key.len * 8) - start_bit.*;
-        var idx: usize = 0;
+        const key_size   = (key.len * 8) - start_bit.*;
+        const value_size = self.num_bits_prefix;
 
         std.debug.assert(key_size > 0);
 
         const is_inline = (self.num_bits_prefix <= 64);
 
-        if (key_size < self.num_bits_prefix) {
-            // (1), (3), and (4) possible.
-            const num_bits = key_size;
+        // Go bit by bit for first iteration.
 
-            while (idx < num_bits) {
+        var idx: usize = 0;
+        if (key_size < value_size) {
+
+            while (idx < key_size) {
+
                 const key_byte_idx: u3 = @intCast(start_bit.* / 8);
-                const key_bit_idx: u3  = @intCast(start_bit.* % 8);
-                const key_bit  = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
+                const key_bit_idx:  u3 = @intCast(start_bit.* % 8);
+                const key_bit:      u1 = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
 
-                const self_byte_idx = idx / 8;
-                const self_bit_idx: u3 = @intCast(idx % 8);
-                const self_bit = self.prefix.accessPrefix(self_byte_idx, is_inline) & (@as(u8, 1) << self_bit_idx);
+                const value_byte_idx: u3 = idx / 8;
+                const value_bit_idx:  u3 = @intCast(idx % 8);
+                const value_bit:      u1 = self.prefix.accessPrefix(
+                    value_byte_idx, 
+                    is_inline,
+                    ) & (@as(u8, 1) << value_bit_idx);
 
-                if (self_bit != key_bit) {
+                if (value_bit != key_bit) {
                     diff_bit.* = key_bit;
 
-                    // Partial prefix match. Split node.
+                    if (idx == value_size) {
+                        // Partial key and entire value match. Create new child node.
+                        return InsertPath.create;
+                    }
+
+                    // Partial key and partial value match. Split node.
                     return InsertPath.split;
                 }
 
@@ -266,24 +275,29 @@ const Node = extern struct {
                 idx         += 1;
             }
 
-            // Full prefix match, but current node's prefix not complete. Traverse.
-            return InsertPath.split;
+            // Full key match, value not finished. Traverse.
+            return InsertPath.traverse;
 
         } else if (key_size == self.num_bits_prefix) {
-            // Only time where (2. make_terminal) is possible.
-            const num_bits = key_size;
 
-            while (idx < num_bits) {
+            var key_bit:   u1 = 0;
+            var value_bit: u1 = 0;
+            while (idx < key_size) {
                 const key_byte_idx: u3 = @intCast(start_bit.* / 8);
-                const key_bit_idx: u3  = @intCast(start_bit.* % 8);
-                const key_bit  = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
+                const key_bit_idx:  u3  = @intCast(start_bit.* % 8);
+                key_bit = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
 
-                const self_byte_idx = idx / 8;
-                const self_bit_idx: u3 = @intCast(idx % 8);
-                const self_bit = self.prefix.accessPrefix(self_byte_idx, is_inline) & (@as(u8, 1) << self_bit_idx);
+                const value_byte_idx: u3 = idx / 8;
+                const value_bit_idx:  u3 = @intCast(idx % 8);
+                value_bit = self.prefix.accessPrefix(
+                    value_byte_idx, 
+                    is_inline,
+                    ) & (@as(u8, 1) << value_bit_idx);
 
-                if (self_bit != key_bit) {
+                if (value_bit != key_bit) {
                     diff_bit.* = key_bit;
+
+                    // Partial key and partial value match. Split node.
                     return InsertPath.split;
                 }
 
@@ -291,24 +305,32 @@ const Node = extern struct {
                 idx         += 1;
             }
 
+            diff_bit.* = key_bit;
+
+            // Entire key and partial value match. Make terminal.
             return InsertPath.make_terminal;
 
         } else {
-            // (3) and (4) possible.
-            const num_bits = self.num_bits_prefix;
 
-            while (idx < num_bits) {
+            var key_bit:   u1 = 0;
+            var value_bit: u1 = 0;
+            while (idx < self.num_bits_prefix) {
                 const key_byte_idx: u3 = @intCast(start_bit.* / 8);
                 const key_bit_idx: u3  = @intCast(start_bit.* % 8);
-                const key_bit  = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
+                key_bit = key[key_byte_idx] & (@as(u8, 1) << key_bit_idx);
 
 
-                const self_byte_idx = idx / 8;
-                const self_bit_idx: u3 = @intCast(idx % 8);
-                const self_bit = self.prefix.accessPrefix(self_byte_idx, is_inline) & (@as(u8, 1) << self_bit_idx);
+                const value_byte_idx = idx / 8;
+                const value_bit_idx: u3 = @intCast(idx % 8);
+                value_bit = self.prefix.accessPrefix(
+                    value_byte_idx, 
+                    is_inline,
+                    ) & (@as(u8, 1) << value_bit_idx);
 
-                if (self_bit != key_bit) {
+                if (value_bit != key_bit) {
                     diff_bit.* = key_bit;
+
+                    // Partial key and partial value match. Split node.
                     return InsertPath.split;
                 }
 
@@ -316,6 +338,7 @@ const Node = extern struct {
                 idx         += 1;
             }
 
+            // Entire key and partial value match. Split node.
             return InsertPath.traverse;
         }
     }
