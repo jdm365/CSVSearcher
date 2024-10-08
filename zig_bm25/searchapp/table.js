@@ -10,11 +10,14 @@ var data = [];
 var search_columns = [];
 var columns = [];
 
+PORT = 5000;
+
 async function get_columns() {
 	try {
-		const response = await fetch('http://localhost:5000/get_columns');
+		const response = await fetch(`http://localhost:${PORT}/get_columns`);
 		if (!response.ok) {
 			throw new Error('Network response was not ok');
+			console.error('Error fetching columns:', error);
 		}
 		const data = await response.json();
 		
@@ -41,7 +44,7 @@ async function get_columns() {
 
 async function get_search_columns() {
 	try {
-		const response = await fetch('http://localhost:5000/get_search_columns');
+		const response = await fetch(`http://localhost:${PORT}/get_search_columns`);
 		if (!response.ok) {
 			throw new Error('Network response was not ok');
 		}
@@ -62,7 +65,7 @@ async function waitForPort(port, retryInterval = 10000, maxRetries = 60) {
         try {
             // Attempt to fetch a resource from the server on the specified port
             const response = await fetch(
-				`http://localhost:${port}/healthcheck`, 
+				`http://localhost:${PORT}/healthcheck`, 
 				// Make no-cors request to avoid CORS policy blocking the request
 				{ method: 'HEAD' }
 			);
@@ -84,7 +87,7 @@ async function waitForPort(port, retryInterval = 10000, maxRetries = 60) {
 
 document.addEventListener("DOMContentLoaded", function() {
 	(async function() {
-		await waitForPort(5000);
+		await waitForPort(PORT);
 		columns = await get_columns();
 		grid = new Slick.Grid("#myGrid", data, columns, options);
 		search();
@@ -181,7 +184,7 @@ function search() {
 	let text_string = new URLSearchParams(params).toString();
 	let query = `${text_string}`;
 
-	fetch(`http://localhost:5000/search?${query}`)
+	fetch(`http://localhost:${PORT}/search?${query}`)
 		.then(response => response.json())
 		.then(data => {
 			updateGrid(data);

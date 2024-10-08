@@ -302,8 +302,6 @@ const InvertedIndex = struct {
         }
         avg_doc_size /= @floatFromInt(self.num_docs);
         self.avg_doc_size = @floatCast(avg_doc_size);
-
-        std.debug.print("Total postings size: {d}MB\n", .{postings_size * 4 / 1_048_576});
     }
 };
 
@@ -638,7 +636,7 @@ pub const IndexManager = struct {
 
     pub fn init(
         input_filename: []const u8,
-        search_cols: *std.ArrayList([]const u8),
+        search_cols: *std.ArrayList([]u8),
         allocator: std.mem.Allocator,
         ) !IndexManager {
 
@@ -741,7 +739,7 @@ pub const IndexManager = struct {
 
     fn readCSVHeader(
         input_filename: []const u8,
-        search_cols: *std.ArrayList([]const u8),
+        search_cols: *std.ArrayList([]u8),
         cols: *std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
         string_arena: std.mem.Allocator,
@@ -769,6 +767,12 @@ pub const IndexManager = struct {
         var term: [MAX_TERM_LENGTH]u8 = undefined;
         var cntr: usize = 0;
 
+        for (search_cols.items) |*col| {
+            _ = std.ascii.upperString(col.*, col.*);
+            std.debug.print("Search col: {s}\n", .{col.*});
+        }
+
+
         var byte_pos: usize = 0;
         line: while (true) {
             const is_quoted = f_data[byte_pos] == '"';
@@ -787,6 +791,7 @@ pub const IndexManager = struct {
 
                             for (0..search_cols.items.len) |idx| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[idx])) {
+                                    std.debug.print("Found search col: {s}\n", .{search_cols.items[idx]});
                                     const copy_term = try string_arena.dupe(u8, term[0..cntr]);
                                     try col_map.put(
                                         copy_term, 
@@ -821,6 +826,7 @@ pub const IndexManager = struct {
 
                             for (0..search_cols.items.len) |idx| {
                                 if (std.mem.eql(u8, term[0..cntr], search_cols.items[idx])) {
+                                    std.debug.print("Found search col: {s}\n", .{search_cols.items[idx]});
                                     const copy_term = try string_arena.dupe(u8, term[0..cntr]);
                                     try col_map.put(
                                         copy_term, 
@@ -1358,9 +1364,9 @@ pub const QueryHandler = struct {
         };
     }
 
-    pub fn deinit(self: *QueryHandler) !void {
+    pub fn deinit(self: *QueryHandler) void {
         self.json_objects.deinit();
-        self.ouput_buffer.deinit();
+        self.output_buffer.deinit();
     }
 
     fn on_request(
@@ -1380,12 +1386,6 @@ pub const QueryHandler = struct {
                 self.query_map,
                 self.allocator,
             );
-
-            var iterator = self.query_map.iterator();
-            while (iterator.next()) |item| {
-                std.debug.print("KEY: {s}\n",   .{item.key_ptr.*});
-                std.debug.print("VALUE: {s}\n", .{item.value_ptr.*});
-            }
 
             // Do search.
             try self.index_manager.query(
@@ -1432,7 +1432,14 @@ pub const QueryHandler = struct {
         self: *QueryHandler,
         r: zap.Request,
     ) !void {
-        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        if (r.path == null) {
+            std.debug.print("Request is null\n", .{});
+            return;
+        }
+
+        r.setHeader("Access-Control-Allow-Origin", "*") catch |err| {
+            std.debug.print("Error setting header: {?}\n", .{err});
+        };
 
         self.output_buffer.clearRetainingCapacity();
 
@@ -1567,26 +1574,34 @@ pub const QueryHandler = struct {
     }
 };
 
-pub fn main() !void {
+fn test_main() !void {
     const API = false;
 
-    // const filename: []const u8 = "../tests/mb_small.csv";
-   const filename: []const u8 = "../tests/mb.csv";
+    const filename: []const u8 = "../tests/mb_small.csv";
+   // const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var search_cols = std.ArrayList([]const u8).init(allocator);
-    try search_cols.append("TITLE");
-    try search_cols.append("ARTIST");
-    try search_cols.append("ALBUM");
+    var search_cols = std.ArrayList([]u8).init(allocator);
+    const title:  []u8 = try allocator.dupe(u8, "Title");
+    const artist: []u8 = try allocator.dupe(u8, "ARTIST");
+    const album:  []u8 = try allocator.dupe(u8, "ALBUM");
+
+    try search_cols.append(title);
+    try search_cols.append(artist);
+    try search_cols.append(album);
 
     var index_manager = try IndexManager.init(filename, &search_cols, allocator);
     try index_manager.readFile();
 
-    index_manager.printDebugInfo();
+    // index_manager.printDebugInfo();
 
     defer {
+        allocator.free(title);
+        allocator.free(artist);
+        allocator.free(album);
+
         search_cols.deinit();
         index_manager.deinit() catch {};
         _ = gpa.deinit();
@@ -1619,12 +1634,13 @@ pub fn main() !void {
     }
 
     if (API) {
-        var query_handler = QueryHandler.init(
+        var query_handler = try QueryHandler.init(
             &index_manager,
             boost_factors,
             query_map,
             allocator,
         );
+        query_handler.deinit();
 
         var simple_router = zap.Router.init(allocator, .{});
 
@@ -1650,4 +1666,110 @@ pub fn main() !void {
             .workers = 1,
         });
     }
+}
+
+fn main_cli_runner() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    var filename: []const u8 = undefined;
+
+    var search_cols = std.ArrayList([]u8).init(allocator);
+
+    var idx: usize = 0;
+    while (args.next()) |arg| {
+        if (idx == 0) {
+            // Skip binary name.
+        } else if (idx == 1) {
+            filename = arg;
+        } else {
+            try search_cols.append(try allocator.dupe(u8, arg));
+        }
+        idx += 1;
+    }
+    if (idx < 3) {
+        @panic("Add filename - Usage: ./bm25 <filename> <search_col1> <search_col2> ...");
+    }
+
+
+    var index_manager = try IndexManager.init(filename, &search_cols, allocator);
+    try index_manager.readFile();
+
+    // index_manager.printDebugInfo();
+
+    defer {
+        for (search_cols.items) |col| {
+            allocator.free(col);
+        }
+
+        search_cols.deinit();
+        index_manager.deinit() catch {};
+        _ = gpa.deinit();
+    }
+
+    var query_map = std.StringHashMap([]const u8).init(allocator);
+    var boost_factors = std.ArrayList(f32).init(allocator);
+    defer query_map.deinit();
+    defer boost_factors.deinit();
+
+    for (search_cols.items) |col| {
+        try query_map.put(col, "test");
+        try boost_factors.append(1.0);
+    }
+
+    try index_manager.query(
+        query_map,
+        10,
+        boost_factors,
+        );
+
+    var query_handler = try QueryHandler.init(
+        &index_manager,
+        boost_factors,
+        query_map,
+        allocator,
+    );
+    query_handler.deinit();
+
+    var simple_router = zap.Router.init(
+        allocator, 
+        .{},
+        );
+    defer simple_router.deinit();
+
+    try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
+    try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
+    try simple_router.handle_func("/get_search_columns", &query_handler, &QueryHandler.get_search_columns);
+    try simple_router.handle_func("/healthcheck", &query_handler, &QueryHandler.healthcheck);
+
+    var listener = zap.HttpListener.init(.{
+        .port = 5000,
+        .on_request = simple_router.on_request_handler(),
+        .log = true,
+        .max_clients = 10_000,
+    });
+    try listener.listen();
+
+
+    std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
+
+    // start worker threads
+    zap.start(.{
+        .threads = 1,
+        .workers = 1,
+    });
+
+    // Open file ./searchapp/index.html
+    // _ = try std.posix.open("./searchapp/index.html",
+        // .{},
+        // 0o660,
+    // );
+}
+
+pub fn main() !void {
+    // try test_main();
+    try main_cli_runner();
 }
