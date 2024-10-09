@@ -17,7 +17,6 @@ async function get_columns() {
 		const response = await fetch(`http://localhost:${PORT}/get_columns`);
 		if (!response.ok) {
 			throw new Error('Network response was not ok');
-			console.error('Error fetching columns:', error);
 		}
 		const data = await response.json();
 		

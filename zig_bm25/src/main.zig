@@ -1365,6 +1365,9 @@ pub const QueryHandler = struct {
     }
 
     pub fn deinit(self: *QueryHandler) void {
+        for (self.json_objects.items) |*json| {
+            json.object.deinit();
+        }
         self.json_objects.deinit();
         self.output_buffer.deinit();
     }
@@ -1384,7 +1387,7 @@ pub const QueryHandler = struct {
             try parse_keys(
                 query,
                 self.query_map,
-                self.allocator,
+                self.index_manager.string_arena.allocator(),
             );
 
             // Do search.
@@ -1396,7 +1399,7 @@ pub const QueryHandler = struct {
 
             for (0..10) |idx| {
                 try self.json_objects.append(try csvLineToJson(
-                    self.allocator,
+                    self.index_manager.string_arena.allocator(),
                     self.index_manager.result_strings[idx].items,
                     self.index_manager.result_positions[idx],
                     self.index_manager.cols,
@@ -1408,6 +1411,7 @@ pub const QueryHandler = struct {
             var response = std.json.Value{
                 .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
             };
+            defer response.object.deinit();
 
             try response.object.put(
                 "results",
@@ -1669,6 +1673,11 @@ fn test_main() !void {
 }
 
 fn main_cli_runner() !void {
+    // Embed files
+    const index_html = @embedFile("index.html");
+    const style_css = @embedFile("style.css");
+    const table_js = @embedFile("table.js");
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -1698,33 +1707,49 @@ fn main_cli_runner() !void {
     var index_manager = try IndexManager.init(filename, &search_cols, allocator);
     try index_manager.readFile();
 
+    // Write files to disk
+    var output_filename = try std.fmt.allocPrint(
+        index_manager.allocator, 
+        "{s}/index.html", 
+        .{index_manager.tmp_dir}
+        );
+    var output_file = try std.fs.cwd().createFile(
+        output_filename, 
+        .{ .read = true },
+        );
+    _ = try output_file.write(index_html);
+
+    output_filename = try std.fmt.allocPrint(
+        index_manager.allocator, 
+        "{s}/style.css",
+        .{index_manager.tmp_dir}
+        );
+    output_file = try std.fs.cwd().createFile(
+        output_filename, 
+        .{ .read = true },
+        );
+    _ = try output_file.write(style_css);
+
+    output_filename = try std.fmt.allocPrint(
+        index_manager.allocator, 
+        "{s}/table.js",
+        .{index_manager.tmp_dir}
+        );
+    output_file = try std.fs.cwd().createFile(
+        output_filename, 
+        .{ .read = true },
+        );
+    _ = try output_file.write(table_js);
+
     // index_manager.printDebugInfo();
-
-    defer {
-        for (search_cols.items) |col| {
-            allocator.free(col);
-        }
-
-        search_cols.deinit();
-        index_manager.deinit() catch {};
-        _ = gpa.deinit();
-    }
 
     var query_map = std.StringHashMap([]const u8).init(allocator);
     var boost_factors = std.ArrayList(f32).init(allocator);
-    defer query_map.deinit();
-    defer boost_factors.deinit();
 
     for (search_cols.items) |col| {
         try query_map.put(col, "test");
         try boost_factors.append(1.0);
     }
-
-    try index_manager.query(
-        query_map,
-        10,
-        boost_factors,
-        );
 
     var query_handler = try QueryHandler.init(
         &index_manager,
@@ -1732,13 +1757,12 @@ fn main_cli_runner() !void {
         query_map,
         allocator,
     );
-    query_handler.deinit();
+
 
     var simple_router = zap.Router.init(
         allocator, 
         .{},
         );
-    defer simple_router.deinit();
 
     try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
     try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
@@ -1749,9 +1773,34 @@ fn main_cli_runner() !void {
         .port = 5000,
         .on_request = simple_router.on_request_handler(),
         .log = true,
-        .max_clients = 10_000,
     });
     try listener.listen();
+
+    const full_path = try std.mem.concat(
+        index_manager.string_arena.allocator(),
+        u8, 
+        &[_][]const u8{index_manager.tmp_dir, "/index.html"}
+        );
+
+    var cmd = std.process.Child.init(&[_][]const u8{"open", full_path}, allocator);
+    try cmd.spawn();
+    _ = try cmd.wait();
+
+    defer {
+        for (search_cols.items) |col| {
+            allocator.free(col);
+        }
+
+        search_cols.deinit();
+        query_map.deinit();
+        boost_factors.deinit();
+
+        query_handler.deinit();
+        simple_router.deinit();
+
+        index_manager.deinit() catch {};
+        _ = gpa.deinit();
+    }
 
 
     std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
@@ -1761,12 +1810,6 @@ fn main_cli_runner() !void {
         .threads = 1,
         .workers = 1,
     });
-
-    // Open file ./searchapp/index.html
-    // _ = try std.posix.open("./searchapp/index.html",
-        // .{},
-        // 0o660,
-    // );
 }
 
 pub fn main() !void {

@@ -25,11 +25,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    // link libc
-    // exe.linkLibC();
     exe.root_module.addImport("zap", zap.module("zap"));
 
     b.installArtifact(exe);
+
+    // Add install command to place binary in /usr/local/bin
+    // const install_cmd = b.addInstallArtifact(exe, .{.dest_dir = "/usr/local/bin/zig_bm25"});
+    const install_cmd = b.addInstallArtifact(exe, .{.dest_dir = .{
+        .override = .{ .custom = "/usr/local/bin/zig_bm25" },
+    }});
+    install_cmd.step.dependOn(b.getInstallStep());
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -40,6 +45,9 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    const install_step = b.step("install_local", "Install the app");
+    install_step.dependOn(&install_cmd.step);
 
     const tests = b.addTest(.{
             .target = target,
