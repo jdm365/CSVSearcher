@@ -30,6 +30,11 @@ const Column = struct {
     II_idx: usize,
 };
 
+const ColTokenPair = struct {
+    col_idx: u32,
+    token: u32,
+};
+
 pub fn StaticIntegerSet(comptime n: u32) type {
     return struct {
         const Self = @This();
@@ -67,7 +72,6 @@ pub fn StaticIntegerSet(comptime n: u32) type {
         }
     };
 }
-
 
 pub fn iterField(buffer: []const u8, byte_pos: *usize) !void {
     // Iterate to next field in compliance with RFC 4180.
@@ -1144,19 +1148,8 @@ pub const IndexManager = struct {
         std.debug.assert(num_search_cols > 0);
 
         // Tokenize query.
-        var tokens: []std.ArrayList(u32) = try self.allocator.alloc(
-            std.ArrayList(u32), 
-            num_search_cols
-            );
-        for (tokens) |*t| {
-            t.* = std.ArrayList(u32).init(self.allocator);
-        }
-        defer {
-            for (tokens) |*t| {
-                t.deinit();
-            }
-            self.allocator.free(tokens);
-        }
+        var tokens: std.ArrayList(ColTokenPair) = std.ArrayList(ColTokenPair).init(self.allocator);
+        defer tokens.deinit();
 
         var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
 
@@ -1178,7 +1171,10 @@ pub const IndexManager = struct {
                         term_buffer[0..term_len]
                         );
                     if (token != null) {
-                        try tokens[col_idx].append(token.?);
+                        try tokens.append(ColTokenPair{
+                            .col_idx = @intCast(col_idx),
+                            .token = token.?,
+                        });
                         empty_query = false;
                     }
                     term_len = 0;
@@ -1193,7 +1189,10 @@ pub const IndexManager = struct {
                         term_buffer[0..term_len]
                         );
                     if (token != null) {
-                        try tokens[col_idx].append(token.?);
+                        try tokens.append(ColTokenPair{
+                            .col_idx = @intCast(col_idx),
+                            .token = token.?,
+                        });
                         empty_query = false;
                     }
                     term_len = 0;
@@ -1205,7 +1204,10 @@ pub const IndexManager = struct {
                     term_buffer[0..term_len]
                     );
                 if (token != null) {
-                    try tokens[col_idx].append(token.?);
+                    try tokens.append(ColTokenPair{
+                        .col_idx = @intCast(col_idx),
+                        .token = token.?,
+                    });
                     empty_query = false;
                 }
             }
@@ -1218,31 +1220,32 @@ pub const IndexManager = struct {
         var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
         defer doc_scores.deinit();
 
-        for (0.., tokens) |col_idx, *col_tokens| {
+        for (tokens.items) |col_token_pair| {
+            const col_idx = @as(usize, @intCast(col_token_pair.col_idx));
+            const token   = @as(usize, @intCast(col_token_pair.token));
+
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
 
-            for (col_tokens.items) |token| {
-                const boost_weighted_idf: f32 = (
-                    1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])))
-                    ) * boost_factors.items[col_idx];
+            const boost_weighted_idf: f32 = (
+                1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])))
+                ) * boost_factors.items[col_idx];
 
-                const offset      = II.term_offsets[token];
-                const last_offset = II.term_offsets[token + 1];
+            const offset      = II.term_offsets[token];
+            const last_offset = II.term_offsets[token + 1];
 
-                for (II.postings[offset..last_offset]) |doc_token| {
-                    const score = boost_weighted_idf;
+            for (II.postings[offset..last_offset]) |doc_token| {
+                const score = boost_weighted_idf;
 
-                    const doc_id:   u32 = @intCast(doc_token.doc_id);
-                    // const term_pos: u32 = @intCast(doc_token.term_pos);
-                    std.debug.assert(doc_id < self.index_partitions[partition_idx].II[col_idx].num_docs);
+                const doc_id:   u32 = @intCast(doc_token.doc_id);
+                // const term_pos: u32 = @intCast(doc_token.term_pos);
+                std.debug.assert(doc_id < self.index_partitions[partition_idx].II[col_idx].num_docs);
 
-                    const result = try doc_scores.getOrPut(doc_id);
-                    if (result.found_existing) {
-                        result.value_ptr.* += score;
-                    } else {
-                        result.key_ptr.* = doc_id;
-                        result.value_ptr.* = score;
-                    }
+                const result = try doc_scores.getOrPut(doc_id);
+                if (result.found_existing) {
+                    result.value_ptr.* += score;
+                } else {
+                    result.key_ptr.* = doc_id;
+                    result.value_ptr.* = score;
                 }
             }
         }
