@@ -769,7 +769,6 @@ pub const IndexManager = struct {
 
         for (search_cols.items) |*col| {
             _ = std.ascii.upperString(col.*, col.*);
-            std.debug.print("Search col: {s}\n", .{col.*});
         }
 
 
@@ -1214,6 +1213,7 @@ pub const IndexManager = struct {
 
         if (empty_query) return;
 
+
         // For each token in each II, get relevant docs and add to score.
         var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
         defer doc_scores.deinit();
@@ -1225,7 +1225,6 @@ pub const IndexManager = struct {
                 const boost_weighted_idf: f32 = (
                     1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])))
                     ) * boost_factors.items[col_idx];
-                // std.debug.print("Column: {d} - Doc Freq: {d}\n", .{col_idx, II.doc_freqs.items[token]});
 
                 const offset      = II.term_offsets[token];
                 const last_offset = II.term_offsets[token + 1];
@@ -1318,13 +1317,13 @@ pub const IndexManager = struct {
         }
 
         if (results.count == 0) {
-            std.debug.print("No results\n", .{});
+            // std.debug.print("No results\n", .{});
             return;
         }
-        for (0..10) |idx| {
-            std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
-        }
-        std.debug.print("\n", .{});
+        // for (0..10) |idx| {
+            // std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
+        // }
+        // std.debug.print("\n", .{});
 
         for (0..results.count) |idx| {
             const result = results.items[idx];
@@ -1578,11 +1577,81 @@ pub const QueryHandler = struct {
     }
 };
 
+fn bench() !void {
+    // const filename: []const u8 = "../tests/mb_small.csv";
+    const filename: []const u8 = "../tests/mb.csv";
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var search_cols = std.ArrayList([]u8).init(allocator);
+    const title:  []u8 = try allocator.dupe(u8, "Title");
+    const artist: []u8 = try allocator.dupe(u8, "ARTIST");
+    const album:  []u8 = try allocator.dupe(u8, "ALBUM");
+
+    try search_cols.append(title);
+    try search_cols.append(artist);
+    try search_cols.append(album);
+
+    var index_manager = try IndexManager.init(filename, &search_cols, allocator);
+    try index_manager.readFile();
+
+    // index_manager.printDebugInfo();
+
+    defer {
+        allocator.free(title);
+        allocator.free(artist);
+        allocator.free(album);
+
+        search_cols.deinit();
+        index_manager.deinit() catch {};
+        _ = gpa.deinit();
+    }
+
+    var query_map = std.StringHashMap([]const u8).init(allocator);
+    defer query_map.deinit();
+
+    try query_map.put("TITLE", "JOHNSON");
+    try query_map.put("ARTIST", "BILLY BOYA");
+    try query_map.put("ALBUM", "LIGHTNING");
+
+    var boost_factors = std.ArrayList(f32).init(allocator);
+    defer boost_factors.deinit();
+
+    try boost_factors.append(2.0);
+    try boost_factors.append(1.0);
+    try boost_factors.append(1.0);
+
+    try index_manager.query(
+        query_map,
+        10,
+        boost_factors,
+        );
+
+    const num_queries: usize = 1_000;
+
+    const start_time = std.time.milliTimestamp();
+    for (0..num_queries) |_| {
+        try index_manager.query(
+            query_map,
+            10,
+            boost_factors,
+            );
+    }
+    const end_time = std.time.milliTimestamp();
+    const execution_time_ms = (end_time - start_time);
+    const qps = @as(f64, @floatFromInt(num_queries)) / @as(f64, @floatFromInt(execution_time_ms)) * 1000;
+
+    std.debug.print("\n\n================================================\n", .{});
+    std.debug.print("QUERIES PER SECOND: {d}\n", .{qps});
+    std.debug.print("================================================\n", .{});
+}
+
 fn test_main() !void {
     const API = false;
 
     const filename: []const u8 = "../tests/mb_small.csv";
-   // const filename: []const u8 = "../tests/mb.csv";
+    // const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -1814,5 +1883,6 @@ fn main_cli_runner() !void {
 
 pub fn main() !void {
     // try test_main();
-    try main_cli_runner();
+    // try main_cli_runner();
+    try bench();
 }
