@@ -69,7 +69,7 @@ pub const ProgressBar = struct {
     
     fn display(self: *ProgressBar) void {
         std.debug.print(
-            "Iteration: {d}/{d} {s}\r", 
+            "Docs Processed: {d}/{d} {s}\r", 
             .{self.current_iter, self.total_iters, self.bar_string}
             );
     }
@@ -91,9 +91,7 @@ test "pbar" {
     try std.testing.expectEqual(120, pbar.total_updates);
     try std.testing.expectEqual(8, pbar.update_differential);
 
-    // for (0..1000) |_| {
     for (0..1000) |i| {
-        // pbar.tick();
         pbar.update(i);
         std.time.sleep(2_000_000);
     }

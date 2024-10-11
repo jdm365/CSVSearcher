@@ -22,12 +22,14 @@ pub fn SortedScoreArray(comptime T: type) type {
         allocator: std.mem.Allocator,
         items: []T,
         count: usize,
+        capacity: usize,
 
         pub fn init(allocator: std.mem.Allocator, size: usize) !Self {
             return Self{
                 .allocator = allocator,
                 .items = try allocator.alloc(T, size + 1),
                 .count = 0,
+                .capacity = size,
             };
         }
 
@@ -38,6 +40,17 @@ pub fn SortedScoreArray(comptime T: type) type {
         fn cmp(lhs: T, rhs: T) bool {
             // For a max heap, we return true if the lhs.score is less than rhs.score
             return lhs.score > rhs.score;
+        }
+
+        pub fn clear(self: *Self) void {
+            self.count = 0;
+        }
+
+        pub fn resize(self: *Self, new_size: usize) void {
+            if (new_size > self.capacity) {
+                @panic("Cannot grow the array");
+            }
+            self.capacity = new_size;
         }
 
         fn binarySearch(self: *Self, item: T) usize {
@@ -80,7 +93,8 @@ pub fn SortedScoreArray(comptime T: type) type {
         pub fn insert(self: *Self, item: T) void {
             const insert_idx = self.search(item);
 
-            self.count = @min(self.count + 1, self.items.len - 1);
+            // self.count = @min(self.count + 1, self.items.len - 1);
+            self.count = @min(self.count + 1, self.capacity - 1);
 
             var idx: usize = self.count;
             while (idx > insert_idx) {

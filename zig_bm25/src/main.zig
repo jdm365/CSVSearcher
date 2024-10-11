@@ -636,6 +636,8 @@ pub const IndexManager = struct {
     tmp_dir: []const u8,
     result_positions: [MAX_NUM_RESULTS][]TermPos,
     result_strings: [MAX_NUM_RESULTS]std.ArrayList(u8),
+    results_arrays: []sorted_array.SortedScoreArray(QueryResult),
+    thread_pool: std.Thread.Pool,
     header_bytes: usize,
 
     pub fn init(
@@ -695,6 +697,7 @@ pub const IndexManager = struct {
             .file_handles = undefined,
             .result_positions = result_positions,
             .result_strings = result_strings,
+            .results_arrays = undefined,
             .header_bytes = header_bytes,
         };
     }
@@ -716,6 +719,7 @@ pub const IndexManager = struct {
         for (0..MAX_NUM_RESULTS) |idx| {
             self.allocator.free(self.result_positions[idx]);
             self.result_strings[idx].deinit();
+            self.results_arrays[idx].deinit();
         }
 
         self.string_arena.deinit();
@@ -1041,12 +1045,14 @@ pub const IndexManager = struct {
         const num_lines = line_offsets.items.len - 1;
 
         const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = 8;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
+        self.results_arrays = try self.allocator.alloc(sorted_array.SortedScoreArray(QueryResult), num_partitions);
         for (0..num_partitions) |idx| {
             self.file_handles[idx] = try std.fs.cwd().openFile(self.input_filename, .{});
+            self.results_arrays[idx] = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, MAX_NUM_RESULTS);
         }
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
@@ -1278,21 +1284,11 @@ pub const IndexManager = struct {
         var threads = try self.allocator.alloc(std.Thread, num_partitions);
         defer self.allocator.free(threads);
 
-        var thread_results = try self.allocator.alloc(
-            sorted_array.SortedScoreArray(QueryResult), 
-            num_partitions
-            );
-        defer {
-            for (thread_results) |*res| {
-                res.deinit();
-            }
-            self.allocator.free(thread_results);
-        }
-
         // TODO: Aggregate dfs and calculate idf.
 
         for (0..num_partitions) |partition_idx| {
-            thread_results[partition_idx] = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, k);
+            self.results_arrays[partition_idx].clear();
+            self.results_arrays[partition_idx].resize(k);
             threads[partition_idx] = try std.Thread.spawn(
                 .{},
                 queryPartition,
@@ -1301,7 +1297,7 @@ pub const IndexManager = struct {
                     queries,
                     boost_factors,
                     partition_idx,
-                    &thread_results[partition_idx],
+                    &self.results_arrays[partition_idx],
                 },
             );
         }
@@ -1313,7 +1309,7 @@ pub const IndexManager = struct {
             thread.join();
         }
 
-        for (thread_results) |*tr| {
+        for (self.results_arrays) |*tr| {
             for (tr.items[0..tr.count]) |r| {
                 results.insert(r);
             }
