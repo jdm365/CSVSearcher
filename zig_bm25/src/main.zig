@@ -1,6 +1,7 @@
 const std = @import("std");
 const progress = @import("progress.zig");
 const sorted_array = @import("sorted_array.zig");
+const ScorePair = @import("sorted_array.zig");
 const builtin = @import("builtin");
 const TermPos = @import("server.zig").TermPos;
 const csvLineToJson = @import("server.zig").csvLineToJson;
@@ -314,17 +315,22 @@ const BM25Partition = struct {
     line_offsets: []usize,
     allocator: std.mem.Allocator,
     string_arena: std.heap.ArenaAllocator,
+    doc_score_map: std.AutoHashMap(u32, f32),
 
     pub fn init(
         allocator: std.mem.Allocator,
         num_search_cols: usize,
         line_offsets: []usize,
     ) !BM25Partition {
+        var doc_score_map = std.AutoHashMap(u32, f32).init(allocator);
+        try doc_score_map.ensureTotalCapacity(50_000);
+
         const partition = BM25Partition{
             .II = try allocator.alloc(InvertedIndex, num_search_cols),
             .line_offsets = line_offsets,
             .allocator = allocator,
             .string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .doc_score_map = doc_score_map,
         };
 
         for (0..num_search_cols) |idx| {
@@ -341,6 +347,7 @@ const BM25Partition = struct {
         }
         self.allocator.free(self.II);
         self.string_arena.deinit();
+        self.doc_score_map.deinit();
     }
 
     fn addTerm(
@@ -637,7 +644,7 @@ pub const IndexManager = struct {
     result_positions: [MAX_NUM_RESULTS][]TermPos,
     result_strings: [MAX_NUM_RESULTS]std.ArrayList(u8),
     results_arrays: []sorted_array.SortedScoreArray(QueryResult),
-    thread_pool: std.Thread.Pool,
+    // thread_pool: std.Thread.Pool,
     header_bytes: usize,
 
     pub fn init(
@@ -704,11 +711,13 @@ pub const IndexManager = struct {
     
     pub fn deinit(self: *IndexManager) !void {
         for (0..self.index_partitions.len) |idx| {
+            self.results_arrays[idx].deinit();
             self.index_partitions[idx].deinit();
             self.file_handles[idx].close();
         }
         self.allocator.free(self.file_handles);
         self.allocator.free(self.index_partitions);
+        self.allocator.free(self.results_arrays);
 
         self.search_cols.deinit();
         self.cols.deinit();
@@ -719,7 +728,6 @@ pub const IndexManager = struct {
         for (0..MAX_NUM_RESULTS) |idx| {
             self.allocator.free(self.result_positions[idx]);
             self.result_strings[idx].deinit();
-            self.results_arrays[idx].deinit();
         }
 
         self.string_arena.deinit();
@@ -1045,7 +1053,7 @@ pub const IndexManager = struct {
         const num_lines = line_offsets.items.len - 1;
 
         const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 8;
+        // const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
@@ -1143,7 +1151,7 @@ pub const IndexManager = struct {
     }
 
 
-    pub fn queryPartition(
+    pub fn queryPartitionWandish(
         self: *const IndexManager,
         queries: std.StringHashMap([]const u8),
         boost_factors: std.ArrayList(f32),
@@ -1221,40 +1229,99 @@ pub const IndexManager = struct {
 
         if (empty_query) return;
 
+        const ColScorePair = struct {
+            doc_id: u32,
+            score:  f32,
+            col_idx: usize,
+        };
 
-        // For each token in each II, get relevant docs and add to score.
-        var doc_scores = std.AutoArrayHashMap(u32, f32).init(self.allocator);
-        defer doc_scores.deinit();
+        var sorted_terms = try sorted_array.SortedScoreArray(ColScorePair).init(
+            self.allocator, 
+            tokens.items.len
+            );
+        defer sorted_terms.deinit();
 
-        for (tokens.items) |col_token_pair| {
-            const col_idx = @as(usize, @intCast(col_token_pair.col_idx));
-            const token   = @as(usize, @intCast(col_token_pair.token));
+
+        var idf_remaining: f32 = 0.0;
+        for (tokens.items) |_token| {
+            const col_idx: usize = @intCast(_token.col_idx);
+            const token:   usize = @intCast(_token.token);
 
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
-
             const boost_weighted_idf: f32 = (
                 1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])))
                 ) * boost_factors.items[col_idx];
+            idf_remaining += boost_weighted_idf;
+
+            sorted_terms.insert(ColScorePair{
+                .doc_id = @intCast(token),
+                .score = boost_weighted_idf,
+                .col_idx = col_idx,
+            });
+        }
+
+        // For each token in each II, get relevant docs and add to score.
+        var doc_scores: *std.AutoHashMap(u32, f32) = &self.index_partitions[partition_idx].doc_score_map;
+        doc_scores.clearRetainingCapacity();
+
+        const score_f32 = struct {
+            score: f32,
+        };
+        var sorted_scores = try sorted_array.SortedScoreArray(score_f32).init(
+            self.allocator, 
+            query_results.capacity,
+            );
+        defer sorted_scores.deinit();
+
+        var done = false;
+
+        for (0..sorted_terms.count) |idx| {
+            const col_score_pair = sorted_terms.items[idx];
+
+            const col_idx = col_score_pair.col_idx;
+            const token   = @as(usize, @intCast(col_score_pair.doc_id));
+
+            const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
 
             const offset      = II.term_offsets[token];
             const last_offset = II.term_offsets[token + 1];
 
             for (II.postings[offset..last_offset]) |doc_token| {
-                const score = boost_weighted_idf;
+                const score = col_score_pair.score;
 
                 const doc_id:   u32 = @intCast(doc_token.doc_id);
                 // const term_pos: u32 = @intCast(doc_token.term_pos);
-                std.debug.assert(doc_id < self.index_partitions[partition_idx].II[col_idx].num_docs);
 
-                const result = try doc_scores.getOrPut(doc_id);
-                if (result.found_existing) {
-                    result.value_ptr.* += score;
-                } else {
-                    result.key_ptr.* = doc_id;
-                    result.value_ptr.* = score;
+                const result = doc_scores.getPtr(doc_id);
+                if (result != null) {
+                    result.?.* += score;
+                    const score_copy = result.?.*;
+                    sorted_scores.insert(score_f32{
+                        .score = score_copy,
+                    });
+                    continue;
+                }
+
+                if (!done) {
+                    if (sorted_scores.count == sorted_scores.capacity - 1) {
+                        const min_score = sorted_scores.items[sorted_scores.count - 1];
+                        if (min_score.score > idf_remaining) {
+                            done = true;
+                            continue;
+                        }
+                    }
+
+                    try doc_scores.put(doc_id, score);
+                    sorted_scores.insert(score_f32{
+                        .score = score,
+                    });
                 }
             }
+
+            idf_remaining -= col_score_pair.score;
         }
+
+        // std.debug.print("TOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
 
         var score_it = doc_scores.iterator();
         while (score_it.next()) |entry| {
@@ -1266,7 +1333,6 @@ pub const IndexManager = struct {
             query_results.insert(score_pair);
         }
     }
-
 
     pub fn query(
         self: *const IndexManager,
@@ -1291,7 +1357,7 @@ pub const IndexManager = struct {
             self.results_arrays[partition_idx].resize(k);
             threads[partition_idx] = try std.Thread.spawn(
                 .{},
-                queryPartition,
+                queryPartitionWandish,
                 .{
                     self,
                     queries,
@@ -1610,24 +1676,19 @@ fn bench() !void {
     var query_map = std.StringHashMap([]const u8).init(allocator);
     defer query_map.deinit();
 
-    try query_map.put("TITLE", "JOHNSON");
-    try query_map.put("ARTIST", "BILLY BOYA");
+    try query_map.put("TITLE", "UNDER MY SKIN");
+    try query_map.put("ARTIST", "FRANK SINATRA");
     try query_map.put("ALBUM", "LIGHTNING");
 
     var boost_factors = std.ArrayList(f32).init(allocator);
     defer boost_factors.deinit();
 
-    try boost_factors.append(2.0);
     try boost_factors.append(1.0);
     try boost_factors.append(1.0);
-
-    try index_manager.query(
-        query_map,
-        10,
-        boost_factors,
-        );
+    try boost_factors.append(1.0);
 
     const num_queries: usize = 1_000;
+    // const num_queries: usize = 1;
 
     const start_time = std.time.milliTimestamp();
     for (0..num_queries) |_| {
