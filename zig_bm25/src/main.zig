@@ -36,6 +36,13 @@ const ColTokenPair = struct {
     token: u32,
 };
 
+const ScoringInfo = struct {
+    score: f32,
+    term_pos: u8,
+    col_bitmap: u24,
+};
+
+
 pub fn StaticIntegerSet(comptime n: u32) type {
     return struct {
         const Self = @This();
@@ -204,6 +211,8 @@ const TokenStream = struct {
         // Iterate to next field in compliance with RFC 4180.
         const is_quoted = self.f_data[byte_pos.*] == '"';
         byte_pos.* += @intFromBool(is_quoted);
+        
+        // const start_byte = byte_pos.*;
 
         while (true) {
             if (is_quoted) {
@@ -225,7 +234,9 @@ const TokenStream = struct {
                         return;
                     },
                     '\n' => {
-                        return error.UnexpectedNewline;
+                        byte_pos.* += 1;
+                        return;
+                        // return error.UnexpectedNewline;
                     },
                     else => {
                         byte_pos.* += 1;
@@ -315,14 +326,16 @@ const BM25Partition = struct {
     line_offsets: []usize,
     allocator: std.mem.Allocator,
     string_arena: std.heap.ArenaAllocator,
-    doc_score_map: std.AutoHashMap(u32, f32),
+    // doc_score_map: std.AutoHashMap(u32, f32),
+    doc_score_map: std.AutoHashMap(u32, ScoringInfo),
 
     pub fn init(
         allocator: std.mem.Allocator,
         num_search_cols: usize,
         line_offsets: []usize,
     ) !BM25Partition {
-        var doc_score_map = std.AutoHashMap(u32, f32).init(allocator);
+        // var doc_score_map = std.AutoHashMap(u32, f32).init(allocator);
+        var doc_score_map = std.AutoHashMap(u32, ScoringInfo).init(allocator);
         try doc_score_map.ensureTotalCapacity(50_000);
 
         const partition = BM25Partition{
@@ -399,6 +412,8 @@ const BM25Partition = struct {
         max_byte: usize,
         terms_seen: *StaticIntegerSet(MAX_NUM_TERMS),
     ) !void {
+        const start_byte = byte_idx.*;
+
         var term_pos: u8 = 0;
         const is_quoted  = (token_stream.f_data[byte_idx.*] == '"');
         byte_idx.* += @intFromBool(is_quoted);
@@ -411,7 +426,12 @@ const BM25Partition = struct {
         if (is_quoted) {
 
             while (true) {
-                std.debug.assert(self.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+                // std.debug.assert(self.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
+                if (self.II[col_idx].doc_sizes[doc_id] >= MAX_NUM_TERMS) {
+                    byte_idx.* = start_byte;
+                    try token_stream.iterField(byte_idx);
+                    return;
+                }
                 std.debug.assert(byte_idx.* < max_byte);
 
                 if (token_stream.f_data[byte_idx.*] == '"') {
@@ -863,6 +883,20 @@ pub const IndexManager = struct {
                             try cols.append(
                                 try string_arena.dupe(u8, term[0..cntr])
                                 );
+                            for (0..search_cols.items.len) |idx| {
+                                if (std.mem.eql(u8, term[0..cntr], search_cols.items[idx])) {
+                                    std.debug.print("Found search col: {s}\n", .{search_cols.items[idx]});
+                                    const copy_term = try string_arena.dupe(u8, term[0..cntr]);
+                                    try col_map.put(
+                                        copy_term, 
+                                        Column{
+                                            .csv_idx = col_idx,
+                                            .II_idx = col_map.count(),
+                                            },
+                                        );
+                                    break;
+                                }
+                            }
                             num_bytes.* = byte_pos + 1;
                             return col_map;
                         },
@@ -931,6 +965,9 @@ pub const IndexManager = struct {
 
         var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
         var terms_seen_bitset = StaticIntegerSet(MAX_NUM_TERMS).init();
+
+        // Sort search_col_idxs
+        std.sort.insertion(usize, search_col_idxs, {}, comptime std.sort.asc(usize));
 
         var last_doc_id: usize = 0;
         for (0.., start_doc..end_doc) |doc_id, _| {
@@ -1052,8 +1089,8 @@ pub const IndexManager = struct {
 
         const num_lines = line_offsets.items.len - 1;
 
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
@@ -1261,7 +1298,8 @@ pub const IndexManager = struct {
         }
 
         // For each token in each II, get relevant docs and add to score.
-        var doc_scores: *std.AutoHashMap(u32, f32) = &self.index_partitions[partition_idx].doc_score_map;
+        // var doc_scores: *std.AutoHashMap(u32, f32) = &self.index_partitions[partition_idx].doc_score_map;
+        var doc_scores: *std.AutoHashMap(u32, ScoringInfo) = &self.index_partitions[partition_idx].doc_score_map;
         doc_scores.clearRetainingCapacity();
 
         const score_f32 = struct {
@@ -1272,6 +1310,14 @@ pub const IndexManager = struct {
             query_results.capacity,
             );
         defer sorted_scores.deinit();
+
+        // const PhraseInfo = packed struct(u32) {
+            // term_pos: u8,
+            // term_idx: u24,
+        // };
+
+        var phrase_candidates = std.AutoHashMap(u32, u32).init(self.allocator);
+        defer phrase_candidates.deinit();
 
         var done = false;
 
@@ -1290,12 +1336,23 @@ pub const IndexManager = struct {
                 const score = col_score_pair.score;
 
                 const doc_id:   u32 = @intCast(doc_token.doc_id);
-                // const term_pos: u32 = @intCast(doc_token.term_pos);
+                const term_pos: u8  = @intCast(doc_token.term_pos);
 
                 const result = doc_scores.getPtr(doc_id);
                 if (result != null) {
-                    result.?.* += score;
-                    const score_copy = result.?.*;
+                    result.?.*.score += score;
+                    if ((@as(u24, (@as(u24, 1) << @as(u5, @intCast(col_idx)))) & result.?.*.col_bitmap) == @as(u24, 1)) {
+                        const gop = try phrase_candidates.getOrPut(doc_id);
+
+                        if (gop.found_existing) {
+                            gop.value_ptr.* |= @intCast(result.?.col_bitmap);
+                        } else {
+                            gop.key_ptr.* = doc_id;
+                            gop.value_ptr.* = @intCast(result.?.col_bitmap);
+                        }
+                    }
+
+                    const score_copy = result.?.*.score;
                     sorted_scores.insert(score_f32{
                         .score = score_copy,
                     });
@@ -1311,7 +1368,15 @@ pub const IndexManager = struct {
                         }
                     }
 
-                    try doc_scores.put(doc_id, score);
+                    // try doc_scores.put(doc_id, score);
+                    try doc_scores.put(
+                        doc_id, 
+                        ScoringInfo{
+                            .score = score,
+                            .term_pos = term_pos,
+                            .col_bitmap = @intCast((@as(u24, 1) << @as(u5, @intCast(col_idx)))),
+                        },
+                        );
                     sorted_scores.insert(score_f32{
                         .score = score,
                     });
@@ -1322,12 +1387,20 @@ pub const IndexManager = struct {
         }
 
         // std.debug.print("TOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
+        // std.debug.print("TOTAL PHRASE CANDIDATES: {d}\n", .{phrase_candidates.count()});
 
         var score_it = doc_scores.iterator();
         while (score_it.next()) |entry| {
+            // Score phrases.
+            // if (phrase_candidates.get(entry.key_ptr.*)) |value| {
+                // Value gives columns with phrase candidates.
+                // Need to fetch term positions, terms.
+            // }
+
+
             const score_pair = QueryResult{
                 .doc_id = entry.key_ptr.*,
-                .score = entry.value_ptr.*,
+                .score = entry.value_ptr.*.score,
                 .partition_idx = partition_idx,
             };
             query_results.insert(score_pair);
@@ -1687,8 +1760,8 @@ fn bench() !void {
     try boost_factors.append(1.0);
     try boost_factors.append(1.0);
 
-    const num_queries: usize = 1_000;
-    // const num_queries: usize = 1;
+    // const num_queries: usize = 1_000;
+    const num_queries: usize = 1;
 
     const start_time = std.time.milliTimestamp();
     for (0..num_queries) |_| {
@@ -1705,100 +1778,6 @@ fn bench() !void {
     std.debug.print("\n\n================================================\n", .{});
     std.debug.print("QUERIES PER SECOND: {d}\n", .{qps});
     std.debug.print("================================================\n", .{});
-}
-
-fn test_main() !void {
-    const API = false;
-
-    const filename: []const u8 = "../tests/mb_small.csv";
-    // const filename: []const u8 = "../tests/mb.csv";
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    var search_cols = std.ArrayList([]u8).init(allocator);
-    const title:  []u8 = try allocator.dupe(u8, "Title");
-    const artist: []u8 = try allocator.dupe(u8, "ARTIST");
-    const album:  []u8 = try allocator.dupe(u8, "ALBUM");
-
-    try search_cols.append(title);
-    try search_cols.append(artist);
-    try search_cols.append(album);
-
-    var index_manager = try IndexManager.init(filename, &search_cols, allocator);
-    try index_manager.readFile();
-
-    // index_manager.printDebugInfo();
-
-    defer {
-        allocator.free(title);
-        allocator.free(artist);
-        allocator.free(album);
-
-        search_cols.deinit();
-        index_manager.deinit() catch {};
-        _ = gpa.deinit();
-    }
-
-    var query_map = std.StringHashMap([]const u8).init(allocator);
-    defer query_map.deinit();
-
-    try query_map.put("TITLE", "FRANK SINATRA");
-    try query_map.put("ARTIST", "FRANK SINATRA");
-    try query_map.put("ALBUM", "FRANK SINATRA");
-
-    var boost_factors = std.ArrayList(f32).init(allocator);
-    defer boost_factors.deinit();
-
-    try boost_factors.append(2.0);
-    try boost_factors.append(1.0);
-    try boost_factors.append(1.0);
-
-    try index_manager.query(
-        query_map,
-        10,
-        boost_factors,
-        );
-
-    for (index_manager.result_positions[0]) |pos| {
-        const start_byte = pos.start_pos;
-        const end_byte   = start_byte + pos.field_len;
-        std.debug.print("{s},", .{index_manager.result_strings[0].items[start_byte..end_byte]});
-    }
-
-    if (API) {
-        var query_handler = try QueryHandler.init(
-            &index_manager,
-            boost_factors,
-            query_map,
-            allocator,
-        );
-        query_handler.deinit();
-
-        var simple_router = zap.Router.init(allocator, .{});
-
-        try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
-        try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
-        try simple_router.handle_func("/get_search_columns", &query_handler, &QueryHandler.get_search_columns);
-        try simple_router.handle_func("/healthcheck", &query_handler, &QueryHandler.healthcheck);
-
-        defer simple_router.deinit();
-        var listener = zap.HttpListener.init(.{
-            .port = 5000,
-            .on_request = simple_router.on_request_handler(),
-            .log = true,
-        });
-        try listener.listen();
-
-    
-        std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
-
-        // start worker threads
-        zap.start(.{
-            .threads = 1,
-            .workers = 1,
-        });
-    }
 }
 
 fn main_cli_runner() !void {
@@ -1942,7 +1921,6 @@ fn main_cli_runner() !void {
 }
 
 pub fn main() !void {
-    // try test_main();
     // try main_cli_runner();
     try bench();
 }
