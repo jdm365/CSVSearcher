@@ -96,8 +96,7 @@ pub fn SortedScoreArray(comptime T: type) type {
         pub fn insert(self: *Self, item: T) void {
             const insert_idx = self.search(item);
 
-            // self.count = @min(self.count + 1, self.items.len - 1);
-            self.count = @min(self.count + 1, self.capacity - 1);
+            self.count = @min(self.count + 1, self.capacity);
 
             var idx: usize = self.count;
             while (idx > insert_idx) {
