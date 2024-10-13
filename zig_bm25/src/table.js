@@ -21,9 +21,9 @@ async function get_columns() {
 			throw new Error('Network response was not ok');
 		}
 		const data = await response.json();
-		
+
 		// Calculate column width
-		const gridContainerWidth = document.getElementById('alt-view').offsetWidth * 0.8;
+		const gridContainerWidth = document.getElementById('alt-view').offsetWidth * 0.4;
 		const numColumns = data.columns.length;
 		const widthPerColumn = gridContainerWidth / Math.min(5, numColumns);
 		const minWidthPerColumn = gridContainerWidth / Math.min(5, numColumns);
@@ -65,18 +65,21 @@ function setupHeaderRow() {
     var headerCells = headerRow.querySelectorAll(".slick-headerrow-column");
     
     headerCells.forEach((cell, i) => {
+		// Only continue if column is in search_columns
+		if (!search_columns.includes(columns[i].id)) {
+			return;
+		}
+
         var column = columns[i];
         var input = document.createElement('input');
         input.type = 'text';
         input.dataset.columnId = column.id;
-        input.value = column.headerFilter && column.headerFilter.value || "";
         input.style.width = "100%";
-        input.classList.add("slick-headerrow-column-filter");
+        // input.value = column.headerFilter && column.headerFilter.value || "";
+        // input.classList.add("slick-headerrow-column-filter");
         cell.appendChild(input);
 
         input.addEventListener("input", function() {
-            column.headerFilter = column.headerFilter || {};
-            column.headerFilter.value = this.value;
             search();
         });
     });
@@ -114,6 +117,7 @@ async function waitForPort(port, retryInterval = 10000, maxRetries = 60) {
 document.addEventListener("DOMContentLoaded", function() {
 	(async function() {
 		await waitForPort(PORT);
+		search_columns = await get_search_columns();
 		columns = await get_columns();
 
 		grid = new Slick.Grid("#myGrid", data, columns, options);
@@ -121,7 +125,6 @@ document.addEventListener("DOMContentLoaded", function() {
 		setupHeaderRow();
 		search();
 
-		search_columns = await get_search_columns();
 
 		// Create search boxes
 		const inputData = [];
@@ -206,9 +209,12 @@ function updateGrid(results) {
 function search() {
 	let params = {};
 	search_columns.forEach(column => {
-		params[column] = document.getElementById(`search_box_${column}`).value;
+		let input_element = document.querySelector(`input[data-column-id="${column}"]`);
+
+		if (input_element && input_element.value) {
+			params[column] = input_element.value;
+		}
 	});
-	params['limit'] = document.getElementById('limit').value;
 
 	let text_string = new URLSearchParams(params).toString();
 	let query = `${text_string}`;
@@ -219,5 +225,3 @@ function search() {
 			updateGrid(data);
 		});
 }
-
-// grid = new Slick.Grid("#myGrid", data, columns, options);

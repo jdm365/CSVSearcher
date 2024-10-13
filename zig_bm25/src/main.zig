@@ -490,8 +490,8 @@ const BM25Partition = struct {
                 }
 
                 switch (token_stream.f_data[byte_idx.*]) {
-                    ',' => break,
-                    '\n' => break,
+                    // ',' => break,
+                    // '\n' => break,
                     // ' ' => {
                         // if (cntr == 0) {
                             // byte_idx.* += 1;
