@@ -409,6 +409,39 @@ const BM25Partition = struct {
         new_doc.* = false;
     }
 
+    fn addToken(
+        self: *BM25Partition,
+        term: *[MAX_TERM_LENGTH]u8,
+        cntr: *usize,
+        doc_id: u32,
+        term_pos: *u8,
+        col_idx: usize,
+        token_stream: *TokenStream,
+        terms_seen: *StaticIntegerSet(MAX_NUM_TERMS),
+        new_doc: *bool,
+        byte_idx: *usize,
+    ) !void {
+        if (cntr.* == 0) {
+            byte_idx.* += 1;
+            return;
+        }
+
+        try self.addTerm(
+            term, 
+            cntr.*, 
+            doc_id, 
+            term_pos.*, 
+            col_idx, 
+            token_stream, 
+            terms_seen,
+            new_doc,
+            );
+
+        term_pos.* += @intFromBool(term_pos.* != 255);
+        cntr.* = 0;
+        byte_idx.* += 1;
+    }
+
 
     pub fn processDocRfc4180(
         self: *BM25Partition,
@@ -456,32 +489,157 @@ const BM25Partition = struct {
                     }
                 }
 
-                if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
-                    if (cntr == 0) {
-                        byte_idx.* += 1;
-                        continue;
-                    }
+                switch (token_stream.f_data[byte_idx.*]) {
+                    ',' => break,
+                    '\n' => break,
+                    // ' ' => {
+                        // if (cntr == 0) {
+                            // byte_idx.* += 1;
+                            // continue;
+                        // }
 
-                    try self.addTerm(
+                        // try self.addTerm(
+                            // term, 
+                            // cntr, 
+                            // doc_id, 
+                            // term_pos, 
+                            // col_idx, 
+                            // token_stream, 
+                            // terms_seen,
+                            // &new_doc,
+                            // );
+
+                        // term_pos += @intFromBool(term_pos != 255);
+                        // cntr = 0;
+                        // byte_idx.* += 1;
+                    // },
+                    ' ' => try self.addToken(
                         term, 
-                        cntr, 
+                        &cntr, 
                         doc_id, 
-                        term_pos, 
+                        &term_pos, 
                         col_idx, 
                         token_stream, 
                         terms_seen,
                         &new_doc,
-                        );
+                        byte_idx,
+                        ),
+                    '.' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '-' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '/' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '+' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '=' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '&' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    else => {
+                        if (cntr == MAX_TERM_LENGTH - 1) {
+                            try self.addTerm(
+                                term, 
+                                cntr, 
+                                doc_id, 
+                                term_pos, 
+                                col_idx, 
+                                token_stream, 
+                                terms_seen,
+                                &new_doc,
+                                );
 
-                    term_pos += @intFromBool(term_pos != 255);
-                    cntr = 0;
-                    byte_idx.* += 1;
-                    continue;
+                            term_pos += @intFromBool(term_pos != 255);
+                            cntr = 0;
+                            byte_idx.* += 1;
+                            continue;
+                        }
+                        term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
+                        cntr += 1;
+                        byte_idx.* += 1;
+                    }
                 }
 
-                term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
-                cntr += 1;
-                byte_idx.* += 1;
+                // if ((token_stream.f_data[byte_idx.*] == ' ') or (cntr == MAX_TERM_LENGTH - 1)) {
+                    // if (cntr == 0) {
+                        // byte_idx.* += 1;
+                        // continue;
+                    // }
+
+                    // try self.addTerm(
+                        // term, 
+                        // cnr, 
+                        // doc_id, 
+                        // term_pos, 
+                        // col_idx, 
+                        // token_stream, 
+                        // terms_seen,
+                        // &new_doc,
+                        // );
+
+                    // term_pos += @intFromBool(term_pos != 255);
+                    // cntr = 0;
+                    // byte_idx.* += 1;
+                    // continue;
+                // }
+
+                // term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
+                // cntr += 1;
+                // byte_idx.* += 1;
             }
 
         } else {
@@ -493,27 +651,104 @@ const BM25Partition = struct {
                 switch (token_stream.f_data[byte_idx.*]) {
                     ',' => break,
                     '\n' => break,
-                    ' ' => {
-                        if (cntr == 0) {
-                            byte_idx.* += 1;
-                            continue;
-                        }
+                    // ' ' => {
+                        // if (cntr == 0) {
+                            // byte_idx.* += 1;
+                            // continue;
+                        // }
 
-                        try self.addTerm(
-                            term, 
-                            cntr, 
-                            doc_id, 
-                            term_pos, 
-                            col_idx, 
-                            token_stream, 
-                            terms_seen,
-                            &new_doc,
-                            );
+                        // try self.addTerm(
+                            // term, 
+                            // cntr, 
+                            // doc_id, 
+                            // term_pos, 
+                            // col_idx, 
+                            // token_stream, 
+                            // terms_seen,
+                            // &new_doc,
+                            // );
 
-                        term_pos += @intFromBool(term_pos != 255);
-                        cntr = 0;
-                        byte_idx.* += 1;
-                    },
+                        // term_pos += @intFromBool(term_pos != 255);
+                        // cntr = 0;
+                        // byte_idx.* += 1;
+                    // },
+                    ' ' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '.' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '-' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '/' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '+' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '=' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
+                    '&' => try self.addToken(
+                        term, 
+                        &cntr, 
+                        doc_id, 
+                        &term_pos, 
+                        col_idx, 
+                        token_stream, 
+                        terms_seen,
+                        &new_doc,
+                        byte_idx,
+                        ),
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
                             try self.addTerm(
@@ -1333,23 +1568,27 @@ pub const IndexManager = struct {
             for (II.postings[offset..last_offset]) |doc_token| {
                 const doc_id:   u32 = @intCast(doc_token.doc_id);
                 const term_pos: u8  = @intCast(doc_token.term_pos);
-                if (doc_id == prev_doc_id) continue;
+
+                const phrase_only = (doc_id == prev_doc_id);
                 prev_doc_id = doc_id;
 
                 const _result = doc_scores.getPtr(doc_id);
                 if (_result) |result| {
-                    result.*.score += score;
+                    result.*.score += score * @as(f32, @floatFromInt(@intFromBool(!phrase_only)));
 
                     const last_term_pos = result.*.term_pos;
                     if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
                         result.*.score *= 1.25;
                     }
-                    result.*.term_pos = term_pos;
+                    if (!phrase_only) {
+                        result.*.term_pos = term_pos;
 
-                    const score_copy = result.*.score;
-                    sorted_scores.insert(score_f32{
-                        .score = score_copy,
-                    });
+                        const score_copy = result.*.score;
+                        sorted_scores.insert(score_f32{
+                            .score = score_copy,
+                        });
+                    }
+
                 } else {
                     if (!done and ((score > IDF_THRESHOLD) or (score > 0.4 * idf_sum / @as(f32, @floatFromInt(tokens.items.len))))) {
 
