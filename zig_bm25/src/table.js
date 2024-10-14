@@ -134,19 +134,6 @@ document.addEventListener("DOMContentLoaded", function() {
 				{ id: `search_box_${column}`, placeholder: `Enter ${column} here...` }
 			);
 		}
-
-		const container = document.getElementById("search_boxes");
-
-		inputData.forEach(data => {
-			const input = document.createElement("input");
-			input.type = "text";
-			input.id = data.id;
-			input.className = "search_box";
-			input.placeholder = data.placeholder;
-			input.onkeyup = search;
-
-			container.appendChild(input);
-		});
 	})();
 });
 
@@ -163,32 +150,29 @@ function escapeHtml(text) {
 }
 
 function highlightMatchingText(row, cell, value, columnDef, dataContext) {
-	let search_box = "search_box_" + columnDef.name;
-	try {
-		var query = document.getElementById(search_box).value;
-	} catch (e) {
-		var query = false;
-	}
+	let searchBox = document.querySelector(`input[data-column-id="${columnDef.name}"]`);
 
-	if (!query || typeof value !== 'string' || query === 0) {
-		return value;
-	}
+    if (!searchBox || !value || typeof value !== 'string') {
+        return escapeHtml(value);
+    }
 
-	// Do for tokens split by space
-	var tokens = query.split(" ");
-	// Only do first 6 tokens
-	tokens = tokens.slice(0, 6);
+    let query = searchBox.value.trim();
+    if (!query) {
+        return escapeHtml(value);
+    }
 
-	var result = value;
-	tokens.forEach(token => {
-		// Token must contain at least one alphanumeric character
-		if (!/[a-z0-9]/i.test(token)) {
-			return;
-		}
-		var regex = new RegExp('(' + token + ')', 'gi');
-		result = result.replace(regex, '<span class="highlight">$1</span>');
-	});
-	return result;
+    let tokens = query.split(/\s+/).filter(token => /[a-z0-9]/i.test(token)).slice(0, 6);
+    if (tokens.length === 0) {
+        return escapeHtml(value);
+    }
+
+    let escapedValue = escapeHtml(value);
+    let regex = new RegExp('(' + tokens.map(escapeRegExp).join('|') + ')', 'gi');
+    return escapedValue.replace(regex, '<span class="highlight">$1</span>');
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 
