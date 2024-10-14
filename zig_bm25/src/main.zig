@@ -38,16 +38,9 @@ const ColTokenPair = packed struct {
     token: u32,
 };
 
-const PhraseInfo = packed struct {
-    term: u32,
-    term_pos: u8,
-    col_idx: u24,
-};
-
 const ScoringInfo = packed struct {
     score: f32,
     term_pos: u8,
-    col_bitmap: u24,
 };
 
 
@@ -334,7 +327,6 @@ const BM25Partition = struct {
     line_offsets: []usize,
     allocator: std.mem.Allocator,
     string_arena: std.heap.ArenaAllocator,
-    // doc_score_map: std.AutoHashMap(u32, f32),
     doc_score_map: std.AutoHashMap(u32, ScoringInfo),
 
     pub fn init(
@@ -342,7 +334,6 @@ const BM25Partition = struct {
         num_search_cols: usize,
         line_offsets: []usize,
     ) !BM25Partition {
-        // var doc_score_map = std.AutoHashMap(u32, f32).init(allocator);
         var doc_score_map = std.AutoHashMap(u32, ScoringInfo).init(allocator);
         try doc_score_map.ensureTotalCapacity(50_000);
 
@@ -1605,7 +1596,6 @@ pub const IndexManager = struct {
                             ScoringInfo{
                                 .score = score,
                                 .term_pos = term_pos,
-                                .col_bitmap = 0,
                             }
                         );
                         sorted_scores.insert(score_f32{
@@ -1649,14 +1639,11 @@ pub const IndexManager = struct {
         var threads = try self.allocator.alloc(std.Thread, num_partitions);
         defer self.allocator.free(threads);
 
-        // TODO: Aggregate dfs and calculate idf.
-
         for (0..num_partitions) |partition_idx| {
             self.results_arrays[partition_idx].clear();
             self.results_arrays[partition_idx].resize(k);
             threads[partition_idx] = try std.Thread.spawn(
                 .{},
-                // queryPartitionWandish,
                 queryPartitionOrdered,
                 .{
                     self,
