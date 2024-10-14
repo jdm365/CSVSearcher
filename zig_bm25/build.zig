@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("zap", zap.module("zap"));
+    exe.addIncludePath(b.path("CRoaring/include/"));
 
     b.installArtifact(exe);
 

@@ -7,6 +7,11 @@ const TermPos = @import("server.zig").TermPos;
 const csvLineToJson = @import("server.zig").csvLineToJson;
 const zap = @import("zap");
 
+
+pub const roaring_bitmap = @cImport({
+    @cInclude("roaring/roaring.h");
+});
+
 const TOKEN_STREAM_CAPACITY = 1_048_576;
 const MAX_LINE_LENGTH       = 1_048_576;
 const MAX_NUM_TERMS         = 4096;
