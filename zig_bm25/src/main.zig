@@ -6,11 +6,7 @@ const builtin = @import("builtin");
 const TermPos = @import("server.zig").TermPos;
 const csvLineToJson = @import("server.zig").csvLineToJson;
 const zap = @import("zap");
-
-
-pub const roaring_bitmap = @cImport({
-    @cInclude("roaring/roaring.h");
-});
+const Bitmap = @import("roaring.zig").Bitmap;
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
 const MAX_LINE_LENGTH       = 1_048_576;
@@ -926,6 +922,10 @@ pub const IndexManager = struct {
             &header_bytes,
             );
 
+        var map = try Bitmap.createWithCapacity(32);
+        map.add(20);
+        std.debug.print("CARDINALITY: {d}\n", .{map.cardinality()});
+        map.free();
 
         const file_hash = blk: {
             var hash: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
@@ -1684,7 +1684,7 @@ pub const IndexManager = struct {
                 result,
                 @constCast(&self.result_strings[idx]),
             );
-            std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
+            // std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
         }
     }
 };
@@ -1931,8 +1931,8 @@ pub const QueryHandler = struct {
 };
 
 fn bench(testing: bool) !void {
-    const filename: []const u8 = "../tests/mb_small.csv";
-    // const filename: []const u8 = "../tests/mb.csv";
+    // const filename: []const u8 = "../tests/mb_small.csv";
+    const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -2135,6 +2135,6 @@ fn main_cli_runner() !void {
 }
 
 pub fn main() !void {
-    try main_cli_runner();
-    // try bench(false);
+    // try main_cli_runner();
+    try bench(false);
 }

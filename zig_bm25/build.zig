@@ -10,15 +10,6 @@ pub fn build(b: *std.Build) void {
         .openssl = false, // set to true to enable TLS support
     });
 
-    const lib = b.addStaticLibrary(.{
-        .name = "zig_bm25",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    lib.root_module.addImport("zap", zap.module("zap"));
-    b.installArtifact(lib);
-
     const exe = b.addExecutable(.{
         .name = "zig_bm25",
         .root_source_file = b.path("src/main.zig"),
@@ -26,7 +17,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("zap", zap.module("zap"));
-    exe.addIncludePath(b.path("CRoaring/include/"));
+    exe.addIncludePath(b.path("croaring"));
+    exe.addCSourceFile(.{
+        .file = b.path("croaring/roaring.c"),
+        .flags = &.{},
+    });
 
     b.installArtifact(exe);
 
