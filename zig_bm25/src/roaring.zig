@@ -82,7 +82,8 @@ pub const Bitmap = extern struct {
         // We'll just grab the type info, swap out the child field and be done
         // This way const/non-const are handled automatically
         var info = @typeInfo(T);
-        info.Pointer.child = switch (info.Pointer.child) {
+        // info.Pointer.child = switch (info.Pointer.child) {
+        info.pointer.child = switch (info.pointer.child) {
             c.roaring_bitmap_t => Bitmap,
             Bitmap => c.roaring_bitmap_t,
             else => unreachable, // don't call this with anything else

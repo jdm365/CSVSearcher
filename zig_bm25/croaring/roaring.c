@@ -72,7 +72,7 @@
 // We want to make sure that the AVX-512 functions are only built on compilers
 // fully supporting AVX-512.
 #if __has_include(<avx512vbmi2intrin.h>)
-#define CROARING_COMPILER_SUPPORTS_AVX512 1
+#define CROARING_COMPILER_SUPPORTS_AVX512 0
 #endif  // #if __has_include(<avx512vbmi2intrin.h>)
 #endif  // #ifdef __has_include
 

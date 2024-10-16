@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(b.path("croaring"));
     exe.addCSourceFile(.{
         .file = b.path("croaring/roaring.c"),
-        .flags = &.{},
+        .flags = &.{"-DROARING_DISABLE_AVX512"},
     });
 
     b.installArtifact(exe);

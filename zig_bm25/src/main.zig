@@ -22,6 +22,11 @@ const token_t = packed struct(u32) {
     doc_id: u24
 };
 
+const term_pos_t = packed struct(u8) {
+    final_doc: u1,
+    term_pos: u7,
+};
+
 const QueryResult = struct {
     doc_id: u32,
     score: f32,
@@ -43,6 +48,16 @@ const ScoringInfo = packed struct {
     score: f32,
     term_pos: u8,
 };
+
+pub inline fn getExpectedContainers(
+    max_containers: u32,
+    doc_freq: u32,
+) u32 {
+    const float_max_containers = @as(f32, @floatFromInt(max_containers));
+    const float_doc_freq = @as(f32, @floatFromInt(doc_freq));
+    const float_expected_containers = float_max_containers * (1.0 - std.math.exp(-float_doc_freq / float_max_containers));
+    return @as(u32, @intFromFloat(float_expected_containers));
+}
 
 
 pub fn StaticIntegerSet(comptime n: u32) type {
@@ -251,9 +266,12 @@ const TokenStream = struct {
 
 
 const InvertedIndex = struct {
-    postings: []token_t,
+    // postings: []token_t,
+    postings: []*Bitmap,
     vocab: std.StringHashMap(u32),
-    term_offsets: []u32,
+    // term_offsets: []u32,
+    term_offsets: []usize,
+    term_positions: []term_pos_t,
     doc_freqs: std.ArrayList(u32),
     doc_sizes: []u16,
 
@@ -271,9 +289,11 @@ const InvertedIndex = struct {
         try vocab.ensureTotalCapacity(@intCast(num_docs / 25));
 
         const II = InvertedIndex{
-            .postings = &[_]token_t{},
+            // .postings = &[_]token_t{},
+            .postings = &[_]*Bitmap{},
             .vocab = vocab,
-            .term_offsets = &[_]u32{},
+            .term_offsets = &[_]usize{},
+            .term_positions = &[_]term_pos_t{},
             .doc_freqs = try std.ArrayList(u32).initCapacity(
                 allocator, @as(usize, @intFromFloat(@as(f32, @floatFromInt(num_docs)) * 0.1))
                 ),
@@ -294,6 +314,7 @@ const InvertedIndex = struct {
         self.vocab.deinit();
 
         allocator.free(self.term_offsets);
+        allocator.free(self.term_positions);
         self.doc_freqs.deinit();
         allocator.free(self.doc_sizes);
     }
@@ -303,16 +324,25 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         ) !void {
         self.num_terms = @intCast(self.doc_freqs.items.len);
-        self.term_offsets = try allocator.alloc(u32, self.num_terms);
+        self.term_offsets = try allocator.alloc(usize, self.num_terms);
+
+        self.postings = try allocator.alloc(*Bitmap, self.num_terms);
+
+        const max_containers: u32 = @max(1, self.num_docs / 65536);
 
         // Num terms is now known.
         var postings_size: usize = 0;
-        for (0.., self.doc_freqs.items) |i, doc_freq| {
-            self.term_offsets[i] = @intCast(postings_size);
-            postings_size += doc_freq;
+        for (0.., self.doc_freqs.items) |idx, doc_freq| {
+            self.term_offsets[idx] = @intCast(postings_size);
+            // const expected_containers = @as(u32, @intCast(@as(f32, @floatFromInt(max_containers)) * 
+                // (1 - std.math.exp(-@as(f32, @floatFromInt(doc_freq)) / @as(f32, @floatFromInt(max_containers))))));
+            const expected_containers = getExpectedContainers(max_containers, doc_freq);
+            self.postings[idx] = try Bitmap.createWithCapacity(expected_containers);
+
+            postings_size += @intCast(doc_freq);
         }
         self.term_offsets[self.num_terms - 1] = @intCast(postings_size);
-        self.postings = try allocator.alloc(token_t, postings_size + 1);
+        self.term_positions = try allocator.alloc(term_pos_t, postings_size + 1);
 
         var avg_doc_size: f64 = 0.0;
         for (self.doc_sizes) |doc_size| {
@@ -429,7 +459,8 @@ const BM25Partition = struct {
             new_doc,
             );
 
-        term_pos.* += @intFromBool(term_pos.* != 255);
+        // term_pos.* += @intFromBool(term_pos.* != 255);
+        term_pos.* = if (term_pos.* < 127) (term_pos.* + 1) else 0;
         cntr.* = 0;
         byte_idx.* += 1;
     }
@@ -801,11 +832,16 @@ const BM25Partition = struct {
         token_streams: *[]TokenStream,
         ) !void {
 
+        var max_II_size: usize = 0;
+        for (self.II) |*II| {
+            max_II_size = @max(max_II_size, @as(usize, @intCast(II.num_terms)));
+        }
+        var term_offsets = try self.allocator.alloc(usize, max_II_size);
+        defer self.allocator.free(term_offsets);
+
         for (0.., self.II) |col_idx, *II| {
             try II.resizePostings(self.allocator);
-            var term_offsets = try self.allocator.alloc(usize, II.num_terms);
-            defer self.allocator.free(term_offsets);
-            @memset(term_offsets, 0);
+            @memset(term_offsets[0..II.num_terms], 0);
 
             // Create index.
             const ts = token_streams.*[col_idx];
@@ -839,22 +875,28 @@ const BM25Partition = struct {
                     const term_pos = ts.tokens[idx].term_pos;
                     const term_id: usize = @intCast(ts.tokens[idx].doc_id);
 
-
                     current_doc_id += @intCast(new_doc);
 
-                    const token = token_t{
-                        .new_doc = 0,
-                        .term_pos = term_pos,
-                        .doc_id = @truncate(current_doc_id),
-                    };
+                    // const token = token_t{
+                        // .new_doc = 0,
+                        // .term_pos = term_pos,
+                        // .doc_id = @truncate(current_doc_id),
+                    // };
+                    II.postings[term_id].add(@intCast(current_doc_id));
 
                     const postings_offset = II.term_offsets[term_id] + term_offsets[term_id];
-                    std.debug.assert(postings_offset < II.postings.len);
+                    // std.debug.assert(postings_offset < II.postings.len);
                     std.debug.assert(current_doc_id < II.num_docs);
 
-                    term_offsets[term_id] += 1;
+                    if (new_doc == 1) {
+                        II.term_positions[postings_offset - 1].final_doc = 0;
+                    }
 
-                    II.postings[postings_offset] = token;
+                    II.term_positions[postings_offset] = term_pos_t{
+                        .final_doc = ~new_doc,
+                        .term_pos = term_pos,
+                    };
+                    term_offsets[term_id] += 1;
                 }
 
                 token_count += num_tokens;
@@ -921,11 +963,6 @@ pub const IndexManager = struct {
             string_arena.allocator(),
             &header_bytes,
             );
-
-        var map = try Bitmap.createWithCapacity(32);
-        map.add(20);
-        std.debug.print("CARDINALITY: {d}\n", .{map.cardinality()});
-        map.free();
 
         const file_hash = blk: {
             var hash: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
@@ -1328,8 +1365,8 @@ pub const IndexManager = struct {
 
         const num_lines = line_offsets.items.len - 1;
 
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
@@ -1560,53 +1597,64 @@ pub const IndexManager = struct {
             const offset      = II.term_offsets[token];
             const last_offset = II.term_offsets[token + 1];
 
-            var prev_doc_id: u32 = std.math.maxInt(u32);
-            for (II.postings[offset..last_offset]) |doc_token| {
-                const doc_id:   u32 = @intCast(doc_token.doc_id);
-                const term_pos: u8  = @intCast(doc_token.term_pos);
+            // for (II.postings[offset..last_offset]) |doc_token| {
+            var iterator = II.postings[token].iterator();
+            var jdx: usize = 0;
 
-                const phrase_only = (doc_id == prev_doc_id);
-                prev_doc_id = doc_id;
+            while (iterator.next()) |doc_id| {
+                std.debug.assert(offset + jdx < last_offset);
 
-                const _result = doc_scores.getPtr(doc_id);
-                if (_result) |result| {
-                    result.*.score += score * @as(f32, @floatFromInt(@intFromBool(!phrase_only)));
+                var term_pos: u8 = @intCast(II.term_positions[offset + jdx].term_pos);
+                var final_doc: bool = (II.term_positions[offset + jdx].final_doc == 1);
+                var new_doc = true;
 
-                    const last_term_pos = result.*.term_pos;
-                    if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
-                        result.*.score *= 1.25;
-                    }
-                    if (!phrase_only) {
-                        result.*.term_pos = term_pos;
+                while (!final_doc) {
 
-                        const score_copy = result.*.score;
-                        sorted_scores.insert(score_f32{
-                            .score = score_copy,
-                        });
-                    }
+                    const _result = doc_scores.getPtr(doc_id);
+                    if (_result) |result| {
+                        result.*.score += score * @as(f32, @floatFromInt(@intFromBool(new_doc)));
 
-                } else {
-                    if (!done and ((score > IDF_THRESHOLD) or (score > 0.4 * idf_sum / @as(f32, @floatFromInt(tokens.items.len))))) {
+                        const last_term_pos = result.*.term_pos;
+                        if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
+                            result.*.score *= 1.25;
+                        }
+                        if (!new_doc) {
+                            result.*.term_pos = term_pos;
 
-                        if (sorted_scores.count == sorted_scores.capacity - 1) {
-                            const min_score = sorted_scores.items[sorted_scores.count - 1];
-                            if (min_score.score > idf_remaining) {
-                                done = true;
-                                continue;
-                            }
+                            const score_copy = result.*.score;
+                            sorted_scores.insert(score_f32{
+                                .score = score_copy,
+                            });
                         }
 
-                        try doc_scores.put(
-                            doc_id,
-                            ScoringInfo{
-                                .score = score,
-                                .term_pos = term_pos,
+                    } else {
+                        if (!done and ((score > IDF_THRESHOLD) or (score > 0.4 * idf_sum / @as(f32, @floatFromInt(tokens.items.len))))) {
+
+                            if (sorted_scores.count == sorted_scores.capacity - 1) {
+                                const min_score = sorted_scores.items[sorted_scores.count - 1];
+                                if (min_score.score > idf_remaining) {
+                                    done = true;
+                                    continue;
+                                }
                             }
-                        );
-                        sorted_scores.insert(score_f32{
-                            .score = score,
-                        });
+
+                            try doc_scores.put(
+                                doc_id,
+                                ScoringInfo{
+                                    .score = score,
+                                    .term_pos = term_pos,
+                                }
+                            );
+                            sorted_scores.insert(score_f32{
+                                .score = score,
+                            });
+                        }
                     }
+
+                    term_pos  = @intCast(II.term_positions[offset + jdx].term_pos);
+                    final_doc = (II.term_positions[offset + jdx].final_doc == 1);
+                    new_doc   = false;
+                    jdx += 1;
                 }
             }
 
@@ -1931,8 +1979,8 @@ pub const QueryHandler = struct {
 };
 
 fn bench(testing: bool) !void {
-    // const filename: []const u8 = "../tests/mb_small.csv";
-    const filename: []const u8 = "../tests/mb.csv";
+    const filename: []const u8 = "../tests/mb_small.csv";
+    // const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
