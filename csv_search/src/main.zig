@@ -56,7 +56,7 @@ pub inline fn getExpectedContainers(
     const float_max_containers = @as(f32, @floatFromInt(max_containers));
     const float_doc_freq = @as(f32, @floatFromInt(doc_freq));
     const float_expected_containers = float_max_containers * (1.0 - std.math.exp(-float_doc_freq / float_max_containers));
-    return @as(u32, @intFromFloat(float_expected_containers));
+    return @max(1, @as(u32, @intFromFloat(float_expected_containers)));
 }
 
 
@@ -328,16 +328,16 @@ const InvertedIndex = struct {
 
         self.postings = try allocator.alloc(*Bitmap, self.num_terms);
 
-        const max_containers: u32 = @max(1, self.num_docs / 65536);
+        // const max_containers: u32 = @max(1, self.num_docs / 65536);
 
         // Num terms is now known.
         var postings_size: usize = 0;
         for (0.., self.doc_freqs.items) |idx, doc_freq| {
             self.term_offsets[idx] = @intCast(postings_size);
-            // const expected_containers = @as(u32, @intCast(@as(f32, @floatFromInt(max_containers)) * 
-                // (1 - std.math.exp(-@as(f32, @floatFromInt(doc_freq)) / @as(f32, @floatFromInt(max_containers))))));
-            const expected_containers = getExpectedContainers(max_containers, doc_freq);
-            self.postings[idx] = try Bitmap.createWithCapacity(expected_containers);
+
+            // const expected_containers = getExpectedContainers(max_containers, doc_freq);
+            // self.postings[idx] = try Bitmap.createWithCapacity(expected_containers);
+            self.postings[idx] = try Bitmap.create();
 
             postings_size += @intCast(doc_freq);
         }
@@ -839,6 +839,9 @@ const BM25Partition = struct {
         var term_offsets = try self.allocator.alloc(usize, max_II_size);
         defer self.allocator.free(term_offsets);
 
+        // time
+        const start_time = std.time.milliTimestamp();
+
         for (0.., self.II) |col_idx, *II| {
             try II.resizePostings(self.allocator);
             @memset(term_offsets[0..II.num_terms], 0);
@@ -850,7 +853,7 @@ const BM25Partition = struct {
             var bytes_read: usize = 0;
 
             var num_tokens: usize = TOKEN_STREAM_CAPACITY;
-            var current_doc_id: usize = 0;
+            var current_doc_id: u32 = 0;
 
             while (num_tokens == TOKEN_STREAM_CAPACITY) {
                 var _num_tokens: [4]u8 = undefined;
@@ -877,18 +880,13 @@ const BM25Partition = struct {
 
                     current_doc_id += @intCast(new_doc);
 
-                    // const token = token_t{
-                        // .new_doc = 0,
-                        // .term_pos = term_pos,
-                        // .doc_id = @truncate(current_doc_id),
-                    // };
                     II.postings[term_id].add(@intCast(current_doc_id));
 
                     const postings_offset = II.term_offsets[term_id] + term_offsets[term_id];
                     // std.debug.assert(postings_offset < II.postings.len);
                     std.debug.assert(current_doc_id < II.num_docs);
 
-                    if (new_doc == 1) {
+                    if ((new_doc == 1) and (postings_offset > 0)) {
                         II.term_positions[postings_offset - 1].final_doc = 0;
                     }
 
@@ -902,6 +900,9 @@ const BM25Partition = struct {
                 token_count += num_tokens;
             }
         }
+        const end_time = std.time.milliTimestamp();
+
+        std.debug.print("Index construction time: {d} ms\n", .{end_time - start_time});
     }
 
     pub fn fetchRecords(
@@ -1365,8 +1366,8 @@ pub const IndexManager = struct {
 
         const num_lines = line_offsets.items.len - 1;
 
-        // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 1;
+        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
@@ -1602,7 +1603,11 @@ pub const IndexManager = struct {
             var jdx: usize = 0;
 
             while (iterator.next()) |doc_id| {
-                std.debug.assert(offset + jdx < last_offset);
+                // std.debug.assert(offset + jdx < last_offset);
+                if (offset + jdx >= last_offset) {
+                    std.debug.print("ERROR: Offset: {d} - Last offset: {d} - jdx + offset: {d}\n", .{offset, last_offset, jdx + offset});
+                    @panic("Index out of bounds");
+                }
 
                 var term_pos: u8 = @intCast(II.term_positions[offset + jdx].term_pos);
                 var final_doc: bool = (II.term_positions[offset + jdx].final_doc == 1);
@@ -1979,8 +1984,8 @@ pub const QueryHandler = struct {
 };
 
 fn bench(testing: bool) !void {
-    const filename: []const u8 = "../tests/mb_small.csv";
-    // const filename: []const u8 = "../tests/mb.csv";
+    // const filename: []const u8 = "../tests/mb_small.csv";
+    const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
