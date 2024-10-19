@@ -56,7 +56,7 @@ pub inline fn getExpectedContainers(
     const float_max_containers = @as(f32, @floatFromInt(max_containers));
     const float_doc_freq = @as(f32, @floatFromInt(doc_freq));
     const float_expected_containers = float_max_containers * (1.0 - std.math.exp(-float_doc_freq / float_max_containers));
-    return @max(1, @as(u32, @intFromFloat(float_expected_containers)));
+    return @min(256, @max(1, @as(u32, @intFromFloat(float_expected_containers))));
 }
 
 
@@ -328,16 +328,17 @@ const InvertedIndex = struct {
 
         self.postings = try allocator.alloc(*Bitmap, self.num_terms);
 
-        // const max_containers: u32 = @max(1, self.num_docs / 65536);
+        const max_containers: u32 = @max(1, self.num_docs / 65536);
+        std.debug.print("NUM DOCS: {d}\n", .{self.num_docs});
 
         // Num terms is now known.
         var postings_size: usize = 0;
         for (0.., self.doc_freqs.items) |idx, doc_freq| {
             self.term_offsets[idx] = @intCast(postings_size);
 
-            // const expected_containers = getExpectedContainers(max_containers, doc_freq);
-            // self.postings[idx] = try Bitmap.createWithCapacity(expected_containers);
-            self.postings[idx] = try Bitmap.create();
+            const expected_containers = getExpectedContainers(max_containers, doc_freq);
+            self.postings[idx] = try Bitmap.createWithCapacity(expected_containers);
+            // self.postings[idx] = try Bitmap.create();
 
             postings_size += @intCast(doc_freq);
         }
@@ -883,6 +884,7 @@ const BM25Partition = struct {
                     II.postings[term_id].add(@intCast(current_doc_id));
 
                     const postings_offset = II.term_offsets[term_id] + term_offsets[term_id];
+
                     // std.debug.assert(postings_offset < II.postings.len);
                     std.debug.assert(current_doc_id < II.num_docs);
 
@@ -1366,8 +1368,8 @@ pub const IndexManager = struct {
 
         const num_lines = line_offsets.items.len - 1;
 
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 16;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
@@ -1605,8 +1607,8 @@ pub const IndexManager = struct {
             while (iterator.next()) |doc_id| {
                 // std.debug.assert(offset + jdx < last_offset);
                 if (offset + jdx >= last_offset) {
-                    std.debug.print("ERROR: Offset: {d} - Last offset: {d} - jdx + offset: {d}\n", .{offset, last_offset, jdx + offset});
-                    @panic("Index out of bounds");
+                    std.debug.print("ERROR: Offset: {d} - Last offset: {d} - jdx + offset: {d} - Thread: {d}\n", .{offset, last_offset, jdx + offset, partition_idx});
+                    // @panic("Index out of bounds");
                 }
 
                 var term_pos: u8 = @intCast(II.term_positions[offset + jdx].term_pos);
