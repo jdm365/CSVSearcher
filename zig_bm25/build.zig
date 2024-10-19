@@ -10,21 +10,31 @@ pub fn build(b: *std.Build) void {
         .openssl = false, // set to true to enable TLS support
     });
 
+    const lib = b.addStaticLibrary(.{
+        .name = "zig_bm25",
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lib.root_module.addImport("zap", zap.module("zap"));
+    b.installArtifact(lib);
+
     const exe = b.addExecutable(.{
-        .name = "csv_search",
+        .name = "zig_bm25",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     exe.root_module.addImport("zap", zap.module("zap"));
-    exe.addIncludePath(b.path("croaring"));
-    exe.addCSourceFile(.{
-        .file = b.path("croaring/roaring.c"),
-        .flags = &.{},
-    });
-    exe.linkLibC();
 
     b.installArtifact(exe);
+
+    // Add install command to place binary in /usr/local/bin
+    // const install_cmd = b.addInstallArtifact(exe, .{.dest_dir = "/usr/local/bin/zig_bm25"});
+    const install_cmd = b.addInstallArtifact(exe, .{.dest_dir = .{
+        .override = .{ .custom = "/usr/local/bin/zig_bm25" },
+    }});
+    install_cmd.step.dependOn(b.getInstallStep());
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -35,6 +45,9 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    const install_step = b.step("install_local", "Install the app");
+    install_step.dependOn(&install_cmd.step);
 
     const tests = b.addTest(.{
             .target = target,
