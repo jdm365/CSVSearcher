@@ -43,6 +43,21 @@ const ScoringInfo = packed struct {
     term_pos: u8,
 };
 
+const SmallSlice = packed struct(u64) {
+    len: u16,
+    ptr: u48,
+
+    fn init(ptr: *anyopaque, len: usize) SmallSlice {
+        return SmallSlice{
+            .ptr = @truncate(@as(u48, @truncate(@intFromPtr(ptr))) & 0x0000_ffff_ffff_ffff),
+            .len = @intCast(len),
+        };
+    }
+
+    fn get_ptr(self: SmallSlice) [*]const u8 {
+        return @ptrFromInt(self.ptr);
+    }
+};
 
 pub fn StaticIntegerSet(comptime n: u32) type {
     return struct {
@@ -132,6 +147,14 @@ pub fn parseRecordCSV(
             .field_len = @as(u32, @intCast(byte_pos - start_pos - 1)) - @intFromBool(buffer[start_pos] == '"'),
         };
     }
+}
+
+pub fn guessMapMemoryUsage(map: std.StringHashMap(u32)) usize {
+    const avg_string_size = 6;
+    const entry_size = @sizeOf(u32) + @sizeOf(usize) + avg_string_size + @sizeOf(*usize);
+    const metadata_size = @sizeOf(@TypeOf(map));
+    const entries_size = map.capacity() * entry_size;
+    return metadata_size + entries_size;
 }
 
 const TokenStream = struct {
@@ -252,7 +275,8 @@ const TokenStream = struct {
 const InvertedIndex = struct {
     postings: []token_t,
     vocab: std.StringHashMap(u32),
-    term_offsets: []u32,
+    // term_offsets: []u32,
+    term_offsets: []usize,
     doc_freqs: std.ArrayList(u32),
     doc_sizes: []u16,
 
@@ -272,7 +296,8 @@ const InvertedIndex = struct {
         const II = InvertedIndex{
             .postings = &[_]token_t{},
             .vocab = vocab,
-            .term_offsets = &[_]u32{},
+            // .term_offsets = &[_]u32{},
+            .term_offsets = &[_]usize{},
             .doc_freqs = try std.ArrayList(u32).initCapacity(
                 allocator, @as(usize, @intFromFloat(@as(f32, @floatFromInt(num_docs)) * 0.1))
                 ),
@@ -302,15 +327,16 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         ) !void {
         self.num_terms = @intCast(self.doc_freqs.items.len);
-        self.term_offsets = try allocator.alloc(u32, self.num_terms);
+        // self.term_offsets = try allocator.alloc(u32, self.num_terms);
+        self.term_offsets = try allocator.alloc(usize, self.num_terms);
 
         // Num terms is now known.
         var postings_size: usize = 0;
         for (0.., self.doc_freqs.items) |i, doc_freq| {
-            self.term_offsets[i] = @intCast(postings_size);
+            self.term_offsets[i] = postings_size;
             postings_size += doc_freq;
         }
-        self.term_offsets[self.num_terms - 1] = @intCast(postings_size);
+        self.term_offsets[self.num_terms - 1] = postings_size;
         self.postings = try allocator.alloc(token_t, postings_size + 1);
 
         var avg_doc_size: f64 = 0.0;
@@ -378,6 +404,8 @@ const BM25Partition = struct {
 
         if (!gop.found_existing) {
             const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
+            // const test_copy = SmallSlice.init(term_copy.ptr, term_copy.len);
+            // std.debug.print("String test: {s}\n", .{test_copy.get_ptr()[0..term_len]});
 
             gop.key_ptr.* = term_copy;
             gop.value_ptr.* = self.II[col_idx].num_terms;
@@ -385,10 +413,6 @@ const BM25Partition = struct {
             try self.II[col_idx].doc_freqs.append(1);
             try token_stream.addToken(new_doc.*, term_pos, gop.value_ptr.*);
         } else {
-            // std.debug.print("Value address: {*}\n", .{gop.value_ptr});
-            // std.debug.print("Entry address: {*}\n", .{&gop});
-            // std.debug.print("Offset: {}\n", .{@intFromPtr(gop.value_ptr) - @intFromPtr(&gop)}); 
-            // @breakpoint();
 
             if (!terms_seen.checkOrInsert(gop.value_ptr.*)) {
                 self.II[col_idx].doc_freqs.items[gop.value_ptr.*] += 1;
@@ -990,19 +1014,34 @@ pub const IndexManager = struct {
     fn printDebugInfo(self: *const IndexManager) void {
         std.debug.print("\n=====================================================\n", .{});
 
+        var num_terms: usize = 0;
+        var num_docs: usize = 0;
+        var avg_doc_size: f32 = 0.0;
+        var vocab_bytes: usize = 0;
+
         for (0..self.index_partitions.len) |idx| {
-            std.debug.print("Partition {d}\n", .{idx});
-            std.debug.print("---------------------------------------\n", .{});
 
+            num_docs += self.index_partitions[idx].II[0].num_docs;
             for (0..self.index_partitions[idx].II.len) |jdx| {
-                const II = self.index_partitions[idx].II[jdx];
-
-                std.debug.print("Column {d}\n", .{jdx});
-                std.debug.print("Num terms: {d}\n", .{II.num_terms});
-                std.debug.print("Num docs: {d}\n", .{II.num_docs});
-                std.debug.print("Avg doc size: {d}\n\n", .{II.avg_doc_size});
+                num_terms += self.index_partitions[idx].II[jdx].num_terms;
+                avg_doc_size += self.index_partitions[idx].II[jdx].avg_doc_size;
+                vocab_bytes += guessMapMemoryUsage(self.index_partitions[idx].II[jdx].vocab);
             }
+
         }
+
+        std.debug.print("Num Partitions:   {d}\n", .{self.index_partitions.len});
+        std.debug.print("Vocab Mem Usage:  {d}MB\n\n", .{vocab_bytes / 1_048_576});
+
+        var col_iterator = self.search_cols.iterator();
+        while (col_iterator.next()) |item| {
+            std.debug.print("Column:       {s}\n", .{item.key_ptr.*});
+            std.debug.print("---------------------------------------------\n", .{});
+            std.debug.print("Num terms:    {d}\n", .{num_terms});
+            std.debug.print("Num docs:     {d}\n", .{num_docs});
+            std.debug.print("Avg doc size: {d}\n\n", .{avg_doc_size / @as(f32, @floatFromInt(self.index_partitions.len))});
+        }
+
         std.debug.print("=====================================================\n\n\n\n", .{});
     }
 
@@ -1679,7 +1718,7 @@ pub const IndexManager = struct {
                 result,
                 @constCast(&self.result_strings[idx]),
             );
-            std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
+            // std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
         }
     }
 };
@@ -1926,8 +1965,8 @@ pub const QueryHandler = struct {
 };
 
 fn bench(testing: bool) !void {
-    const filename: []const u8 = "../tests/mb_small.csv";
-    // const filename: []const u8 = "../tests/mb.csv";
+    // const filename: []const u8 = "../tests/mb_small.csv";
+    const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -1944,7 +1983,7 @@ fn bench(testing: bool) !void {
     var index_manager = try IndexManager.init(filename, &search_cols, allocator);
     try index_manager.readFile();
 
-    // index_manager.printDebugInfo();
+    index_manager.printDebugInfo();
 
     defer {
         allocator.free(title);
@@ -2130,6 +2169,6 @@ fn main_cli_runner() !void {
 }
 
 pub fn main() !void {
-    try main_cli_runner();
-    // try bench(false);
+    // try main_cli_runner();
+    try bench(false);
 }

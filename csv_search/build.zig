@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const lib = b.addStaticLibrary(.{
-        .name = "zig_bm25",
+        .name = "csv_search",
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     const exe = b.addExecutable(.{
-        .name = "zig_bm25",
+        .name = "csv_search",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
@@ -30,9 +30,9 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     // Add install command to place binary in /usr/local/bin
-    // const install_cmd = b.addInstallArtifact(exe, .{.dest_dir = "/usr/local/bin/zig_bm25"});
+    // const install_cmd = b.addInstallArtifact(exe, .{.dest_dir = "/usr/local/bin/csv_search"});
     const install_cmd = b.addInstallArtifact(exe, .{.dest_dir = .{
-        .override = .{ .custom = "/usr/local/bin/zig_bm25" },
+        .override = .{ .custom = "/usr/local/bin/csv_search" },
     }});
     install_cmd.step.dependOn(b.getInstallStep());
 
