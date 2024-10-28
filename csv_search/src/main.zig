@@ -43,21 +43,111 @@ const ScoringInfo = packed struct {
     term_pos: u8,
 };
 
+const score_f32 = struct {
+    score: f32,
+};
+
 const SmallSlice = packed struct(u64) {
     len: u16,
     ptr: u48,
 
     fn init(ptr: *anyopaque, len: usize) SmallSlice {
+        std.debug.assert(len < 65536);
         return SmallSlice{
-            .ptr = @truncate(@as(u48, @truncate(@intFromPtr(ptr))) & 0x0000_ffff_ffff_ffff),
+            .ptr = @truncate(@intFromPtr(ptr)),
             .len = @intCast(len),
         };
+    }
+
+    // TODO: Figure out how to make the slice comptime determined.
+    fn initFromSlice(slice: []const u8) SmallSlice {
+        std.debug.assert(slice.len < 65536);
+        return SmallSlice{
+            .ptr = @truncate(@as(u48, @truncate(@intFromPtr(slice.ptr))) & 0x0000_ffff_ffff_ffff),
+            .len = @intCast(slice.len),
+        };
+    }
+
+    fn initFromSliceCopy(allocator: std.mem.Allocator, slice: []const u8) !SmallSlice {
+        std.debug.assert(slice.len < 65536);
+        // Slice memory managed by caller. Probably best to use with arena.
+        const copy = try allocator.dupe(u8, slice);
+        return SmallSlice.initFromSlice(copy);
     }
 
     fn get_ptr(self: SmallSlice) [*]const u8 {
         return @ptrFromInt(self.ptr);
     }
 };
+
+
+pub const SmallStringContext = struct {
+    pub fn hash(self: @This(), s: SmallSlice) u64 {
+        _ = self;
+        return std.hash.CityHash64.hash(s.get_ptr()[0..s.len]);
+    }
+    pub fn eql(self: @This(), a: SmallSlice, b: SmallSlice) bool {
+        _ = self;
+        return std.hash_map.eqlString(a.get_ptr()[0..a.len], b.get_ptr()[0..b.len]);
+    }
+};
+
+pub fn SmallStringHashMap(comptime T: type) type {
+
+
+    return struct {
+        const Self = @This();
+
+        pub const GetOrPutResult = struct {
+            value_ptr: *T,
+            found_existing: bool,
+        };
+
+        map: std.HashMap(
+                 SmallSlice, 
+                 T, 
+                 // std.hash_map.StringContext, 
+                 SmallStringContext,
+                 std.hash_map.default_max_load_percentage,
+                 ),
+
+        // TODO: Make custom SmallStringContext
+
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return Self{
+                .map = std.HashMap(
+                     SmallSlice, 
+                     T, 
+                     // std.hash_map.StringContext, 
+                     SmallStringContext, 
+                     std.hash_map.default_max_load_percentage,
+                     ).init(allocator),
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.map.deinit();
+        }
+
+        pub fn ensureTotalCapacity(self: *Self, size: usize) !void {
+            try self.map.ensureTotalCapacity(@intCast(size));
+        }
+
+        pub fn getOrPut(self: *Self, key: []const u8) !std.hash_map.HashMap(
+            SmallSlice, T, SmallStringContext, std.hash_map.default_max_load_percentage,
+            ).GetOrPutResult {
+            return try self.map.getOrPut(SmallSlice.initFromSlice(key));
+        }
+
+        pub fn get(self: *Self, key: []const u8) ?T {
+            return self.map.get(SmallSlice.initFromSlice(key));
+        }
+
+        pub fn put(self: *Self, key: []const u8, value: T) !void {
+            return try self.map.put(SmallSlice.initFromSlice(key), value);
+        }
+    };
+}
 
 pub fn StaticIntegerSet(comptime n: u32) type {
     return struct {
@@ -149,11 +239,11 @@ pub fn parseRecordCSV(
     }
 }
 
-pub fn guessMapMemoryUsage(map: std.StringHashMap(u32)) usize {
+pub fn guessMapMemoryUsage(map: SmallStringHashMap(u32)) usize {
     const avg_string_size = 6;
-    const entry_size = @sizeOf(u32) + @sizeOf(usize) + avg_string_size + @sizeOf(*usize);
-    const metadata_size = @sizeOf(@TypeOf(map));
-    const entries_size = map.capacity() * entry_size;
+    const entry_size = @sizeOf(u32) + avg_string_size + @sizeOf(*usize);
+    const metadata_size = @sizeOf(@TypeOf(map.map));
+    const entries_size = map.map.capacity() * entry_size;
     return metadata_size + entries_size;
 }
 
@@ -274,7 +364,8 @@ const TokenStream = struct {
 
 const InvertedIndex = struct {
     postings: []token_t,
-    vocab: std.StringHashMap(u32),
+    // vocab: std.StringHashMap(u32),
+    vocab: SmallStringHashMap(u32),
     // term_offsets: []u32,
     term_offsets: []usize,
     doc_freqs: std.ArrayList(u32),
@@ -288,7 +379,8 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         num_docs: usize,
         ) !InvertedIndex {
-        var vocab = std.StringHashMap(u32).init(allocator);
+        // var vocab = std.StringHashMap(u32).init(allocator);
+        var vocab = SmallStringHashMap(u32).init(allocator);
 
         // Guess capacity
         try vocab.ensureTotalCapacity(@intCast(num_docs / 25));
@@ -400,14 +492,15 @@ const BM25Partition = struct {
         new_doc: *bool,
     ) !void {
 
+        // const gop = try self.II[col_idx].vocab.getOrPut(term[0..term_len]);
         const gop = try self.II[col_idx].vocab.getOrPut(term[0..term_len]);
 
         if (!gop.found_existing) {
-            const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
-            // const test_copy = SmallSlice.init(term_copy.ptr, term_copy.len);
+            // const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
             // std.debug.print("String test: {s}\n", .{test_copy.get_ptr()[0..term_len]});
 
-            gop.key_ptr.* = term_copy;
+            // gop.key_ptr.* = term_copy;
+            gop.key_ptr.* = try SmallSlice.initFromSliceCopy(self.string_arena.allocator(), term[0..term_len]);
             gop.value_ptr.* = self.II[col_idx].num_terms;
             self.II[col_idx].num_terms += 1;
             try self.II[col_idx].doc_freqs.append(1);
@@ -1023,23 +1116,23 @@ pub const IndexManager = struct {
 
             num_docs += self.index_partitions[idx].II[0].num_docs;
             for (0..self.index_partitions[idx].II.len) |jdx| {
-                num_terms += self.index_partitions[idx].II[jdx].num_terms;
+                num_terms    += self.index_partitions[idx].II[jdx].num_terms;
                 avg_doc_size += self.index_partitions[idx].II[jdx].avg_doc_size;
-                vocab_bytes += guessMapMemoryUsage(self.index_partitions[idx].II[jdx].vocab);
+                vocab_bytes  += guessMapMemoryUsage(self.index_partitions[idx].II[jdx].vocab);
             }
 
         }
 
-        std.debug.print("Num Partitions:   {d}\n", .{self.index_partitions.len});
-        std.debug.print("Vocab Mem Usage:  {d}MB\n\n", .{vocab_bytes / 1_048_576});
+        std.debug.print("Num Partitions:  {d}\n", .{self.index_partitions.len});
+        std.debug.print("Vocab Mem Usage: {d}MB\n\n", .{vocab_bytes / 1_048_576});
 
         var col_iterator = self.search_cols.iterator();
         while (col_iterator.next()) |item| {
-            std.debug.print("Column:       {s}\n", .{item.key_ptr.*});
+            std.debug.print("Column:          {s}\n", .{item.key_ptr.*});
             std.debug.print("---------------------------------------------\n", .{});
-            std.debug.print("Num terms:    {d}\n", .{num_terms});
-            std.debug.print("Num docs:     {d}\n", .{num_docs});
-            std.debug.print("Avg doc size: {d}\n\n", .{avg_doc_size / @as(f32, @floatFromInt(self.index_partitions.len))});
+            std.debug.print("Num terms:       {d}\n", .{num_terms});
+            std.debug.print("Num docs:        {d}\n", .{num_docs});
+            std.debug.print("Avg doc size:    {d}\n\n", .{avg_doc_size / @as(f32, @floatFromInt(self.index_partitions.len))});
         }
 
         std.debug.print("=====================================================\n\n\n\n", .{});
@@ -1362,8 +1455,8 @@ pub const IndexManager = struct {
 
         const num_lines = line_offsets.items.len - 1;
 
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
@@ -1460,7 +1553,6 @@ pub const IndexManager = struct {
         std.debug.print("Processed {d} documents in {d}ms\n", .{_total_docs_read, time_diff});
     }
 
-
     pub fn queryPartitionOrdered(
         self: *const IndexManager,
         queries: std.StringHashMap([]const u8),
@@ -1550,9 +1642,6 @@ pub const IndexManager = struct {
         var doc_scores: *std.AutoHashMap(u32, ScoringInfo) = &self.index_partitions[partition_idx].doc_score_map;
         doc_scores.clearRetainingCapacity();
 
-        const score_f32 = struct {
-            score: f32,
-        };
         var sorted_scores = try sorted_array.SortedScoreArray(score_f32).init(
             self.allocator, 
             query_results.capacity,
@@ -1574,8 +1663,6 @@ pub const IndexManager = struct {
                 ) * boost_factors.items[col_idx];
             idf_remaining += boost_weighted_idf;
             scores_arr[idx] = boost_weighted_idf;
-
-            // std.debug.print("DF: {d}\n", .{II.doc_freqs.items[token]});
         }
         const idf_sum = idf_remaining;
 
@@ -1594,6 +1681,16 @@ pub const IndexManager = struct {
             const offset      = II.term_offsets[token];
             const last_offset = II.term_offsets[token + 1];
 
+            const is_high_df_term: bool = (score < IDF_THRESHOLD) or
+                                          (score < 0.4 * idf_sum / @as(f32, @floatFromInt(tokens.items.len)));
+
+            // if (is_high_df_term) {
+                // scoreHighDFTerm(
+                // );
+            // } else {
+                // scoreLowDFTerm(
+                // );
+            // }
             var prev_doc_id: u32 = std.math.maxInt(u32);
             for (II.postings[offset..last_offset]) |doc_token| {
                 const doc_id:   u32 = @intCast(doc_token.doc_id);
@@ -1620,7 +1717,7 @@ pub const IndexManager = struct {
                     }
 
                 } else {
-                    if (!done and ((score > IDF_THRESHOLD) or (score > 0.4 * idf_sum / @as(f32, @floatFromInt(tokens.items.len))))) {
+                    if (!done and !is_high_df_term) {
 
                         if (sorted_scores.count == sorted_scores.capacity - 1) {
                             const min_score = sorted_scores.items[sorted_scores.count - 1];
@@ -1644,11 +1741,13 @@ pub const IndexManager = struct {
                 }
             }
 
+            std.debug.print("TOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
+            std.debug.print("WAS HIGH DF TERM:   {}\n\n", .{is_high_df_term});
             idf_remaining -= score;
             last_col_idx = col_idx;
         }
 
-        // std.debug.print("TOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
+        std.debug.print("\nTOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
 
         var score_it = doc_scores.iterator();
         while (score_it.next()) |entry| {
@@ -2170,5 +2269,5 @@ fn main_cli_runner() !void {
 
 pub fn main() !void {
     // try main_cli_runner();
-    try bench(false);
+    try bench(true);
 }

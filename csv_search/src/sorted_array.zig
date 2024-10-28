@@ -6,18 +6,6 @@ const ScorePair = struct {
 };
 
 pub fn SortedScoreArray(comptime T: type) type {
-    // if (!@hasField(T, "doc_id") or !@hasField(T, "score")) {
-        // @compileError("Type " ++ @typeName(T) ++ " must have 'doc_id: u32' and 'score: f32' fields");
-    // }
-    // if (!@hasField(T, "score")) {
-        // @compileError("Type " ++ @typeName(T) ++ "'score: T' fields");
-    // }
-    // if (@TypeOf(@field(std.mem.zeroes(T), "doc_id")) != u32) {
-        // @compileError("doc_id must be of type u32");
-    // }
-    // if (@TypeOf(@field(std.mem.zeroes(T), "score")) != f32) {
-        // @compileError("score must be of type f32");
-    // }
 
     return struct {
         const Self = @This();
