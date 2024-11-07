@@ -38,7 +38,7 @@ model.index_file(
 )
 
 QUERY = 'hello world'
-K = 50
+K = 10
 
 ## Only analyze documents containing token with fewer than
 ## this number of occurences. Smaller numbers speed up queries
