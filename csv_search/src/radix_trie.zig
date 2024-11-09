@@ -27,11 +27,6 @@ const RadixEdge = extern struct {
         };
         return edge;
     }
-
-    pub inline fn getStr(self: *const RadixEdge) []const u8 {
-        return self.str[0..self.len];
-    }
-
 };
 
 const RadixNode = packed struct {
@@ -79,7 +74,7 @@ const RadixNode = packed struct {
     pub fn printChildren(self: *const RadixNode, depth: u32) void {
         for (0..self.num_edges) |edge_idx| {
             const edge = self.edges[edge_idx];
-            print("Depth {d} - Edge: {s}\n",  .{depth, edge.getStr()});
+            print("Depth {d} - Edge: {s}\n",  .{depth, edge.str[0..edge.len]});
             print("Depth {d} - Child: {d}\n\n", .{depth, edge.child_ptr.value});
             edge.child_ptr.printChildren(depth + 1);
         }
@@ -113,7 +108,8 @@ const RadixTrie = struct {
             var partial: bool = false;
 
             for (0..node.num_edges) |edge_idx| {
-                const current_prefix = node.edges[edge_idx].getStr();
+                const current_edge   = node.edges[edge_idx];
+                const current_prefix = current_edge.str[0..current_edge.len];
                 const lcp = LCP(key[key_idx..], current_prefix);
 
                 if (lcp > max_lcp) {
@@ -143,13 +139,7 @@ const RadixTrie = struct {
 
             // Matched rest of key. Node already exists. Error for now. 
             // Make behavior user defined later.
-            if (!partial and (max_lcp == key[key_idx..].len)) {
-                print("LCP:     {d}\n", .{max_lcp});
-                print("Key idx: {d}\n", .{key_idx});
-                print("Key:     {s}\n", .{key});
-                print("Current: {s}\n", .{node.edges[max_edge_idx].getStr()});
-                return error.AlreadyExistsError;
-            }
+            if (!partial and (max_lcp == key[key_idx..].len)) return error.AlreadyExistsError;
 
             key_idx += max_lcp;
             if (partial) {
@@ -170,7 +160,7 @@ const RadixTrie = struct {
                     // existing_edge: 'ABCD'       //
                     //                             //
                     // --------------------------- //
-                    //            SPLIT            //
+                    //      SPLIT NO-CREATE        //
                     // --------------------------- //
                     // \ - existing_edge           // 
                     //  O - new_node               //
@@ -215,7 +205,7 @@ const RadixTrie = struct {
                     // existing_edge: 'ABCD'               //
                     //                                     //
                     // ----------------------------------- //
-                    //                 SPLIT               //
+                    //             SPLIT CREATE            //
                     // ----------------------------------- //
                     //  \ - existing_edge                  // 
                     //   O - new_node_1                    //
@@ -269,7 +259,9 @@ const RadixTrie = struct {
             var matched = false;
 
             for (0..node.num_edges) |edge_idx| {
-                const current_prefix = node.edges[edge_idx].getStr();
+                const current_edge   = node.edges[edge_idx];
+                const current_prefix = current_edge.str[0..current_edge.len];
+
                 if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
                     matched  = true;
                     node     = node.edges[edge_idx].child_ptr;
