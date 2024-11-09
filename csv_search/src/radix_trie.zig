@@ -37,8 +37,8 @@ const RadixEdge = extern struct {
 const RadixNode = packed struct {
     num_edges: u8,
     edgelist_capacity: u8,
-    _pad: u8,
     is_leaf: bool,
+    _pad: u8,
     value: u32,
     edges: [*]RadixEdge,
 
@@ -47,8 +47,8 @@ const RadixNode = packed struct {
         node.* = RadixNode{
             .num_edges = 0,
             .edgelist_capacity = 0,
+            .is_leaf = false,
             ._pad = undefined,
-            .is_leaf = undefined,
             .value = undefined,
             .edges = undefined,
         };
@@ -75,12 +75,21 @@ const RadixNode = packed struct {
         }
         self.edges[self.num_edges - 1] = edge.*;
     }
+
+    pub fn printChildren(self: *const RadixNode, depth: u32) void {
+        for (0..self.num_edges) |edge_idx| {
+            const edge = self.edges[edge_idx];
+            print("Depth {d} - Edge: {s}\n",  .{depth, edge.getStr()});
+            print("Depth {d} - Child: {d}\n\n", .{depth, edge.child_ptr.value});
+            edge.child_ptr.printChildren(depth + 1);
+        }
+    }
 };
 
 const RadixTrie = struct {
     allocator: std.mem.Allocator,
     root: *RadixNode,
-    num_nodes: u32,
+    num_keys: u32,
 
 
     pub fn init(allocator: std.mem.Allocator) !RadixTrie {
@@ -88,7 +97,7 @@ const RadixTrie = struct {
         return RadixTrie{
             .allocator = allocator,
             .root = root,
-            .num_nodes = 0,
+            .num_keys = 0,
         };
     }
 
@@ -119,7 +128,6 @@ const RadixTrie = struct {
                 // Create new node
                 const new_node   = try RadixNode.init(self.allocator);
                 new_node.value   = value;
-                new_node.is_leaf = true;
 
                 // Create new edge
                 const new_edge = try RadixEdge.init(self.allocator);
@@ -129,58 +137,121 @@ const RadixTrie = struct {
 
                 try node.addEdge(self.allocator, new_edge);
 
-                self.num_nodes += 1;
+                self.num_keys += 1;
                 return;
             }
 
             // Matched rest of key. Node already exists. Error for now. 
             // Make behavior user defined later.
-            if (max_lcp == key[key_idx..].len) return error.AlreadyExistsError;
+            if (!partial and (max_lcp == key[key_idx..].len)) {
+                print("LCP:     {d}\n", .{max_lcp});
+                print("Key idx: {d}\n", .{key_idx});
+                print("Key:     {s}\n", .{key});
+                print("Current: {s}\n", .{node.edges[max_edge_idx].getStr()});
+                return error.AlreadyExistsError;
+            }
 
             key_idx += max_lcp;
             if (partial) {
                 // Split
-                const new_node = try RadixNode.init(self.allocator);
-                const new_edge = try RadixEdge.init(self.allocator);
+                const rem_chars = key.len - key_idx;
+                if (rem_chars == 0) {
+                    var existing_edge = &node.edges[max_edge_idx];
+                    const existing_node = existing_edge.child_ptr;
+                    const new_node = try RadixNode.init(self.allocator);
+                    const new_edge = try RadixEdge.init(self.allocator);
 
-                /////////////////////////////////
-                //                             //
-                // \ - existing_edge           //
-                //  O - existing_node          //
-                //                             //
-                // str:           'ABC'        //
-                // existing_edge: 'ABCD'       //
-                //                             //
-                // --------------------------- //
-                //            SPLIT            //
-                // --------------------------- //
-                // \ - existing_edge           // 
-                //  O - existing_node          //
-                //   \ - new_edge              //
-                //    O - new_node             //
-                //                             //
-                // existing_edge: 'ABC'        //
-                // new_edge:      'D'          //
-                //                             //
-                /////////////////////////////////
+                    /////////////////////////////////
+                    //                             //
+                    // \ - existing_edge           //
+                    //  O - existing_node          //
+                    //                             //
+                    // str:           'ABC'        //
+                    // existing_edge: 'ABCD'       //
+                    //                             //
+                    // --------------------------- //
+                    //            SPLIT            //
+                    // --------------------------- //
+                    // \ - existing_edge           // 
+                    //  O - new_node               //
+                    //   \ - new_edge              //
+                    //    O - existing_node        //
+                    //                             //
+                    // existing_edge: 'ABC'        //
+                    // new_edge:      'D'          //
+                    //                             //
+                    /////////////////////////////////
+                    new_node.is_leaf = true;
 
-                @memcpy(new_edge.str[0..key.len - key_idx], key[key_idx..]);
-                new_edge.len  = max_lcp;
-                new_edge.child_ptr = new_node;
+                    new_edge.len      = existing_edge.len - max_lcp;
+                    existing_edge.len = max_lcp;
 
-                node.edges[max_edge_idx].len -= 1;
+                    @memcpy(
+                        new_edge.str[0..new_edge.len], 
+                        existing_edge.str[0..new_edge.len],
+                        );
 
-                try node.addEdge(self.allocator, new_edge);
+                    existing_edge.child_ptr = new_node;
+                    new_edge.child_ptr      = existing_node;
 
-                new_node.* = RadixNode{
-                    .num_edges = 0,
-                    .edgelist_capacity = 0,
-                    ._pad = undefined,
-                    .is_leaf = true,
-                    .value = value,
-                    .edges = undefined,
-                };
-                self.num_nodes += 1;
+                    new_node.value = value;
+
+                    try new_node.addEdge(self.allocator, new_edge);
+                    self.num_keys += 1;
+                } else {
+                    var existing_edge = &node.edges[max_edge_idx];
+                    const existing_node = existing_edge.child_ptr;
+                    const new_node_1 = try RadixNode.init(self.allocator);
+                    const new_edge_1 = try RadixEdge.init(self.allocator);
+                    const new_node_2 = try RadixNode.init(self.allocator);
+                    const new_edge_2 = try RadixEdge.init(self.allocator);
+
+                    /////////////////////////////////////////
+                    //                                     //
+                    // \ - existing_edge                   //
+                    //  O - existing_node                  //
+                    //                                     //
+                    // str:           'AEF'                //
+                    // existing_edge: 'ABCD'               //
+                    //                                     //
+                    // ----------------------------------- //
+                    //                 SPLIT               //
+                    // ----------------------------------- //
+                    //  \ - existing_edge                  // 
+                    //   O - new_node_1                    //
+                    //  / \ - (new_edge_1, new_edge_2)     //
+                    // O   O - (new_node_2, existing_node) //
+                    //                                     //
+                    // existing_edge: 'A'                  //
+                    // new_edge_1:    'BCD'                //
+                    // new_edge_2:    'EF'                 //
+                    //                                     //
+                    /////////////////////////////////////////
+                    new_node_2.is_leaf = true;
+
+                    new_edge_1.len    = @intCast(rem_chars);
+                    new_edge_2.len    = existing_edge.len - max_lcp;
+                    existing_edge.len = max_lcp;
+
+                    @memcpy(
+                        new_edge_1.str[0..new_edge_1.len], 
+                        key[key.len-rem_chars..],
+                        );
+                    @memcpy(
+                        new_edge_2.str[0..new_edge_2.len], 
+                        existing_edge.str[max_lcp..max_lcp + new_edge_2.len],
+                        );
+
+                    new_edge_1.child_ptr    = new_node_2;
+                    new_edge_2.child_ptr    = existing_node;
+                    existing_edge.child_ptr = new_node_1;
+
+                    new_node_2.value = value;
+
+                    try new_node_1.addEdge(self.allocator, new_edge_1);
+                    try new_node_1.addEdge(self.allocator, new_edge_2);
+                    self.num_keys += 1;
+                }
                 return;
             }
 
@@ -188,9 +259,66 @@ const RadixTrie = struct {
             node = next_node;
         }
     }
+
+    pub fn find(self: *RadixTrie, key: []const u8) !u32 {
+        var node = self.root;
+        var key_idx: usize = 0;
+        var depth: usize = 0;
+
+        while (true) {
+            var matched = false;
+
+            for (0..node.num_edges) |edge_idx| {
+                const current_prefix = node.edges[edge_idx].getStr();
+                if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                    matched  = true;
+                    node     = node.edges[edge_idx].child_ptr;
+                    key_idx += current_prefix.len;
+
+                    if (key_idx == key.len) return node.value;
+                    break;
+                }
+            }
+
+            if (!matched) return std.math.maxInt(u32);
+            depth += 1;
+            
+        }
+    }
+
+    pub fn printNodes(self: *const RadixTrie) void {
+        self.root.printChildren(0);
+        print("\n\n", .{});
+    }
 };
 
 
+test "insertion" {
+    print("\n\n", .{});
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var trie = try RadixTrie.init(allocator);
+
+    try trie.insert("test", 420);
+    try trie.insert("testing", 69);
+    try trie.insert("tes", 24);
+    try trie.insert("waddup", 54);
+    try trie.insert("newting", 54);
+    try trie.insert("tosting", 69);
+
+    trie.printNodes();
+
+    try std.testing.expectEqual(420, trie.find("test"));
+    try std.testing.expectEqual(69, trie.find("testing"));
+    try std.testing.expectEqual(24, trie.find("tes"));
+    try std.testing.expectEqual(420, trie.find("test"));
+    try std.testing.expectEqual(69, trie.find("testing"));
+    try std.testing.expectEqual(54, trie.find("waddup"));
+    try std.testing.expectEqual(std.math.maxInt(u32), trie.find("testin"));
+}
 
 test "bench" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -210,7 +338,7 @@ test "bench" {
     var trie = try RadixTrie.init(allocator);
 
     const _N: usize = 1_000_000;
-    const num_chars: usize = 8;
+    const num_chars: usize = 7;
     const rand = std.crypto.random;
     for (0.._N) |i| {
         var key = try allocator.alloc(u8, num_chars);
@@ -245,5 +373,5 @@ test "bench" {
     // std.debug.print("Hashmap MB allocated: {d}MB\n", .{(init_bytes) / (1024 * 1024)});
     // std.debug.print("Trie MB allocated:    {d}MB\n", .{total_bytes / (1024 * 1024)});
 
-    try std.testing.expectEqual(N, trie.num_nodes);
+    try std.testing.expectEqual(N, trie.num_keys);
 }
