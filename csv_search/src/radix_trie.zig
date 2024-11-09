@@ -1,42 +1,44 @@
 const std = @import("std");
 
+const print = std.debug.print;
+
 const MAX_STRING_LEN = 7;
 
 
 pub fn LCP(key: []const u8, match: []const u8) u8 {
-    var len: usize = 0;
-    for (key) |c| {
-        if (c != match[len]) return @intCast(len);
-        len += 1;
+    const max_chars = @min(key.len, match.len);
+    for (0..max_chars) |idx| {
+        if (key[idx] != match[idx]) return @intCast(idx);
     }
-    return len;
+    return @intCast(max_chars);
 }
 
 const RadixEdge = extern struct {
-    edge_str: [MAX_STRING_LEN]u8,
-    edge_len: u8,
+    str: [MAX_STRING_LEN]u8,
+    len: u8,
     child_ptr: *RadixNode,
 
     pub fn init(allocator: std.mem.Allocator) !*RadixEdge {
-        const edge = allocator.create(RadixEdge);
+        const edge = try allocator.create(RadixEdge);
         edge.* = RadixEdge{
-            .edge_str = undefined,
-            .edge_len = 0,
+            .str = undefined,
+            .len = 0,
             .child_ptr = undefined,
         };
         return edge;
     }
 
-    pub inline fn getStr(self: *const RadixEdge) *[]u8 {
-        return self.edge_str[0..self.edge_len];
+    pub inline fn getStr(self: *const RadixEdge) []const u8 {
+        return self.str[0..self.len];
     }
 
 };
 
 const RadixNode = packed struct {
     num_edges: u8,
+    edgelist_capacity: u8,
+    _pad: u8,
     is_leaf: bool,
-    _pad: u16,
     value: u32,
     edges: [*]RadixEdge,
 
@@ -44,25 +46,47 @@ const RadixNode = packed struct {
         const node = try allocator.create(RadixNode);
         node.* = RadixNode{
             .num_edges = 0,
-            .is_leaf = undefined,
+            .edgelist_capacity = 0,
             ._pad = undefined,
+            .is_leaf = undefined,
             .value = undefined,
             .edges = undefined,
         };
         return node;
     }
+
+    pub inline fn addEdge(
+        self: *RadixNode, 
+        allocator: std.mem.Allocator,
+        edge: *RadixEdge,
+        ) !void {
+        self.num_edges += 1;
+
+        if (self.num_edges > self.edgelist_capacity) {
+            const new_capacity: usize = @min(256, (2 * self.edgelist_capacity) + 1);
+            const old_slice = self.edges[0..self.edgelist_capacity];
+
+            const new_slice: []RadixEdge = try allocator.realloc(
+                    old_slice,
+                    new_capacity,
+                    );
+            self.edges = new_slice.ptr;
+            self.edgelist_capacity = @intCast(new_capacity);
+        }
+        self.edges[self.num_edges - 1] = edge.*;
+    }
 };
 
 const RadixTrie = struct {
-    arena: *std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
     root: *RadixNode,
     num_nodes: u32,
 
 
-    pub fn init(arena: *std.heap.ArenaAllocator) !RadixTrie {
-        const root = try RadixNode.init(arena.allocator());
+    pub fn init(allocator: std.mem.Allocator) !RadixTrie {
+        const root = try RadixNode.init(allocator);
         return RadixTrie{
-            .arena = arena,
+            .allocator = allocator,
             .root = root,
             .num_nodes = 0,
         };
@@ -70,78 +94,123 @@ const RadixTrie = struct {
 
     pub fn insert(self: *RadixTrie, key: []const u8, value: u32) !void {
         var node = self.root;
+        var key_idx: usize = 0;
 
+        // TODO: Break at MAX_STRING_LEN chars.
         while (true) {
             var next_node: *RadixNode = undefined;
+            var max_edge_idx: usize = 0;
             var max_lcp: u8 = 0;
+            var partial: bool = false;
+
             for (0..node.num_edges) |edge_idx| {
                 const current_prefix = node.edges[edge_idx].getStr();
-                const lcp = LCP(key, current_prefix);
+                const lcp = LCP(key[key_idx..], current_prefix);
 
                 if (lcp > max_lcp) {
-                    max_lcp = lcp;
+                    max_lcp   = lcp;
+                    max_edge_idx = edge_idx;
                     next_node = node.edges[edge_idx].child_ptr;
+                    partial   = lcp < current_prefix.len;
                 }
             }
 
-
             if (max_lcp == 0) {
-                // TODO: Check for exceeding MAX_STRING_LEN
-
                 // Create new node
-                const new_node = try RadixNode.init(self.arena.allocator());
-                new_node.value = value;
+                const new_node   = try RadixNode.init(self.allocator);
+                new_node.value   = value;
                 new_node.is_leaf = true;
 
-                node.is_leaf = false;
-
                 // Create new edge
-                node.edges[node.num_edges] = try RadixEdge.init(self.arena.allocator());
-                node.edges[node.num_edges].* = RadixEdge{
-                    .edge_str = key,
-                    .edge_len = key.len,
-                    .child_ptr = new_node,
-                };
-                node.num_edges += 1;
+                const new_edge = try RadixEdge.init(self.allocator);
+                @memcpy(new_edge.str[0..key.len - key_idx], key[key_idx..]);
+                new_edge.len = @intCast(key[key_idx..].len);
+                new_edge.child_ptr = new_node;
 
+                try node.addEdge(self.allocator, new_edge);
+
+                self.num_nodes += 1;
                 return;
             }
 
-            // node = next_node;
+            // Matched rest of key. Node already exists. Error for now. 
+            // Make behavior user defined later.
+            if (max_lcp == key[key_idx..].len) return error.AlreadyExistsError;
+
+            key_idx += max_lcp;
+            if (partial) {
+                // Split
+                const new_node = try RadixNode.init(self.allocator);
+                const new_edge = try RadixEdge.init(self.allocator);
+
+                /////////////////////////////////
+                //                             //
+                // \ - existing_edge           //
+                //  O - existing_node          //
+                //                             //
+                // str:           'ABC'        //
+                // existing_edge: 'ABCD'       //
+                //                             //
+                // --------------------------- //
+                //            SPLIT            //
+                // --------------------------- //
+                // \ - existing_edge           // 
+                //  O - existing_node          //
+                //   \ - new_edge              //
+                //    O - new_node             //
+                //                             //
+                // existing_edge: 'ABC'        //
+                // new_edge:      'D'          //
+                //                             //
+                /////////////////////////////////
+
+                @memcpy(new_edge.str[0..key.len - key_idx], key[key_idx..]);
+                new_edge.len  = max_lcp;
+                new_edge.child_ptr = new_node;
+
+                node.edges[max_edge_idx].len -= 1;
+
+                try node.addEdge(self.allocator, new_edge);
+
+                new_node.* = RadixNode{
+                    .num_edges = 0,
+                    .edgelist_capacity = 0,
+                    ._pad = undefined,
+                    .is_leaf = true,
+                    .value = value,
+                    .edges = undefined,
+                };
+                self.num_nodes += 1;
+                return;
+            }
+
+            // Traverse
+            node = next_node;
         }
     }
 };
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 test "bench" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
+
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // defer {
+        // _ = gpa.deinit();
+    // }
+    // const g_allocator = gpa.allocator();
 
     var keys = std.StringHashMap(usize).init(allocator);
     defer keys.deinit();
 
-    var trie = try RadixTrie.init(&arena);
+    var trie = try RadixTrie.init(allocator);
 
-    const _N: usize = 1;
-    const num_chars: usize = 6;
+    const _N: usize = 1_000_000;
+    const num_chars: usize = 8;
     const rand = std.crypto.random;
     for (0.._N) |i| {
         var key = try allocator.alloc(u8, num_chars);
@@ -154,7 +223,7 @@ test "bench" {
     const N = keys.count();
     std.debug.print("N: {d}\n", .{N});
 
-    const init_bytes: usize = arena.queryCapacity();
+    // const init_bytes: usize = arena.queryCapacity();
 
     const start = std.time.milliTimestamp();
     var it = keys.iterator();
@@ -172,9 +241,9 @@ test "bench" {
     std.debug.print("Insertions per second: {d}\n", .{insertions_per_second});
 
     // Get total bytes allocated
-    const total_bytes: usize = trie.mem_usage;
-    std.debug.print("Hashmap MB allocated: {d}MB\n", .{(init_bytes) / (1024 * 1024)});
-    std.debug.print("Trie MB allocated:    {d}MB\n", .{total_bytes / (1024 * 1024)});
+    // const total_bytes: usize = trie.getMemUsage();
+    // std.debug.print("Hashmap MB allocated: {d}MB\n", .{(init_bytes) / (1024 * 1024)});
+    // std.debug.print("Trie MB allocated:    {d}MB\n", .{total_bytes / (1024 * 1024)});
 
-    try std.testing.expectEqual(N, trie.terminal_count);
+    try std.testing.expectEqual(N, trie.num_nodes);
 }
