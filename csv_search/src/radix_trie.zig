@@ -33,7 +33,7 @@ const RadixNode = packed struct {
     num_edges: u8,
     edgelist_capacity: u8,
     is_leaf: bool,
-    _pad: u8,
+    freq_char_bitmask: u8,
     value: u32,
     edges: [*]RadixEdge,
 
@@ -43,7 +43,7 @@ const RadixNode = packed struct {
             .num_edges = 0,
             .edgelist_capacity = 0,
             .is_leaf = false,
-            ._pad = undefined,
+            .freq_char_bitmask = 0,
             .value = undefined,
             .edges = undefined,
         };
@@ -273,7 +273,7 @@ const RadixTrie = struct {
         }
     }
 
-    pub fn find(self: *RadixTrie, key: []const u8) !u32 {
+    pub fn find(self: *RadixTrie, key: []const u8) u32 {
         var node = self.root;
         var key_idx: usize = 0;
         var depth: usize = 0;
@@ -368,27 +368,30 @@ test "bench" {
     const N = keys.count();
     std.debug.print("N: {d}\n", .{N});
 
-    // const init_bytes: usize = arena.queryCapacity();
-
-    const start = std.time.milliTimestamp();
+    var start = std.time.milliTimestamp();
     var it = keys.iterator();
     var i: u32 = 0;
     while (it.next()) |entry| {
         try trie.insert(entry.key_ptr.*, i);
         i += 1;
     }
-    const end = std.time.milliTimestamp();
-    const elapsed = end - start;
+    var end = std.time.milliTimestamp();
+    const elapsed_insert = end - start;
+
+    start = std.time.milliTimestamp();
+    it = keys.iterator();
+    while (it.next()) |entry| {
+        _ = trie.find(entry.key_ptr.*);
+    }
+    end = std.time.milliTimestamp();
+    const elapsed_find = end - start;
 
     const big_N: u64 = N * @as(u64, 1000);
-    const insertions_per_second = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed));
-    std.debug.print("\nConstruction time: {}ms\n", .{elapsed});
+    const insertions_per_second = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert));
+    const lookups_per_second    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_find));
+    std.debug.print("\nConstruction time:   {}ms\n", .{elapsed_insert});
     std.debug.print("Insertions per second: {d}\n", .{insertions_per_second});
-
-    // Get total bytes allocated
-    // const total_bytes: usize = trie.getMemUsage();
-    // std.debug.print("Hashmap MB allocated: {d}MB\n", .{(init_bytes) / (1024 * 1024)});
-    // std.debug.print("Trie MB allocated:    {d}MB\n", .{total_bytes / (1024 * 1024)});
+    std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second});
 
     try std.testing.expectEqual(N, trie.num_keys);
 }
