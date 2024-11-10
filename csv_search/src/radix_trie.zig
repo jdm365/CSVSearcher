@@ -4,6 +4,27 @@ const print = std.debug.print;
 
 const MAX_STRING_LEN = 7;
 
+// Most frequent characters in English.
+const CHAR_FREQ_TABLE: [256]u8 = blk: {
+    var table: [256]u8 = undefined;
+    for (0..256) |idx| {
+        table[idx] = 0;
+    }
+
+    table['e'] = 1;
+    table['a'] = 2;
+    table['r'] = 3;
+    table['i'] = 4;
+    table['o'] = 5;
+    table['t'] = 6;
+    table['n'] = 7;
+
+    break :blk table;
+};
+
+pub inline fn getFreqVal(char: u8) u8 {
+    return (@as(u8, 1) << @as(u3, @intCast(CHAR_FREQ_TABLE[char])));
+}
 
 pub fn LCP(key: []const u8, match: []const u8) u8 {
     const max_chars = @min(key.len, match.len);
@@ -127,6 +148,8 @@ const RadixTrie = struct {
                 key[0..num_chars_edge],
                 );
 
+            node.freq_char_bitmask |= getFreqVal(key[0]);
+
             try node.addEdge(self.allocator, new_edge);
 
             if (is_leaf) break;
@@ -140,12 +163,20 @@ const RadixTrie = struct {
         var node = self.root;
         var key_idx: usize = 0;
 
-        // TODO: Break at MAX_STRING_LEN chars.
         while (true) {
             var next_node: *RadixNode = undefined;
             var max_edge_idx: usize = 0;
             var max_lcp: u8 = 0;
             var partial: bool = false;
+
+            const bit_idx: u8 = (
+                node.freq_char_bitmask & getFreqVal(key[key_idx])
+            );
+            if (bit_idx == 0) {
+                try self.addNode(key[key_idx..], node, value);
+                self.num_keys += 1;
+                return;
+            }
 
             for (0..node.num_edges) |edge_idx| {
                 const current_edge   = node.edges[edge_idx];
@@ -214,6 +245,7 @@ const RadixTrie = struct {
                     new_edge.child_ptr      = existing_node;
 
                     new_node.value = value;
+                    new_node.freq_char_bitmask = getFreqVal(new_edge.str[0]);
 
                     try new_node.addEdge(self.allocator, new_edge);
                     self.num_keys += 1;
@@ -262,6 +294,7 @@ const RadixTrie = struct {
 
                     // New node addition handler here, to account for rem_chars > MAX_STRING_LEN.
                     try self.addNode(key[key.len-rem_chars..], new_node_1, value);
+                    new_node_1.freq_char_bitmask |= getFreqVal(new_edge_2.str[0]);
                 }
 
                 self.num_keys += 1;
@@ -321,9 +354,10 @@ test "insertion" {
     try trie.insert("testing", 69);
     try trie.insert("tes", 24);
     try trie.insert("waddup", 54);
-    try trie.insert("newting", 54);
+    try trie.insert("newting", 44);
     try trie.insert("tosting", 69);
     try trie.insert("abracadabra", 121);
+    try trie.insert("toaster", 84);
 
     trie.printNodes();
 
@@ -338,6 +372,7 @@ test "insertion" {
 }
 
 test "bench" {
+    // @breakpoint();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -355,12 +390,12 @@ test "bench" {
     var trie = try RadixTrie.init(allocator);
 
     const _N: usize = 1_000_000;
-    const num_chars: usize = 7;
+    const num_chars: usize = 6;
     const rand = std.crypto.random;
     for (0.._N) |i| {
         var key = try allocator.alloc(u8, num_chars);
         for (0..num_chars) |j| {
-            key[j] = rand.int(u8) % 12 + @as(u8, 'a');
+            key[j] = rand.int(u8) % 26 + @as(u8, 'a');
         }
         try keys.put(key, i);
     }
