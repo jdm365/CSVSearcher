@@ -247,7 +247,6 @@ const RadixTrie = struct {
                 partial      = max_lcp < edge.len;
                 max_edge_idx = access_idx;
 
-                // std.debug.assert(max_lcp > 0);
                 if (max_lcp == 0) {
                     print("access_idx: {d}\n", .{access_idx});
                     print("Bitmask:    {b:0>8}\n", .{node.freq_char_bitmask});
