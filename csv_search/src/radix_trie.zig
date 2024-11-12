@@ -279,7 +279,6 @@ const RadixTrie = struct {
 
             // Matched rest of key. Node already exists. Error for now. 
             // Make behavior user defined later.
-            // if (!partial and (max_lcp == key[key_idx..].len)) return error.AlreadyExistsError;
             if (!partial and (key_idx == key.len)) return error.AlreadyExistsError;
 
             const rem_chars: usize = key.len - key_idx;
@@ -390,10 +389,10 @@ const RadixTrie = struct {
             var matched = false;
             if (key_idx >= key.len) return std.math.maxInt(u32);
 
+            const shift_len:  usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
+            const access_idx: usize = @popCount(node.freq_char_bitmask & FULL_MASKS[shift_len]);
 
-            const shift_len: usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
             if (shift_len > 0) {
-                const access_idx = @popCount(node.freq_char_bitmask & FULL_MASKS[shift_len]);
                 const current_edge   = node.edges[access_idx];
                 const current_prefix = current_edge.str[0..current_edge.len];
 
@@ -405,8 +404,7 @@ const RadixTrie = struct {
                     if ((key_idx == key.len) and node.is_leaf) return node.value;
                 }
             } else {
-                const start_idx = @popCount(node.freq_char_bitmask);
-                for (start_idx..node.num_edges) |edge_idx| {
+                for (access_idx..node.num_edges) |edge_idx| {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
 
@@ -474,8 +472,8 @@ test "insertion" {
 
 test "bench" {
     // @breakpoint();
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    // var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
@@ -490,58 +488,74 @@ test "bench" {
 
     var trie = try RadixTrie.init(allocator);
 
-    const _N: usize = 1_000_000;
-    const num_chars: usize = 6;
-    const rand = std.crypto.random;
+    // const _N: usize = 1_000_000;
+    // const num_chars: usize = 6;
+    // const rand = std.crypto.random;
 
-    const raw_keys = try allocator.alloc([num_chars]u8, _N);
-    for (0.._N) |i| {
-        for (0..num_chars) |j| {
-            raw_keys[i][j] = rand.int(u8) % 26 + @as(u8, 'a');
-        }
-    }
+    // TODO: Read lines from file.
+    const filename = "data/words.txt";
+    const max_bytes_per_line = 4096;
+    var file = std.fs.cwd().openFile(filename, .{}) catch {
+        return;
+    };
+    defer file.close();
+    var buffered_reader = std.io.bufferedReader(file.reader());
 
-    var start = std.time.milliTimestamp();
-    for (0.._N) |i| {
-        try keys.put(&raw_keys[i], i);
+    var raw_keys: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(allocator);
+    defer raw_keys.deinit();
+
+    const reader = buffered_reader.reader();
+    while (try reader.readUntilDelimiterOrEofAlloc(allocator, '\n', max_bytes_per_line)) |line| {
+        try raw_keys.append(line);
     }
-    var end = std.time.milliTimestamp();
+    const _N = raw_keys.items.len;
+
+    var start = std.time.microTimestamp();
+    for (0.._N) |i| {
+        try keys.put(raw_keys.items[i], i);
+    }
+    var end = std.time.microTimestamp();
     const elapsed_insert_hashmap = end - start;
 
     const N = keys.count();
     std.debug.print("N: {d}\n", .{N});
 
-    start = std.time.milliTimestamp();
+    const init_capacity = arena.queryCapacity();
+    start = std.time.microTimestamp();
     var it = keys.iterator();
     var i: u32 = 0;
-    while (it.next()) |entry| {
-        try trie.insert(entry.key_ptr.*, i);
+    for (0..N) |j| {
+        try trie.insert(raw_keys.items[j], i);
         i += 1;
     }
-    end = std.time.milliTimestamp();
+    end = std.time.microTimestamp();
     const elapsed_insert_trie = end - start;
+    const final_capacity = arena.queryCapacity();
+    print("Initial capacity: {d}\n", .{init_capacity});
+    print("Final capacity: {d}\n", .{final_capacity});
+    print("Capacity used: {d}\n", .{final_capacity - init_capacity});
 
-    start = std.time.milliTimestamp();
+    start = std.time.microTimestamp();
     it = keys.iterator();
     while (it.next()) |entry| {
         _ = trie.find(entry.key_ptr.*);
     }
-    end = std.time.milliTimestamp();
+    end = std.time.microTimestamp();
     const elapsed_trie_find = end - start;
 
-    start = std.time.milliTimestamp();
+    start = std.time.microTimestamp();
     it = keys.iterator();
     while (it.next()) |entry| {
         _ = keys.get(entry.key_ptr.*);
     }
-    end = std.time.milliTimestamp();
+    end = std.time.microTimestamp();
     const elapsed_hashmap_find = end - start;
 
-    const big_N: u64 = N * @as(u64, 1000);
+    const big_N: u64 = N * @as(u64, 1_000_000);
     const insertions_per_second_trie = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert_trie));
     const lookups_per_second_trie    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_trie_find));
     std.debug.print("-------------------  RADIX TRIE  -------------------\n", .{});
-    std.debug.print("\nConstruction time:   {}ms\n", .{elapsed_insert_trie});
+    std.debug.print("\nConstruction time:   {}ms\n", .{@divFloor(elapsed_insert_trie, 1000)});
     std.debug.print("Insertions per second: {d}\n", .{insertions_per_second_trie});
     std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second_trie});
 
@@ -550,7 +564,7 @@ test "bench" {
     const insertions_per_second_hashmap = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert_hashmap));
     const lookups_per_second_hashmap    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_hashmap_find));
     std.debug.print("-------------------  HASHMAP  -------------------\n", .{});
-    std.debug.print("\nConstruction time:   {}ms\n", .{elapsed_insert_hashmap});
+    std.debug.print("\nConstruction time:   {}ms\n", .{@divFloor(elapsed_insert_hashmap, 1000)});
     std.debug.print("Insertions per second: {d}\n", .{insertions_per_second_hashmap});
     std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second_hashmap});
 
