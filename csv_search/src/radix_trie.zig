@@ -166,6 +166,7 @@ const RadixNode = packed struct {
 const RadixTrie = struct {
     allocator: std.mem.Allocator,
     root: *RadixNode,
+    nodes: std.ArrayList(RadixNode),
     num_keys: u32,
 
 
@@ -174,6 +175,7 @@ const RadixTrie = struct {
         return RadixTrie{
             .allocator = allocator,
             .root = root,
+            .nodes = std.ArrayList(RadixNode).init(allocator),
             .num_keys = 0,
         };
     }
@@ -548,22 +550,22 @@ test "bench" {
     end = std.time.microTimestamp();
     const elapsed_hashmap_find = end - start;
 
-    const big_N: u64 = N * @as(u64, 1_000_000);
-    const insertions_per_second_trie = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert_trie));
-    const lookups_per_second_trie    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_trie_find));
+    // const big_N: u64 = N * @as(u64, 1_000_000);
+    const million_insertions_per_second_trie = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_insert_trie));
+    const million_lookups_per_second_trie    = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_trie_find));
     std.debug.print("-------------------  RADIX TRIE  -------------------\n", .{});
     std.debug.print("\nConstruction time:   {}ms\n", .{@divFloor(elapsed_insert_trie, 1000)});
-    std.debug.print("Insertions per second: {d}\n", .{insertions_per_second_trie});
-    std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second_trie});
+    std.debug.print("Million insertions per second: {d}\n", .{million_insertions_per_second_trie});
+    std.debug.print("Million lookups per second:    {d}\n", .{million_lookups_per_second_trie});
 
     std.debug.print("\n\n", .{});
 
-    const insertions_per_second_hashmap = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert_hashmap));
-    const lookups_per_second_hashmap    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_hashmap_find));
+    const million_insertions_per_second_hashmap = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_insert_hashmap));
+    const million_lookups_per_second_hashmap    = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_hashmap_find));
     std.debug.print("-------------------  HASHMAP  -------------------\n", .{});
     std.debug.print("\nConstruction time:   {}ms\n", .{@divFloor(elapsed_insert_hashmap, 1000)});
-    std.debug.print("Insertions per second: {d}\n", .{insertions_per_second_hashmap});
-    std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second_hashmap});
+    std.debug.print("Million insertions per second: {d}\n", .{million_insertions_per_second_hashmap});
+    std.debug.print("Million lookups per second:    {d}\n", .{million_lookups_per_second_hashmap});
 
 
     try std.testing.expectEqual(N, trie.num_keys);
