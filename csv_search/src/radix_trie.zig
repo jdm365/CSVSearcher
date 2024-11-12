@@ -202,6 +202,7 @@ const RadixTrie = struct {
             const new_node   = try RadixNode.init(self.allocator);
             new_node.value   = value;
             new_node.is_leaf = is_leaf;
+            new_node.freq_char_bitmask = 0b00000001;
 
             const new_edge     = try RadixEdge.init(self.allocator);
             new_edge.len       = @truncate(num_chars_edge);
@@ -256,7 +257,7 @@ const RadixTrie = struct {
                 partial      = max_lcp < edge.len;
                 max_edge_idx = access_idx;
             } else {
-                const start_idx = @popCount(node.freq_char_bitmask);
+                const start_idx = @popCount(node.freq_char_bitmask & 0b11111110);
                 for (start_idx..node.num_edges) |edge_idx| {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
@@ -326,7 +327,9 @@ const RadixTrie = struct {
                     new_edge.child_ptr      = existing_node;
 
                     new_node.value = value;
-                    new_node.freq_char_bitmask = (BIT_MASKS[CHAR_FREQ_TABLE[new_edge.str[0]]] & 0b11111110);
+                    new_node.freq_char_bitmask = (
+                        BIT_MASKS[CHAR_FREQ_TABLE[new_edge.str[0]]] | 0b00000001
+                        );
 
                     try new_node.addEdgePos(self.allocator, new_edge);
                     self.num_keys += 1;
@@ -392,7 +395,9 @@ const RadixTrie = struct {
             if (key_idx >= key.len) return std.math.maxInt(u32);
 
             const shift_len:  usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
-            const access_idx: usize = @popCount(node.freq_char_bitmask & FULL_MASKS[shift_len]);
+            const access_idx: usize = @popCount(
+                node.freq_char_bitmask  & 0b11111110 & FULL_MASKS[shift_len]
+                );
 
             if (shift_len > 0) {
                 const current_edge   = node.edges[access_idx];
@@ -403,7 +408,8 @@ const RadixTrie = struct {
                     node     = current_edge.child_ptr;
                     key_idx += current_prefix.len;
 
-                    if ((key_idx == key.len) and node.is_leaf) return node.value;
+                    // if ((key_idx == key.len) and node.is_leaf) return node.value;
+                    if ((key_idx == key.len) and (node.freq_char_bitmask & 0b00000001 == 1)) return node.value;
                 }
             } else {
                 for (access_idx..node.num_edges) |edge_idx| {
@@ -415,7 +421,8 @@ const RadixTrie = struct {
                         node     = node.edges[edge_idx].child_ptr;
                         key_idx += current_prefix.len;
 
-                        if ((key_idx == key.len) and node.is_leaf) return node.value;
+                        // if ((key_idx == key.len) and node.is_leaf) return node.value;
+                        if ((key_idx == key.len) and (node.freq_char_bitmask & 0b00000001 == 1)) return node.value;
                         break;
                     }
                 }
