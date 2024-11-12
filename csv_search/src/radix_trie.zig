@@ -22,13 +22,26 @@ const CHAR_FREQ_TABLE: [256]u8 = blk: {
     break :blk table;
 };
 
-pub inline fn _getFreqVal(lhs: u8, shift_len: u3) u8 {
-    return lhs << shift_len;
-}
-
-pub inline fn getFreqVal(lhs: u8, char: u8) u8 {
-    return _getFreqVal(lhs, @as(u3, @intCast(CHAR_FREQ_TABLE[char])));
-}
+const FULL_MASKS: [8]u8 = [_]u8{
+    0b11111110,
+    0b11111100,
+    0b11111000,
+    0b11110000,
+    0b11100000,
+    0b11000000,
+    0b10000000,
+    0b00000000,
+};
+const BIT_MASKS: [8]u8 = [_]u8{
+    0b00000001,
+    0b00000010,
+    0b00000100,
+    0b00001000,
+    0b00010000,
+    0b00100000,
+    0b01000000,
+    0b10000000,
+};
 
 pub inline fn popCnt(T: type, val: T) usize {
     return @intCast(std.zig.c_builtins.__builtin_popcount(
@@ -37,19 +50,9 @@ pub inline fn popCnt(T: type, val: T) usize {
 }
 
 pub inline fn getInsertIdx(bitmask: u8, char: u8) usize {
-    //////////////////////////////////////////////////////////////
-    // NOTE: Due to u3 overflow we say:
-    // shift_len = CHAR_FREQ_TABLE[char] - 1, then 7 - shift_len,
-    // instead of
-    // shift_len = CHAR_FREQ_TABLE[char], 8 - shift_len.
-    // which expresses the intent more clearly.
-    //////////////////////////////////////////////////////////////
-
-    const shift_len: u3 = @truncate(CHAR_FREQ_TABLE[char] - 1);
-    const num_bits_populated_front: u8 = @intCast(std.zig.c_builtins.__builtin_popcount(
-        @intCast(bitmask & _getFreqVal(254, shift_len + 1))
-        ));
-    return @intCast(num_bits_populated_front);
+    const shift_len: usize = @intCast(CHAR_FREQ_TABLE[char]);
+    const num_bits_populated_front = popCnt(u8, bitmask & FULL_MASKS[shift_len]);
+    return num_bits_populated_front;
 }
 
 pub fn LCP(key: []const u8, match: []const u8) u8 {
@@ -118,6 +121,35 @@ const RadixNode = packed struct {
         self.edges[self.num_edges - 1] = edge.*;
     }
 
+    pub inline fn addEdgePos(
+        self: *RadixNode, 
+        allocator: std.mem.Allocator,
+        edge: *RadixEdge,
+        ) !void {
+        if (CHAR_FREQ_TABLE[edge.str[0]] == 0) {
+            try self.addEdge(allocator, edge);
+            return;
+        }
+
+        const insert_idx_new: usize = getInsertIdx(self.freq_char_bitmask, edge.str[0]);
+        const old_swap_idx: usize   = @intCast(self.num_edges);
+
+        try self.addEdge(allocator, edge);
+        if (insert_idx_new == old_swap_idx) return;
+
+        // Save for swap. Will be overwritten in memmove.
+        const temp = self.edges[old_swap_idx];
+
+        // Memmove
+        var idx: usize = @intCast(self.num_edges - 1);
+        while (idx > insert_idx_new) : (idx -= 1) {
+            self.edges[idx] = self.edges[idx - 1];
+        }
+
+        // Swap
+        self.edges[insert_idx_new] = temp;
+    }
+
     pub fn printChildren(self: *const RadixNode, depth: u32) void {
         for (0..self.num_edges) |edge_idx| {
             const edge = self.edges[edge_idx];
@@ -182,33 +214,12 @@ const RadixTrie = struct {
                 new_edge.str[0..num_chars_edge], 
                 key[current_idx..current_idx+num_chars_edge],
                 );
-            node.freq_char_bitmask |= getFreqVal(1, new_edge.str[0]);
+            node.freq_char_bitmask |= (BIT_MASKS[CHAR_FREQ_TABLE[new_edge.str[0]]] & 0b11111110);
 
             if (CHAR_FREQ_TABLE[new_edge.str[0]] == 0) {
                 try node.addEdge(self.allocator, new_edge);
             } else {
-                const insert_idx_new: usize = getInsertIdx(node.freq_char_bitmask, key[current_idx]);
-                const old_swap_idx: usize   = @intCast(node.num_edges);
-
-                if (insert_idx_new + old_swap_idx == 0) {
-                    try node.addEdge(self.allocator, new_edge);
-                    break;
-                }
-
-                std.debug.assert(insert_idx_new < node.num_edges + 1);
-                try node.addEdge(self.allocator, new_edge);
-
-                // Save for swap. Will be overwritten in memmove.
-                const temp = node.edges[old_swap_idx];
-
-                // Memmove
-                var idx: usize = @intCast(node.num_edges - 1);
-                while (idx > insert_idx_new) : (idx -= 1) {
-                    node.edges[idx] = node.edges[idx - 1];
-                }
-
-                // Swap
-                node.edges[insert_idx_new] = temp;
+                try node.addEdgePos(self.allocator, new_edge);
             }
 
             if (is_leaf) break;
@@ -229,10 +240,11 @@ const RadixTrie = struct {
             var max_lcp: u8 = 0;
             var partial: bool = false;
 
-            const shift_len: u3 = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
+            const shift_len: usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
 
             if (shift_len > 0) {
-                if ((_getFreqVal(1, shift_len) & node.freq_char_bitmask) == 0) {
+                if ((BIT_MASKS[shift_len] & node.freq_char_bitmask) == 0) {
+
                     // Node doesn't exist. Insert.
                     try self.addNode(key[key_idx..], node, value);
                     self.num_keys += 1;
@@ -250,17 +262,17 @@ const RadixTrie = struct {
                 if (max_lcp == 0) {
                     print("access_idx: {d}\n", .{access_idx});
                     print("Bitmask:    {b:0>8}\n", .{node.freq_char_bitmask});
-                    print("shifted:    {b:0>8}\n", .{_getFreqVal(1, shift_len)});
+                    print("shifted:    {b:0>8}\n", .{BIT_MASKS[shift_len]});
                     print("shift len:  {d}\n", .{shift_len});
                     print("shift len:  {d}\n", .{CHAR_FREQ_TABLE[key[key_idx]]});
                     print("Key:        {s}\n", .{key[key_idx..]});
                     node.printEdges();
-                    @panic("max_lcp > 0");
+                    @panic("max_lcp == 0");
                 }
             } else {
-                const start_idx: usize = @intCast(std.zig.c_builtins.__builtin_popcount(
-                        @intCast(node.freq_char_bitmask)
-                ));
+                std.debug.assert(0 == (1 & node.freq_char_bitmask));
+
+                const start_idx = popCnt(u8, node.freq_char_bitmask);
                 for (start_idx..node.num_edges) |edge_idx| {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
@@ -285,7 +297,8 @@ const RadixTrie = struct {
 
             // Matched rest of key. Node already exists. Error for now. 
             // Make behavior user defined later.
-            if (!partial and (max_lcp == key[key_idx..].len)) return error.AlreadyExistsError;
+            // if (!partial and (max_lcp == key[key_idx..].len)) return error.AlreadyExistsError;
+            if (!partial and (key_idx == key.len)) return error.AlreadyExistsError;
 
             const rem_chars: usize = key.len - key_idx;
             if (partial) {
@@ -330,9 +343,9 @@ const RadixTrie = struct {
                     new_edge.child_ptr      = existing_node;
 
                     new_node.value = value;
-                    new_node.freq_char_bitmask = getFreqVal(1, new_edge.str[0]);
+                    new_node.freq_char_bitmask = (BIT_MASKS[CHAR_FREQ_TABLE[new_edge.str[0]]] & 0b11111110);
 
-                    try new_node.addEdge(self.allocator, new_edge);
+                    try new_node.addEdgePos(self.allocator, new_edge);
                     self.num_keys += 1;
                 } else {
                     var existing_edge = &node.edges[max_edge_idx];
@@ -373,10 +386,9 @@ const RadixTrie = struct {
                     new_edge_2.child_ptr    = existing_node;
                     existing_edge.child_ptr = new_node_1;
 
-                    try new_node_1.addEdge(self.allocator, new_edge_2);
+                    try new_node_1.addEdgePos(self.allocator, new_edge_2);
 
                     try self.addNode(key[key.len-rem_chars..], new_node_1, value);
-                    new_node_1.freq_char_bitmask |= getFreqVal(1, new_edge_2.str[0]);
                 }
 
                 self.num_keys += 1;
@@ -432,6 +444,7 @@ test "insertion" {
 
     var trie = try RadixTrie.init(allocator);
 
+    try trie.insert("ostritch", 25);
     try trie.insert("test", 420);
     try trie.insert("testing", 69);
     try trie.insert("tes", 24);
@@ -442,8 +455,15 @@ test "insertion" {
     try trie.insert("toaster", 84);
     try trie.insert("rapper", 85);
     try trie.insert("apple", 25);
+    try trie.insert("apocryphol", 25);
+    try trie.insert("apacryphol", 25);
+    try trie.insert("apicryphol", 25);
+    try trie.insert("eager", 25);
+    try trie.insert("mantequilla", 25);
+    try trie.insert("initial", 25);
 
-    trie.printNodes();
+    // trie.printNodes();
+    // trie.root.printEdges();
 
     try std.testing.expectEqual(420, trie.find("test"));
     try std.testing.expectEqual(69, trie.find("testing"));
