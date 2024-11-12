@@ -522,7 +522,6 @@ test "bench" {
 
     const init_capacity = arena.queryCapacity();
     start = std.time.microTimestamp();
-    var it = keys.iterator();
     var i: u32 = 0;
     for (0..N) |j| {
         try trie.insert(raw_keys.items[j], i);
@@ -536,17 +535,15 @@ test "bench" {
     print("Capacity used: {d}\n", .{final_capacity - init_capacity});
 
     start = std.time.microTimestamp();
-    it = keys.iterator();
-    while (it.next()) |entry| {
-        _ = trie.find(entry.key_ptr.*);
+    for (0..N) |j| {
+        _ = trie.find(raw_keys.items[j]);
     }
     end = std.time.microTimestamp();
     const elapsed_trie_find = end - start;
 
     start = std.time.microTimestamp();
-    it = keys.iterator();
-    while (it.next()) |entry| {
-        _ = keys.get(entry.key_ptr.*);
+    for (0..N) |j| {
+        _ = keys.get(raw_keys.items[j]);
     }
     end = std.time.microTimestamp();
     const elapsed_hashmap_find = end - start;
