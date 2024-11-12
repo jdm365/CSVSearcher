@@ -43,15 +43,10 @@ const BIT_MASKS: [8]u8 = [_]u8{
     0b10000000,
 };
 
-pub inline fn popCnt(T: type, val: T) usize {
-    return @intCast(std.zig.c_builtins.__builtin_popcount(
-        @intCast(val)
-        ));
-}
 
 pub inline fn getInsertIdx(bitmask: u8, char: u8) usize {
     const shift_len: usize = @intCast(CHAR_FREQ_TABLE[char]);
-    const num_bits_populated_front = popCnt(u8, bitmask & FULL_MASKS[shift_len]);
+    const num_bits_populated_front = @popCount(bitmask & FULL_MASKS[shift_len]);
     return num_bits_populated_front;
 }
 
@@ -258,21 +253,8 @@ const RadixTrie = struct {
                 next_node    = node.edges[access_idx].child_ptr;
                 partial      = max_lcp < edge.len;
                 max_edge_idx = access_idx;
-
-                if (max_lcp == 0) {
-                    print("access_idx: {d}\n", .{access_idx});
-                    print("Bitmask:    {b:0>8}\n", .{node.freq_char_bitmask});
-                    print("shifted:    {b:0>8}\n", .{BIT_MASKS[shift_len]});
-                    print("shift len:  {d}\n", .{shift_len});
-                    print("shift len:  {d}\n", .{CHAR_FREQ_TABLE[key[key_idx]]});
-                    print("Key:        {s}\n", .{key[key_idx..]});
-                    node.printEdges();
-                    @panic("max_lcp == 0");
-                }
             } else {
-                std.debug.assert(0 == (1 & node.freq_char_bitmask));
-
-                const start_idx = popCnt(u8, node.freq_char_bitmask);
+                const start_idx = @popCount(node.freq_char_bitmask);
                 for (start_idx..node.num_edges) |edge_idx| {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
@@ -400,31 +382,46 @@ const RadixTrie = struct {
         }
     }
 
-    pub fn find(self: *RadixTrie, key: []const u8) u32 {
+    pub fn find(self: *const RadixTrie, key: []const u8) u32 {
         var node = self.root;
         var key_idx: usize = 0;
-        var depth: usize = 0;
 
         while (true) {
             var matched = false;
+            if (key_idx >= key.len) return std.math.maxInt(u32);
 
-            for (0..node.num_edges) |edge_idx| {
-                const current_edge   = node.edges[edge_idx];
+
+            const shift_len: usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
+            if (shift_len > 0) {
+                const access_idx = @popCount(node.freq_char_bitmask & FULL_MASKS[shift_len]);
+                const current_edge   = node.edges[access_idx];
                 const current_prefix = current_edge.str[0..current_edge.len];
 
                 if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
                     matched  = true;
-                    node     = node.edges[edge_idx].child_ptr;
+                    node     = current_edge.child_ptr;
                     key_idx += current_prefix.len;
 
                     if ((key_idx == key.len) and node.is_leaf) return node.value;
-                    break;
+                }
+            } else {
+                const start_idx = @popCount(node.freq_char_bitmask);
+                for (start_idx..node.num_edges) |edge_idx| {
+                    const current_edge   = node.edges[edge_idx];
+                    const current_prefix = current_edge.str[0..current_edge.len];
+
+                    if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                        matched  = true;
+                        node     = node.edges[edge_idx].child_ptr;
+                        key_idx += current_prefix.len;
+
+                        if ((key_idx == key.len) and node.is_leaf) return node.value;
+                        break;
+                    }
                 }
             }
 
             if (!matched) return std.math.maxInt(u32);
-            depth += 1;
-            
         }
     }
 
@@ -497,17 +494,19 @@ test "bench" {
     const num_chars: usize = 6;
     const rand = std.crypto.random;
 
+    const raw_keys = try allocator.alloc([num_chars]u8, _N);
+    for (0.._N) |i| {
+        for (0..num_chars) |j| {
+            raw_keys[i][j] = rand.int(u8) % 26 + @as(u8, 'a');
+        }
+    }
 
     var start = std.time.milliTimestamp();
     for (0.._N) |i| {
-        var key = try allocator.alloc(u8, num_chars);
-        for (0..num_chars) |j| {
-            key[j] = rand.int(u8) % 26 + @as(u8, 'a');
-        }
-        try keys.put(key, i);
+        try keys.put(&raw_keys[i], i);
     }
     var end = std.time.milliTimestamp();
-    const elapsed_hashmap = end - start;
+    const elapsed_insert_hashmap = end - start;
 
     const N = keys.count();
     std.debug.print("N: {d}\n", .{N});
@@ -520,7 +519,7 @@ test "bench" {
         i += 1;
     }
     end = std.time.milliTimestamp();
-    const elapsed_insert = end - start;
+    const elapsed_insert_trie = end - start;
 
     start = std.time.milliTimestamp();
     it = keys.iterator();
@@ -528,22 +527,32 @@ test "bench" {
         _ = trie.find(entry.key_ptr.*);
     }
     end = std.time.milliTimestamp();
-    const elapsed_find = end - start;
+    const elapsed_trie_find = end - start;
+
+    start = std.time.milliTimestamp();
+    it = keys.iterator();
+    while (it.next()) |entry| {
+        _ = keys.get(entry.key_ptr.*);
+    }
+    end = std.time.milliTimestamp();
+    const elapsed_hashmap_find = end - start;
 
     const big_N: u64 = N * @as(u64, 1000);
-    const insertions_per_second = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert));
-    const lookups_per_second    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_find));
+    const insertions_per_second_trie = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert_trie));
+    const lookups_per_second_trie    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_trie_find));
     std.debug.print("-------------------  RADIX TRIE  -------------------\n", .{});
-    std.debug.print("\nConstruction time:   {}ms\n", .{elapsed_insert});
-    std.debug.print("Insertions per second: {d}\n", .{insertions_per_second});
-    std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second});
+    std.debug.print("\nConstruction time:   {}ms\n", .{elapsed_insert_trie});
+    std.debug.print("Insertions per second: {d}\n", .{insertions_per_second_trie});
+    std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second_trie});
 
     std.debug.print("\n\n", .{});
 
-    const insertions_per_second_hashmap = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_hashmap));
+    const insertions_per_second_hashmap = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_insert_hashmap));
+    const lookups_per_second_hashmap    = @as(f32, @floatFromInt(big_N)) / @as(f32, @floatFromInt(elapsed_hashmap_find));
     std.debug.print("-------------------  HASHMAP  -------------------\n", .{});
-    std.debug.print("\nConstruction time:   {}ms\n", .{elapsed_hashmap});
+    std.debug.print("\nConstruction time:   {}ms\n", .{elapsed_insert_hashmap});
     std.debug.print("Insertions per second: {d}\n", .{insertions_per_second_hashmap});
+    std.debug.print("Lookups per second:    {d}\n", .{lookups_per_second_hashmap});
 
 
     try std.testing.expectEqual(N, trie.num_keys);
