@@ -18,11 +18,19 @@ const CHAR_FREQ_TABLE: [256]u8 = blk: {
     table['o'] = 5;
     table['t'] = 6;
     table['n'] = 7;
+    table['s'] = 8;
+    table['l'] = 9;
+    table['c'] = 10;
+    table['u'] = 11;
+    table['d'] = 12;
+    table['p'] = 13;
+    table['m'] = 14;
+    table['h'] = 15;
 
     break :blk table;
 };
 
-const FULL_MASKS: [8]u8 = [_]u8{
+const FULL_MASKS_u8: [8]u8 = [_]u8{
     0b11111110,
     0b11111100,
     0b11111000,
@@ -32,7 +40,8 @@ const FULL_MASKS: [8]u8 = [_]u8{
     0b10000000,
     0b00000000,
 };
-const BIT_MASKS: [8]u8 = [_]u8{
+
+const BIT_MASKS_u8: [8]u8 = [_]u8{
     0b00000001,
     0b00000010,
     0b00000100,
@@ -43,10 +52,50 @@ const BIT_MASKS: [8]u8 = [_]u8{
     0b10000000,
 };
 
+const FULL_MASKS_u16: [16]u16= [_]u16{
+    0b11111111_11111110,
+    0b11111111_11111100,
+    0b11111111_11111000,
+    0b11111111_11110000,
+    0b11111111_11100000,
+    0b11111111_11000000,
+    0b11111111_10000000,
+    0b11111111_00000000,
 
-pub inline fn getInsertIdx(bitmask: u8, char: u8) usize {
-    const shift_len: usize = @intCast(CHAR_FREQ_TABLE[char]);
-    const num_bits_populated_front = @popCount(bitmask & FULL_MASKS[shift_len]);
+    0b11111110_00000000,
+    0b11111100_00000000,
+    0b11111000_00000000,
+    0b11110000_00000000,
+    0b11100000_00000000,
+    0b11000000_00000000,
+    0b10000000_00000000,
+    0b00000000_00000000,
+};
+
+const BIT_MASKS_u16: [16]u16 = [_]u16{
+    0b00000000_00000001,
+    0b00000000_00000010,
+    0b00000000_00000100,
+    0b00000000_00001000,
+    0b00000000_00010000,
+    0b00000000_00100000,
+    0b00000000_01000000,
+    0b00000000_10000000,
+
+    0b00000001_00000000,
+    0b00000010_00000000,
+    0b00000100_00000000,
+    0b00001000_00000000,
+    0b00010000_00000000,
+    0b00100000_00000000,
+    0b01000000_00000000,
+    0b10000000_00000000,
+};
+
+pub inline fn getInsertIdx(bitmask: u16, char: u8) usize {
+    const shift_len: usize = @intCast(CHAR_FREQ_TABLE[@intCast(char)]);
+    // const num_bits_populated_front = @popCount(bitmask & FULL_MASKS_u8[shift_len]);
+    const num_bits_populated_front = @popCount(bitmask & FULL_MASKS_u16[shift_len]);
     return num_bits_populated_front;
 }
 
@@ -77,8 +126,7 @@ const RadixEdge = extern struct {
 const RadixNode = packed struct {
     num_edges: u8,
     edgelist_capacity: u8,
-    is_leaf: bool,
-    freq_char_bitmask: u8,
+    freq_char_bitmask: u16,
     value: u32,
     edges: [*]RadixEdge,
 
@@ -87,7 +135,6 @@ const RadixNode = packed struct {
         node.* = RadixNode{
             .num_edges = 0,
             .edgelist_capacity = 0,
-            .is_leaf = false,
             .freq_char_bitmask = 0,
             .value = undefined,
             .edges = undefined,
@@ -201,8 +248,7 @@ const RadixTrie = struct {
 
             const new_node   = try RadixNode.init(self.allocator);
             new_node.value   = value;
-            new_node.is_leaf = is_leaf;
-            new_node.freq_char_bitmask = 0b00000001;
+            new_node.freq_char_bitmask = @intFromBool(is_leaf);
 
             const new_edge     = try RadixEdge.init(self.allocator);
             new_edge.len       = @truncate(num_chars_edge);
@@ -212,7 +258,10 @@ const RadixTrie = struct {
                 new_edge.str[0..num_chars_edge], 
                 key[current_idx..current_idx+num_chars_edge],
                 );
-            node.freq_char_bitmask |= (BIT_MASKS[CHAR_FREQ_TABLE[new_edge.str[0]]] & 0b11111110);
+            // node.freq_char_bitmask |= (BIT_MASKS_u8[CHAR_FREQ_TABLE[new_edge.str[0]]] & 0b11111110);
+            node.freq_char_bitmask |= (
+                BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] & FULL_MASKS_u16[0]
+                );
 
             if (CHAR_FREQ_TABLE[new_edge.str[0]] == 0) {
                 try node.addEdge(self.allocator, new_edge);
@@ -241,7 +290,7 @@ const RadixTrie = struct {
             const shift_len: usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
 
             if (shift_len > 0) {
-                if ((BIT_MASKS[shift_len] & node.freq_char_bitmask) == 0) {
+                if ((BIT_MASKS_u16[shift_len] & node.freq_char_bitmask) == 0) {
 
                     // Node doesn't exist. Insert.
                     try self.addNode(key[key_idx..], node, value);
@@ -257,7 +306,8 @@ const RadixTrie = struct {
                 partial      = max_lcp < edge.len;
                 max_edge_idx = access_idx;
             } else {
-                const start_idx = @popCount(node.freq_char_bitmask & 0b11111110);
+                // const start_idx = @popCount(node.freq_char_bitmask & 0b11111110);
+                const start_idx = @popCount(node.freq_char_bitmask & FULL_MASKS_u16[0]);
                 for (start_idx..node.num_edges) |edge_idx| {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
@@ -313,7 +363,6 @@ const RadixTrie = struct {
                     // new_edge:      'D'          //
                     //                             //
                     /////////////////////////////////
-                    new_node.is_leaf = true;
 
                     new_edge.len      = existing_edge.len - max_lcp;
                     existing_edge.len = max_lcp;
@@ -328,7 +377,8 @@ const RadixTrie = struct {
 
                     new_node.value = value;
                     new_node.freq_char_bitmask = (
-                        BIT_MASKS[CHAR_FREQ_TABLE[new_edge.str[0]]] | 0b00000001
+                        // BIT_MASKS_u8[CHAR_FREQ_TABLE[new_edge.str[0]]] | 0b00000001
+                        BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] | BIT_MASKS_u16[0]
                         );
 
                     try new_node.addEdgePos(self.allocator, new_edge);
@@ -396,7 +446,8 @@ const RadixTrie = struct {
 
             const shift_len:  usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
             const access_idx: usize = @popCount(
-                node.freq_char_bitmask  & 0b11111110 & FULL_MASKS[shift_len]
+                // node.freq_char_bitmask & 0b11111110 & FULL_MASKS_u8[shift_len]
+                node.freq_char_bitmask & FULL_MASKS_u16[0] & FULL_MASKS_u16[shift_len]
                 );
 
             if (shift_len > 0) {
@@ -408,8 +459,8 @@ const RadixTrie = struct {
                     node     = current_edge.child_ptr;
                     key_idx += current_prefix.len;
 
-                    // if ((key_idx == key.len) and node.is_leaf) return node.value;
-                    if ((key_idx == key.len) and (node.freq_char_bitmask & 0b00000001 == 1)) return node.value;
+                    // if ((key_idx == key.len) and (node.freq_char_bitmask & 0b00000001 == 1)) return node.value;
+                    if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 1)) return node.value;
                 }
             } else {
                 for (access_idx..node.num_edges) |edge_idx| {
@@ -421,8 +472,7 @@ const RadixTrie = struct {
                         node     = node.edges[edge_idx].child_ptr;
                         key_idx += current_prefix.len;
 
-                        // if ((key_idx == key.len) and node.is_leaf) return node.value;
-                        if ((key_idx == key.len) and (node.freq_char_bitmask & 0b00000001 == 1)) return node.value;
+                        if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 1)) return node.value;
                         break;
                     }
                 }
