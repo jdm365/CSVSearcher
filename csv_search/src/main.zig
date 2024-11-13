@@ -76,7 +76,8 @@ const SmallSlice = packed struct(u64) {
     }
 
     fn get_ptr(self: SmallSlice) [*]const u8 {
-        return @ptrFromInt(self.ptr);
+        const extended = (self.ptr << 16) >> 16;
+        return @ptrFromInt(extended);
     }
 };
 
@@ -110,8 +111,6 @@ pub fn SmallStringHashMap(comptime T: type) type {
                  SmallStringContext,
                  std.hash_map.default_max_load_percentage,
                  ),
-
-        // TODO: Make custom SmallStringContext
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
@@ -239,11 +238,11 @@ pub fn parseRecordCSV(
     }
 }
 
-pub fn guessMapMemoryUsage(map: SmallStringHashMap(u32)) usize {
+pub fn guessMapMemoryUsage(map: std.hash_map.StringHashMap(u32)) usize {
     const avg_string_size = 6;
     const entry_size = @sizeOf(u32) + avg_string_size + @sizeOf(*usize);
-    const metadata_size = @sizeOf(@TypeOf(map.map));
-    const entries_size = map.map.capacity() * entry_size;
+    const metadata_size = @sizeOf(@TypeOf(map));
+    const entries_size = map.capacity() * entry_size;
     return metadata_size + entries_size;
 }
 
@@ -364,8 +363,8 @@ const TokenStream = struct {
 
 const InvertedIndex = struct {
     postings: []token_t,
-    // vocab: std.StringHashMap(u32),
-    vocab: SmallStringHashMap(u32),
+    vocab: std.StringHashMap(u32),
+    // vocab: SmallStringHashMap(u32),
     // term_offsets: []u32,
     term_offsets: []usize,
     doc_freqs: std.ArrayList(u32),
@@ -379,8 +378,8 @@ const InvertedIndex = struct {
         allocator: std.mem.Allocator,
         num_docs: usize,
         ) !InvertedIndex {
-        // var vocab = std.StringHashMap(u32).init(allocator);
-        var vocab = SmallStringHashMap(u32).init(allocator);
+        var vocab = std.StringHashMap(u32).init(allocator);
+        // var vocab = SmallStringHashMap(u32).init(allocator);
 
         // Guess capacity
         try vocab.ensureTotalCapacity(@intCast(num_docs / 25));
@@ -496,11 +495,10 @@ const BM25Partition = struct {
         const gop = try self.II[col_idx].vocab.getOrPut(term[0..term_len]);
 
         if (!gop.found_existing) {
-            // const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
-            // std.debug.print("String test: {s}\n", .{test_copy.get_ptr()[0..term_len]});
+            const term_copy = try self.string_arena.allocator().dupe(u8, term[0..term_len]);
 
-            // gop.key_ptr.* = term_copy;
-            gop.key_ptr.* = try SmallSlice.initFromSliceCopy(self.string_arena.allocator(), term[0..term_len]);
+            gop.key_ptr.* = term_copy;
+            // gop.key_ptr.* = try SmallSlice.initFromSliceCopy(self.string_arena.allocator(), term[0..term_len]);
             gop.value_ptr.* = self.II[col_idx].num_terms;
             self.II[col_idx].num_terms += 1;
             try self.II[col_idx].doc_freqs.append(1);

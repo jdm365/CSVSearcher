@@ -30,71 +30,35 @@ const CHAR_FREQ_TABLE: [256]u8 = blk: {
     break :blk table;
 };
 
-const FULL_MASKS_u8: [8]u8 = [_]u8{
-    0b11111110,
-    0b11111100,
-    0b11111000,
-    0b11110000,
-    0b11100000,
-    0b11000000,
-    0b10000000,
-    0b00000000,
-};
+fn getBitMasks(comptime T: type) [8 * @sizeOf(T)]T {
+    const num_bits = 8 * @sizeOf(T);
+    var value: T = 1;
 
-const BIT_MASKS_u8: [8]u8 = [_]u8{
-    0b00000001,
-    0b00000010,
-    0b00000100,
-    0b00001000,
-    0b00010000,
-    0b00100000,
-    0b01000000,
-    0b10000000,
-};
+    var masks: [num_bits]T = undefined;
+    for (0..num_bits) |idx| {
+        masks[idx] = value;
+        value <<= 1;
+    }
+    return masks;
+}
 
-const FULL_MASKS_u16: [16]u16= [_]u16{
-    0b11111111_11111110,
-    0b11111111_11111100,
-    0b11111111_11111000,
-    0b11111111_11110000,
-    0b11111111_11100000,
-    0b11111111_11000000,
-    0b11111111_10000000,
-    0b11111111_00000000,
+fn getFullMasks(comptime T: type) [8 * @sizeOf(T)]T {
+    const num_bits = 8 * @sizeOf(T);
+    var value: T = std.math.maxInt(T) - 1;
 
-    0b11111110_00000000,
-    0b11111100_00000000,
-    0b11111000_00000000,
-    0b11110000_00000000,
-    0b11100000_00000000,
-    0b11000000_00000000,
-    0b10000000_00000000,
-    0b00000000_00000000,
-};
+    var masks: [num_bits]T = undefined;
+    for (0..num_bits) |idx| {
+        masks[idx] = value;
+        value <<= 1;
+    }
+    return masks;
+}
 
-const BIT_MASKS_u16: [16]u16 = [_]u16{
-    0b00000000_00000001,
-    0b00000000_00000010,
-    0b00000000_00000100,
-    0b00000000_00001000,
-    0b00000000_00010000,
-    0b00000000_00100000,
-    0b00000000_01000000,
-    0b00000000_10000000,
-
-    0b00000001_00000000,
-    0b00000010_00000000,
-    0b00000100_00000000,
-    0b00001000_00000000,
-    0b00010000_00000000,
-    0b00100000_00000000,
-    0b01000000_00000000,
-    0b10000000_00000000,
-};
+const FULL_MASKS = getFullMasks(std.meta.FieldType(RadixNode, .freq_char_bitmask));
 
 pub inline fn getInsertIdx(bitmask: u16, char: u8) usize {
     const shift_len: usize = @intCast(CHAR_FREQ_TABLE[@intCast(char)]);
-    return @popCount(bitmask & FULL_MASKS_u16[shift_len]);
+    return @popCount(bitmask & FULL_MASKS[shift_len]);
 }
 
 pub fn LCP(key: []const u8, match: []const u8) u8 {
@@ -120,6 +84,17 @@ const RadixEdge = extern struct {
         return edge;
     }
 };
+
+///////////////////////////////////////////
+//                   ALT                 //
+///////////////////////////////////////////
+// const RadixNode = packed struct {
+    // num_edges: u8,
+    // edgelist_capacity: u8,
+    // freq_char_bitmask: u48,
+    // value: *anyopaque,
+    // edges: [*]RadixEdge,
+///////////////////////////////////////////
 
 const RadixNode = packed struct {
     num_edges: u8,
@@ -213,6 +188,7 @@ const RadixTrie = struct {
     root: *RadixNode,
     nodes: std.ArrayList(RadixNode),
     num_keys: u32,
+    bitmasks: [8 * @sizeOf(std.meta.FieldType(RadixNode, .freq_char_bitmask))]std.meta.FieldType(RadixNode, .freq_char_bitmask),
 
 
     pub fn init(allocator: std.mem.Allocator) !RadixTrie {
@@ -222,6 +198,7 @@ const RadixTrie = struct {
             .root = root,
             .nodes = std.ArrayList(RadixNode).init(allocator),
             .num_keys = 0,
+            .bitmasks = getBitMasks(std.meta.FieldType(RadixNode, .freq_char_bitmask)),
         };
     }
 
@@ -257,7 +234,7 @@ const RadixTrie = struct {
                 key[current_idx..current_idx+num_chars_edge],
                 );
             node.freq_char_bitmask |= (
-                BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] & FULL_MASKS_u16[0]
+                self.bitmasks[CHAR_FREQ_TABLE[new_edge.str[0]]] & FULL_MASKS[0]
                 );
 
             if (CHAR_FREQ_TABLE[new_edge.str[0]] == 0) {
@@ -287,7 +264,8 @@ const RadixTrie = struct {
             const shift_len: usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
 
             if (shift_len > 0) {
-                if ((BIT_MASKS_u16[shift_len] & node.freq_char_bitmask) == 0) {
+                // if ((BIT_MASKS_u16[shift_len] & node.freq_char_bitmask) == 0) {
+                if ((self.bitmasks[shift_len] & node.freq_char_bitmask) == 0) {
 
                     // Node doesn't exist. Insert.
                     try self.addNode(key[key_idx..], node, value);
@@ -303,7 +281,7 @@ const RadixTrie = struct {
                 partial      = max_lcp < edge.len;
                 max_edge_idx = access_idx;
             } else {
-                const start_idx = @popCount(node.freq_char_bitmask & FULL_MASKS_u16[0]);
+                const start_idx = @popCount(node.freq_char_bitmask & FULL_MASKS[0]);
                 for (start_idx..node.num_edges) |edge_idx| {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
@@ -375,7 +353,8 @@ const RadixTrie = struct {
 
                     new_node.value = value;
                     new_node.freq_char_bitmask = (
-                        BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] | BIT_MASKS_u16[0]
+                        // BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] | BIT_MASKS_u16[0]
+                        self.bitmasks[CHAR_FREQ_TABLE[new_edge.str[0]]] | self.bitmasks[0]
                         );
 
                     try new_node.addEdgePos(self.allocator, new_edge);
@@ -443,7 +422,7 @@ const RadixTrie = struct {
 
             const shift_len:  usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
             const access_idx: usize = @popCount(
-                node.freq_char_bitmask & FULL_MASKS_u16[0] & FULL_MASKS_u16[shift_len]
+                node.freq_char_bitmask & FULL_MASKS[0] & FULL_MASKS[shift_len]
                 );
 
             if (shift_len > 0) {
@@ -455,7 +434,8 @@ const RadixTrie = struct {
                     node     = current_edge.child_ptr;
                     key_idx += current_prefix.len;
 
-                    if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
+                    // if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
+                    if ((key_idx == key.len) and (node.freq_char_bitmask & self.bitmasks[0] == 0b00000000_00000001)) return node.value;
                 }
             } else {
                 for (access_idx..node.num_edges) |edge_idx| {
@@ -467,7 +447,8 @@ const RadixTrie = struct {
                         node     = node.edges[edge_idx].child_ptr;
                         key_idx += current_prefix.len;
 
-                        if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
+                        // if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
+                        if ((key_idx == key.len) and (node.freq_char_bitmask & self.bitmasks[0] == 0b00000000_00000001)) return node.value;
                         break;
                     }
                 }
@@ -606,6 +587,7 @@ test "bench" {
     std.debug.print("\nConstruction time:   {}ms\n", .{@divFloor(elapsed_insert_trie, 1000)});
     std.debug.print("Million insertions per second: {d}\n", .{million_insertions_per_second_trie});
     std.debug.print("Million lookups per second:    {d}\n", .{million_lookups_per_second_trie});
+    std.debug.print("Average lookup time:           {}ns\n", .{@divFloor(1000 * elapsed_trie_find, N)});
 
     std.debug.print("\n\n", .{});
 
@@ -615,6 +597,7 @@ test "bench" {
     std.debug.print("\nConstruction time:   {}ms\n", .{@divFloor(elapsed_insert_hashmap, 1000)});
     std.debug.print("Million insertions per second: {d}\n", .{million_insertions_per_second_hashmap});
     std.debug.print("Million lookups per second:    {d}\n", .{million_lookups_per_second_hashmap});
+    std.debug.print("Average lookup time:           {}ns\n", .{@divFloor(1000 * elapsed_hashmap_find, N)});
 
 
     try std.testing.expectEqual(N, trie.num_keys);
