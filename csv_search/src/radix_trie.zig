@@ -94,9 +94,7 @@ const BIT_MASKS_u16: [16]u16 = [_]u16{
 
 pub inline fn getInsertIdx(bitmask: u16, char: u8) usize {
     const shift_len: usize = @intCast(CHAR_FREQ_TABLE[@intCast(char)]);
-    // const num_bits_populated_front = @popCount(bitmask & FULL_MASKS_u8[shift_len]);
-    const num_bits_populated_front = @popCount(bitmask & FULL_MASKS_u16[shift_len]);
-    return num_bits_populated_front;
+    return @popCount(bitmask & FULL_MASKS_u16[shift_len]);
 }
 
 pub fn LCP(key: []const u8, match: []const u8) u8 {
@@ -258,7 +256,6 @@ const RadixTrie = struct {
                 new_edge.str[0..num_chars_edge], 
                 key[current_idx..current_idx+num_chars_edge],
                 );
-            // node.freq_char_bitmask |= (BIT_MASKS_u8[CHAR_FREQ_TABLE[new_edge.str[0]]] & 0b11111110);
             node.freq_char_bitmask |= (
                 BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] & FULL_MASKS_u16[0]
                 );
@@ -306,7 +303,6 @@ const RadixTrie = struct {
                 partial      = max_lcp < edge.len;
                 max_edge_idx = access_idx;
             } else {
-                // const start_idx = @popCount(node.freq_char_bitmask & 0b11111110);
                 const start_idx = @popCount(node.freq_char_bitmask & FULL_MASKS_u16[0]);
                 for (start_idx..node.num_edges) |edge_idx| {
                     const current_edge   = node.edges[edge_idx];
@@ -330,9 +326,11 @@ const RadixTrie = struct {
 
             key_idx += max_lcp;
 
-            // Matched rest of key. Node already exists. Error for now. 
-            // Make behavior user defined later.
-            if (!partial and (key_idx == key.len)) return error.AlreadyExistsError;
+            // Matched rest of key. Node already exists. Replace.
+            if (!partial and (key_idx == key.len)) {
+                next_node.value = value;
+                return;
+            }
 
             const rem_chars: usize = key.len - key_idx;
             if (partial) {
@@ -377,7 +375,6 @@ const RadixTrie = struct {
 
                     new_node.value = value;
                     new_node.freq_char_bitmask = (
-                        // BIT_MASKS_u8[CHAR_FREQ_TABLE[new_edge.str[0]]] | 0b00000001
                         BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] | BIT_MASKS_u16[0]
                         );
 
@@ -446,7 +443,6 @@ const RadixTrie = struct {
 
             const shift_len:  usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
             const access_idx: usize = @popCount(
-                // node.freq_char_bitmask & 0b11111110 & FULL_MASKS_u8[shift_len]
                 node.freq_char_bitmask & FULL_MASKS_u16[0] & FULL_MASKS_u16[shift_len]
                 );
 
@@ -459,8 +455,7 @@ const RadixTrie = struct {
                     node     = current_edge.child_ptr;
                     key_idx += current_prefix.len;
 
-                    // if ((key_idx == key.len) and (node.freq_char_bitmask & 0b00000001 == 1)) return node.value;
-                    if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 1)) return node.value;
+                    if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
                 }
             } else {
                 for (access_idx..node.num_edges) |edge_idx| {
@@ -472,7 +467,7 @@ const RadixTrie = struct {
                         node     = node.edges[edge_idx].child_ptr;
                         key_idx += current_prefix.len;
 
-                        if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 1)) return node.value;
+                        if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
                         break;
                     }
                 }
@@ -515,6 +510,7 @@ test "insertion" {
     try trie.insert("eager", 25);
     try trie.insert("mantequilla", 25);
     try trie.insert("initial", 25);
+    try trie.insert("initial", 32);
 
     // trie.printNodes();
     // trie.root.printEdges();
@@ -527,6 +523,7 @@ test "insertion" {
     try std.testing.expectEqual(54, trie.find("waddup"));
     try std.testing.expectEqual(std.math.maxInt(u32), trie.find("testin"));
     try std.testing.expectEqual(121, trie.find("abracadabra"));
+    try std.testing.expectEqual(32, trie.find("initial"));
 }
 
 test "bench" {
@@ -547,11 +544,6 @@ test "bench" {
 
     var trie = try RadixTrie.init(allocator);
 
-    // const _N: usize = 1_000_000;
-    // const num_chars: usize = 6;
-    // const rand = std.crypto.random;
-
-    // TODO: Read lines from file.
     const filename = "data/words.txt";
     const max_bytes_per_line = 4096;
     var file = std.fs.cwd().openFile(filename, .{}) catch {
