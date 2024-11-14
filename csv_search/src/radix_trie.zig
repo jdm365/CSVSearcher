@@ -46,7 +46,7 @@ const FreqStruct = struct {
     value: u8,
 };
 
-fn getBitMasks(comptime T: type) [@bitSizeOf(T)]u64 {
+fn getBitMasksU64(comptime T: type) [@bitSizeOf(T)]u64 {
     const num_bits = @bitSizeOf(T);
     var value: u64 = 1;
 
@@ -57,9 +57,9 @@ fn getBitMasks(comptime T: type) [@bitSizeOf(T)]u64 {
     }
     return masks;
 }
-const BITMASKS = getBitMasks(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
+const BITMASKS = getBitMasksU64(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
 
-fn getFullMasks(comptime T: type) [@bitSizeOf(T)]u64 {
+fn getFullMasksU64(comptime T: type) [@bitSizeOf(T)]u64 {
     const num_bits = @bitSizeOf(T);
     var value: u64 = @as(u64, @intCast(std.math.maxInt(T))) - 1;
 
@@ -72,7 +72,46 @@ fn getFullMasks(comptime T: type) [@bitSizeOf(T)]u64 {
     }
     return masks;
 }
-const FULL_MASKS = getFullMasks(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
+const FULL_MASKS = getFullMasksU64(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
+
+
+fn getBitMasksU256() [240]@Vector(4, u64) {
+    var value: @Vector(4, u64) = @splat(0);
+    value[0] += 1;
+
+    var masks: [240]@Vector(4, u64) = undefined;
+    for (0..240) |idx| {
+        masks[idx] = value;
+
+        const byte_idx = @divFloor(idx+1, 64);
+        if (value[byte_idx] == 0) {
+            value[byte_idx - 1] = 0;
+            value[byte_idx] += 1;
+        } else {
+            value[byte_idx] <<= 1;
+        }
+    }
+    return masks;
+}
+const BITMASKS_256 = getBitMasksU256();
+
+fn getFullMasksU256() [240]@Vector(4, u64) {
+    var value: @Vector(4, u64) = @splat(std.math.maxInt(u64));
+    value[3] &= 0x00FFFFFFFFFFFFFF;
+    value[0] -= 1;
+
+    const overall_mask = value;
+
+    var masks: [240]@Vector(4, u64) = undefined;
+    for (0..240) |idx| {
+        masks[idx] = value & overall_mask;
+
+        const byte_idx = @divFloor(idx+1, 64);
+        value[byte_idx] <<= 1;
+    }
+    return masks;
+}
+const FULL_MASKS_256 = getFullMasksU256();
 
 pub inline fn getInsertIdx(
     char_freq_table: *const [256]u8,
@@ -107,6 +146,50 @@ pub fn RadixEdge(comptime T: type) type {
     };
 }
 
+/////////////////////////////////////////
+///           RadixNodeLarge          ///
+/////////////////////////////////////////
+pub const EdgeDataLarge = struct {
+    data: @Vector(4, u64),
+
+    pub fn init(num_edges: u8, capacity: u8) EdgeDataLarge {
+        // num_edges is highest byte.
+        // edgelist_capacity is second highest byte.
+        var data: @Vector(4, u64) = @splat(0);
+
+        data[3] = (data[3] & 0x00FFFFFFFFFFFFFF) | 
+                  (@as(u64, num_edges) << 56) | 
+                  (@as(u64, capacity) << 48);
+        return EdgeDataLarge{ 
+            .data = data,
+        };
+    }
+
+    pub inline fn getNumEdges(self: *const EdgeDataLarge) u8 {
+        return @truncate(self.data[3] >> 56);
+    }
+
+    pub inline fn getCapacity(self: *const EdgeDataLarge) u8 {
+        return @truncate((self.data[3] >> 48) & 0xFF);
+    }
+
+    pub inline fn setNumEdges(self: *EdgeDataLarge, value: u8) void {
+        self.data[3] = (self.data[3] & 0x00FFFFFFFFFFFFFF) | 
+                       (@as(u64, value) << 56);
+    }
+
+    pub inline fn setCapacity(self: *EdgeDataLarge, value: u8) void {
+        self.data[3] = (self.data[3] & 0xFF00FFFFFFFFFFFF) | 
+                       (@as(u64, value) << 48);
+    }
+
+    pub inline fn getMaskU256(self: *const EdgeDataLarge) @Vector(4, u64) {
+        var result = self.data;
+        result[3] &= 0x00FFFFFFFFFFFFFF;
+        return result;
+    }
+};
+    
 
 pub fn RadixNode(comptime T: type) type {
 
@@ -151,7 +234,9 @@ pub fn RadixNode(comptime T: type) type {
             self.edge_data.num_edges += 1;
 
             if (self.edge_data.num_edges > self.edge_data.edgelist_capacity) {
-                const new_capacity: usize = @min(256, (2 * self.edge_data.edgelist_capacity) + 1);
+                const growth_factor: f32 = if (self.edge_data.edgelist_capacity < 8) 2.0 else 1.5;
+                const new_capacity: usize = @min(256, @as(usize, @intFromFloat(@floor(growth_factor * @as(f32, @floatFromInt(self.edge_data.edgelist_capacity))))) + 1);
+
                 const old_slice = self.edges[0..self.edge_data.edgelist_capacity];
 
                 const new_slice: []RadixEdge(T) = try allocator.realloc(
@@ -227,6 +312,8 @@ pub fn RadixTrie(comptime T: type) type {
 
         allocator: std.mem.Allocator,
         root: *RadixNode(T),
+        num_nodes: u32,
+        num_edges: u32,
         num_keys: u32,
         char_freq_table: [256]u8,
 
@@ -236,6 +323,8 @@ pub fn RadixTrie(comptime T: type) type {
             return Self{
                 .allocator = allocator,
                 .root = root,
+                .num_nodes = 1,
+                .num_edges = 0,
                 .num_keys = 0,
                 .char_freq_table = getBaseCharFreqTable(T),
             };
@@ -280,6 +369,11 @@ pub fn RadixTrie(comptime T: type) type {
             for (num_entries..256) |idx| {
                 self.char_freq_table[@intCast(items[idx].value)] = 0;
             }
+        }
+
+        pub fn getMemoryUsage(self: *Self) usize {
+            const bytes = self.num_nodes * @sizeOf(RadixNode(T)) + self.num_edges * @sizeOf(RadixEdge(T));
+            return bytes;
         }
 
         inline fn addNode(
@@ -351,6 +445,8 @@ pub fn RadixTrie(comptime T: type) type {
                         // Node doesn't exist. Insert.
                         try self.addNode(key[key_idx..], node, value);
                         self.num_keys += 1;
+                        self.num_nodes += 1;
+                        self.num_edges += 1;
                         return;
                     }
 
@@ -383,6 +479,8 @@ pub fn RadixTrie(comptime T: type) type {
                     if (max_lcp == 0) {
                         try self.addNode(key[key_idx..], node, value);
                         self.num_keys += 1;
+                        self.num_nodes += 1;
+                        self.num_edges += 1;
                         return;
                     }
                 }
@@ -403,6 +501,9 @@ pub fn RadixTrie(comptime T: type) type {
                         const existing_node = existing_edge.child_ptr;
                         const new_node = try RadixNode(T).init(self.allocator);
                         const new_edge = try RadixEdge(T).init(self.allocator);
+
+                        self.num_nodes += 1;
+                        self.num_edges += 1;
 
                         /////////////////////////////////
                         //                             //
@@ -448,6 +549,9 @@ pub fn RadixTrie(comptime T: type) type {
                         const existing_node = existing_edge.child_ptr;
                         const new_node_1 = try RadixNode(T).init(self.allocator);
                         const new_edge_2 = try RadixEdge(T).init(self.allocator);
+
+                        self.num_nodes += 2;
+                        self.num_edges += 2;
 
                         /////////////////////////////////////////
                         //                                     //
@@ -689,6 +793,10 @@ test "bench" {
     const elapsed_hashmap_find = end - start;
 
     try std.testing.expectEqual(N, trie.num_keys);
+
+    print("Num trie nodes: {d}\n", .{trie.num_nodes});
+    print("Num trie edges: {d}\n", .{trie.num_edges});
+    print("Theoretical trie memory usage: {d}MB\n", .{trie.getMemoryUsage() / 1_048_576});
 
     const million_insertions_per_second_trie = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_insert_trie));
     const million_lookups_per_second_trie    = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_trie_find));
