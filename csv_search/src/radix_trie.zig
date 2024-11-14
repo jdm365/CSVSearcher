@@ -1,11 +1,13 @@
 const std = @import("std");
-
 const print = std.debug.print;
+
+// TODO: Define second node type for nodes with more than ~48 values.
+//       Use all charachter frequencies here and do popCount with AVX2 instructions.
 
 const MAX_STRING_LEN = 7;
 
 // Most frequent characters in English.
-const CHAR_FREQ_TABLE: [256]u8 = blk: {
+const BASE_CHAR_FREQ_TABLE: [256]u8 = blk: {
     var table: [256]u8 = undefined;
     for (0..256) |idx| {
         table[idx] = 0;
@@ -30,34 +32,45 @@ const CHAR_FREQ_TABLE: [256]u8 = blk: {
     break :blk table;
 };
 
-fn getBitMasks(comptime T: type) [8 * @sizeOf(T)]T {
-    const num_bits = 8 * @sizeOf(T);
-    var value: T = 1;
+const FreqStruct = struct {
+    freq: u64,
+    value: u8,
+};
 
-    var masks: [num_bits]T = undefined;
+fn getBitMasks(comptime T: type) [@bitSizeOf(T)]u64 {
+    const num_bits = @bitSizeOf(T);
+    var value: u64 = 1;
+
+    var masks: [num_bits]u64 = undefined;
     for (0..num_bits) |idx| {
         masks[idx] = value;
         value <<= 1;
     }
     return masks;
 }
+const BITMASKS = getBitMasks(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
 
-fn getFullMasks(comptime T: type) [8 * @sizeOf(T)]T {
-    const num_bits = 8 * @sizeOf(T);
-    var value: T = std.math.maxInt(T) - 1;
+fn getFullMasks(comptime T: type) [@bitSizeOf(T)]u64 {
+    const num_bits = @bitSizeOf(T);
+    var value: u64 = @as(u64, @intCast(std.math.maxInt(T))) - 1;
 
-    var masks: [num_bits]T = undefined;
+    const overall_mask = value;
+
+    var masks: [num_bits]u64 = undefined;
     for (0..num_bits) |idx| {
-        masks[idx] = value;
+        masks[idx] = value & overall_mask;
         value <<= 1;
     }
     return masks;
 }
+const FULL_MASKS = getFullMasks(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
 
-const FULL_MASKS = getFullMasks(std.meta.FieldType(RadixNode, .freq_char_bitmask));
-
-pub inline fn getInsertIdx(bitmask: u16, char: u8) usize {
-    const shift_len: usize = @intCast(CHAR_FREQ_TABLE[@intCast(char)]);
+pub inline fn getInsertIdx(
+    char_freq_table: *const [256]u8,
+    bitmask: u64,
+    char: u8,
+    ) usize {
+    const shift_len: usize = @intCast(char_freq_table[@intCast(char)]);
     return @popCount(bitmask & FULL_MASKS[shift_len]);
 }
 
@@ -69,412 +82,483 @@ pub fn LCP(key: []const u8, match: []const u8) u8 {
     return @intCast(max_chars);
 }
 
-const RadixEdge = extern struct {
-    str: [MAX_STRING_LEN]u8,
-    len: u8,
-    child_ptr: *RadixNode,
+pub fn RadixEdge(comptime T: type) type {
+    return extern struct {
+        const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator) !*RadixEdge {
-        const edge = try allocator.create(RadixEdge);
-        edge.* = RadixEdge{
-            .str = undefined,
-            .len = 0,
-            .child_ptr = undefined,
-        };
-        return edge;
-    }
-};
+        str: [MAX_STRING_LEN]u8,
+        len: u8,
+        child_ptr: *RadixNode(T),
 
-///////////////////////////////////////////
-//                   ALT                 //
-///////////////////////////////////////////
-// const RadixNode = packed struct {
-    // num_edges: u8,
-    // edgelist_capacity: u8,
-    // freq_char_bitmask: u48,
-    // value: *anyopaque,
-    // edges: [*]RadixEdge,
-///////////////////////////////////////////
-
-const RadixNode = packed struct {
-    num_edges: u8,
-    edgelist_capacity: u8,
-    freq_char_bitmask: u16,
-    value: u32,
-    edges: [*]RadixEdge,
-
-    pub fn init(allocator: std.mem.Allocator) !*RadixNode {
-        const node = try allocator.create(RadixNode);
-        node.* = RadixNode{
-            .num_edges = 0,
-            .edgelist_capacity = 0,
-            .freq_char_bitmask = 0,
-            .value = undefined,
-            .edges = undefined,
-        };
-        return node;
-    }
-
-    pub inline fn addEdge(
-        self: *RadixNode, 
-        allocator: std.mem.Allocator,
-        edge: *RadixEdge,
-        ) !void {
-        self.num_edges += 1;
-
-        if (self.num_edges > self.edgelist_capacity) {
-            const new_capacity: usize = @min(256, (2 * self.edgelist_capacity) + 1);
-            const old_slice = self.edges[0..self.edgelist_capacity];
-
-            const new_slice: []RadixEdge = try allocator.realloc(
-                    old_slice,
-                    new_capacity,
-                    );
-            self.edges = new_slice.ptr;
-            self.edgelist_capacity = @intCast(new_capacity);
+        pub fn init(allocator: std.mem.Allocator) !*Self {
+            const edge = try allocator.create(Self);
+            edge.len = 0;
+            return edge;
         }
-        self.edges[self.num_edges - 1] = edge.*;
-    }
+    };
+}
 
-    pub inline fn addEdgePos(
-        self: *RadixNode, 
-        allocator: std.mem.Allocator,
-        edge: *RadixEdge,
-        ) !void {
-        if (CHAR_FREQ_TABLE[edge.str[0]] == 0) {
+
+pub fn RadixNode(comptime T: type) type {
+
+    return extern struct {
+        const Self = @This();
+        const value_type = if (@sizeOf(T) <= 8) T else *T;
+
+        // is_leaf is stored in lowest bit of freq_char_bitmask
+        edge_data: EdgeData,
+        value: value_type,
+        edges: [*]RadixEdge(T),
+
+        pub const EdgeData = packed struct(u64) {
+            num_edges: u8,
+            edgelist_capacity: u8,
+            freq_char_bitmask: u48,
+        };
+
+        comptime {
+            std.debug.assert(@sizeOf(Self) <= 24);
+        }
+
+        pub fn init(allocator: std.mem.Allocator) !*Self {
+            const node = try allocator.create(Self);
+            node.edge_data = EdgeData{ 
+                .num_edges = 0, 
+                .edgelist_capacity = 0, 
+                .freq_char_bitmask = 0, 
+            };
+            return node;
+        }
+
+        pub inline fn getMaskU64(self: *const Self) u64 {
+            return @intCast(self.edge_data.freq_char_bitmask);
+        }
+
+        pub inline fn addEdge(
+            self: *Self, 
+            allocator: std.mem.Allocator,
+            edge: *RadixEdge(T),
+            ) !void {
+            self.edge_data.num_edges += 1;
+
+            if (self.edge_data.num_edges > self.edge_data.edgelist_capacity) {
+                const new_capacity: usize = @min(256, (2 * self.edge_data.edgelist_capacity) + 1);
+                const old_slice = self.edges[0..self.edge_data.edgelist_capacity];
+
+                const new_slice: []RadixEdge(T) = try allocator.realloc(
+                        old_slice,
+                        new_capacity,
+                        );
+                self.edges = new_slice.ptr;
+                self.edge_data.edgelist_capacity = @intCast(new_capacity);
+            }
+            self.edges[self.edge_data.num_edges - 1] = edge.*;
+        }
+
+        pub inline fn addEdgePos(
+            self: *Self, 
+            char_freq_table: *const [256]u8,
+            allocator: std.mem.Allocator,
+            edge: *RadixEdge(T),
+            ) !void {
+            if (char_freq_table[edge.str[0]] == 0) {
+                try self.addEdge(allocator, edge);
+                return;
+            }
+
+            const insert_idx_new: usize = getInsertIdx(
+                char_freq_table,
+                self.getMaskU64(), 
+                edge.str[0],
+                );
+            const old_swap_idx: usize   = @intCast(self.edge_data.num_edges);
+
+            std.debug.assert(insert_idx_new <= old_swap_idx);
+            std.debug.assert(self.edge_data.num_edges <= self.edge_data.edgelist_capacity);
+
             try self.addEdge(allocator, edge);
-            return;
-        }
+            if (insert_idx_new == old_swap_idx) return;
 
-        const insert_idx_new: usize = getInsertIdx(self.freq_char_bitmask, edge.str[0]);
-        const old_swap_idx: usize   = @intCast(self.num_edges);
+            // Save for swap. Will be overwritten in memmove.
+            const temp = self.edges[old_swap_idx];
 
-        try self.addEdge(allocator, edge);
-        if (insert_idx_new == old_swap_idx) return;
-
-        // Save for swap. Will be overwritten in memmove.
-        const temp = self.edges[old_swap_idx];
-
-        // Memmove
-        var idx: usize = @intCast(self.num_edges - 1);
-        while (idx > insert_idx_new) : (idx -= 1) {
-            self.edges[idx] = self.edges[idx - 1];
-        }
-
-        // Swap
-        self.edges[insert_idx_new] = temp;
-    }
-
-    pub fn printChildren(self: *const RadixNode, depth: u32) void {
-        for (0..self.num_edges) |edge_idx| {
-            const edge = self.edges[edge_idx];
-            print("Depth {d} - Edge: {s}\n",  .{depth, edge.str[0..edge.len]});
-            print("Depth {d} - Child: {d}\n\n", .{depth, edge.child_ptr.value});
-            edge.child_ptr.printChildren(depth + 1);
-        }
-    }
-
-    pub fn printEdges(self: *const RadixNode) void {
-        for (0..self.num_edges) |i| {
-            const edge = self.edges[i];
-            print("{d}: {s}\n", .{i, edge.str[0..edge.len]});
-        }
-        print("\n", .{});
-    }
-};
-
-const RadixTrie = struct {
-    allocator: std.mem.Allocator,
-    root: *RadixNode,
-    nodes: std.ArrayList(RadixNode),
-    num_keys: u32,
-    bitmasks: [8 * @sizeOf(std.meta.FieldType(RadixNode, .freq_char_bitmask))]std.meta.FieldType(RadixNode, .freq_char_bitmask),
-
-
-    pub fn init(allocator: std.mem.Allocator) !RadixTrie {
-        const root = try RadixNode.init(allocator);
-        return RadixTrie{
-            .allocator = allocator,
-            .root = root,
-            .nodes = std.ArrayList(RadixNode).init(allocator),
-            .num_keys = 0,
-            .bitmasks = getBitMasks(std.meta.FieldType(RadixNode, .freq_char_bitmask)),
-        };
-    }
-
-    inline fn addNode(
-        self: *RadixTrie, 
-        key: []const u8, 
-        _node: *RadixNode,
-        value: u32,
-    ) !void {
-        var node      = _node;
-        var rem_chars = key.len;
-
-        var current_idx: usize = 0;
-        while (true) {
-            var num_chars_edge = rem_chars;
-            var is_leaf = true;
-
-            if (rem_chars > MAX_STRING_LEN) {
-                num_chars_edge = MAX_STRING_LEN;
-                is_leaf = false;
+            // Memmove
+            var idx: usize = @intCast(self.edge_data.num_edges - 1);
+            while (idx > insert_idx_new) : (idx -= 1) {
+                self.edges[idx] = self.edges[idx - 1];
             }
 
-            const new_node   = try RadixNode.init(self.allocator);
-            new_node.value   = value;
-            new_node.freq_char_bitmask = @intFromBool(is_leaf);
+            // Swap
+            self.edges[insert_idx_new] = temp;
+        }
 
-            const new_edge     = try RadixEdge.init(self.allocator);
-            new_edge.len       = @truncate(num_chars_edge);
-            new_edge.child_ptr = new_node;
+        pub fn printChildren(self: *const Self, depth: u32) void {
+            for (0..self.edge_data.num_edges) |edge_idx| {
+                const edge = self.edges[edge_idx];
+                print("Depth {d} - Edge: {s}\n",  .{depth, edge.str[0..edge.len]});
+                print("Depth {d} - Child: {d}\n\n", .{depth, edge.child_ptr.value});
+                edge.child_ptr.printChildren(depth + 1);
+            }
+        }
 
-            @memcpy(
-                new_edge.str[0..num_chars_edge], 
-                key[current_idx..current_idx+num_chars_edge],
-                );
-            node.freq_char_bitmask |= (
-                self.bitmasks[CHAR_FREQ_TABLE[new_edge.str[0]]] & FULL_MASKS[0]
-                );
+        pub fn printEdges(self: *const Self) void {
+            for (0..self.edge_data.num_edges) |i| {
+                const edge = self.edges[i];
+                print("{d}: {s}\n", .{i, edge.str[0..edge.len]});
+            }
+            print("\n", .{});
+        }
+    };
+}
 
-            if (CHAR_FREQ_TABLE[new_edge.str[0]] == 0) {
-                try node.addEdge(self.allocator, new_edge);
-            } else {
-                try node.addEdgePos(self.allocator, new_edge);
+
+pub fn RadixTrie(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        allocator: std.mem.Allocator,
+        root: *RadixNode(T),
+        num_keys: u32,
+        char_freq_table: [256]u8,
+
+
+        pub fn init(allocator: std.mem.Allocator) !Self {
+            const root = try RadixNode(T).init(allocator);
+            return Self{
+                .allocator = allocator,
+                .root = root,
+                .num_keys = 0,
+                .char_freq_table = BASE_CHAR_FREQ_TABLE,
+            };
+        }
+
+        fn argSortDesc(
+            _: void,
+            a: FreqStruct,
+            b: FreqStruct,
+            ) bool {
+            return a.freq > b.freq;
+        }
+
+        pub fn buildFrequencyTable(self: *Self, words: [][]const u8) void {
+            var items: [256]FreqStruct = undefined;
+            for (0..256) |idx| {
+                items[idx].freq = 0;
+                items[idx].value = @intCast(idx);
             }
 
-            if (is_leaf) break;
+            for (words) |word| {
+                for (word, 0..) |char, idx| {
+                    // Weight by proximity to front of word. 
+                    // Will encounter low depth nodes more frequently.
+                    items[@intCast(char)].freq += (word.len - idx);
+                }
+            }
+            std.mem.sort(
+                FreqStruct,
+                &items,
+                {}, 
+                argSortDesc,
+                );
 
-            rem_chars   -= MAX_STRING_LEN;
-            current_idx += num_chars_edge;
-            node         = new_node;
+            const num_entries = (@bitSizeOf(std.meta.FieldType(RadixNode(T).EdgeData, .freq_char_bitmask))) - 1;
+
+            // Sort by frequency
+            for (0..num_entries) |idx| {
+                self.char_freq_table[@intCast(items[idx].value)] = @intCast(idx + 1);
+            }
+
+            for (num_entries..256) |idx| {
+                self.char_freq_table[@intCast(items[idx].value)] = 0;
+            }
         }
-    }
 
-    pub fn insert(self: *RadixTrie, key: []const u8, value: u32) !void {
-        var node = self.root;
-        var key_idx: usize = 0;
+        inline fn addNode(
+            self: *Self, 
+            key: []const u8, 
+            _node: *RadixNode(T),
+            value: u32,
+        ) !void {
+            var node      = _node;
+            var rem_chars = key.len;
 
-        while (true) {
-            var next_node: *RadixNode = undefined;
-            var max_edge_idx: usize = 0;
-            var max_lcp: u8 = 0;
-            var partial: bool = false;
+            var current_idx: usize = 0;
+            while (true) {
+                var num_chars_edge = rem_chars;
+                var is_leaf = true;
 
-            const shift_len: usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
-
-            if (shift_len > 0) {
-                // if ((BIT_MASKS_u16[shift_len] & node.freq_char_bitmask) == 0) {
-                if ((self.bitmasks[shift_len] & node.freq_char_bitmask) == 0) {
-
-                    // Node doesn't exist. Insert.
-                    try self.addNode(key[key_idx..], node, value);
-                    self.num_keys += 1;
-                    return;
+                if (rem_chars > MAX_STRING_LEN) {
+                    num_chars_edge = MAX_STRING_LEN;
+                    is_leaf = false;
                 }
 
-                const access_idx: usize = getInsertIdx(node.freq_char_bitmask, key[key_idx]);
+                const new_node   = try RadixNode(T).init(self.allocator);
+                new_node.value   = value;
+                new_node.edge_data.freq_char_bitmask = @intFromBool(is_leaf);
 
-                const edge   = node.edges[access_idx];
-                max_lcp      = LCP(key[key_idx..], edge.str[0..edge.len]);
-                next_node    = node.edges[access_idx].child_ptr;
-                partial      = max_lcp < edge.len;
-                max_edge_idx = access_idx;
-            } else {
-                const start_idx = @popCount(node.freq_char_bitmask & FULL_MASKS[0]);
-                for (start_idx..node.num_edges) |edge_idx| {
-                    const current_edge   = node.edges[edge_idx];
-                    const current_prefix = current_edge.str[0..current_edge.len];
-                    const lcp = LCP(key[key_idx..], current_prefix);
+                const new_edge     = try RadixEdge(T).init(self.allocator);
+                new_edge.len       = @truncate(num_chars_edge);
+                new_edge.child_ptr = new_node;
 
-                    if (lcp > max_lcp) {
-                        max_lcp   = lcp;
-                        max_edge_idx = edge_idx;
-                        next_node = node.edges[edge_idx].child_ptr;
-                        partial   = lcp < current_prefix.len;
-                        break;
+                @memcpy(
+                    new_edge.str[0..num_chars_edge], 
+                    key[current_idx..current_idx+num_chars_edge],
+                    );
+
+                const mask_idx = @as(usize, @intCast(self.char_freq_table[new_edge.str[0]]));
+                node.edge_data.freq_char_bitmask |= @intCast(
+                    BITMASKS[mask_idx] & FULL_MASKS[0]
+                    );
+
+                if (mask_idx == 0) {
+                    try node.addEdge(self.allocator, new_edge);
+                } else {
+                    try node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
+                }
+
+                if (is_leaf) break;
+
+                rem_chars   -= MAX_STRING_LEN;
+                current_idx += num_chars_edge;
+                node         = new_node;
+            }
+        }
+
+        pub fn insert(self: *Self, key: []const u8, value: T) !void {
+            var node = self.root;
+            var key_idx: usize = 0;
+
+            while (true) {
+                var next_node: *RadixNode(T) = undefined;
+                var max_edge_idx: usize = 0;
+                var max_lcp: u8 = 0;
+                var partial: bool = false;
+
+                const shift_len: usize = @intCast(self.char_freq_table[key[key_idx]]);
+
+                if (shift_len > 0) {
+                    if ((BITMASKS[shift_len] & node.getMaskU64()) == 0) {
+
+                        // Node doesn't exist. Insert.
+                        try self.addNode(key[key_idx..], node, value);
+                        self.num_keys += 1;
+                        return;
+                    }
+
+                    const access_idx: usize = getInsertIdx(
+                        &self.char_freq_table, 
+                        node.getMaskU64(),
+                        key[key_idx],
+                        );
+
+                    const edge   = node.edges[access_idx];
+                    max_lcp      = LCP(key[key_idx..], edge.str[0..edge.len]);
+                    next_node    = node.edges[access_idx].child_ptr;
+                    partial      = max_lcp < edge.len;
+                    max_edge_idx = access_idx;
+                } else {
+                    const start_idx: usize = @popCount(node.getMaskU64() & FULL_MASKS[0]);
+                    for (start_idx..node.edge_data.num_edges) |edge_idx| {
+                        const current_edge   = node.edges[edge_idx];
+                        const current_prefix = current_edge.str[0..current_edge.len];
+                        const lcp = LCP(key[key_idx..], current_prefix);
+
+                        if (lcp > max_lcp) {
+                            max_lcp   = lcp;
+                            max_edge_idx = edge_idx;
+                            next_node = node.edges[edge_idx].child_ptr;
+                            partial   = lcp < current_prefix.len;
+                            break;
+                        }
+                    }
+                    if (max_lcp == 0) {
+                        try self.addNode(key[key_idx..], node, value);
+                        self.num_keys += 1;
+                        return;
                     }
                 }
-                if (max_lcp == 0) {
-                    try self.addNode(key[key_idx..], node, value);
+
+                key_idx += max_lcp;
+
+                // Matched rest of key. Node already exists. Replace.
+                if (!partial and (key_idx == key.len)) {
+                    next_node.value = value;
+                    return;
+                }
+
+                const rem_chars: usize = key.len - key_idx;
+                if (partial) {
+                    // Split
+                    if (rem_chars == 0) {
+                        var existing_edge = &node.edges[max_edge_idx];
+                        const existing_node = existing_edge.child_ptr;
+                        const new_node = try RadixNode(T).init(self.allocator);
+                        const new_edge = try RadixEdge(T).init(self.allocator);
+
+                        /////////////////////////////////
+                        //                             //
+                        // \ - existing_edge           //
+                        //  O - existing_node          //
+                        //                             //
+                        // str:           'ABC'        //
+                        // existing_edge: 'ABCD'       //
+                        //                             //
+                        // --------------------------- //
+                        //      SPLIT NO-CREATE        //
+                        // --------------------------- //
+                        // \ - existing_edge           // 
+                        //  O - new_node               //
+                        //   \ - new_edge              //
+                        //    O - existing_node        //
+                        //                             //
+                        // existing_edge: 'ABC'        //
+                        // new_edge:      'D'          //
+                        //                             //
+                        /////////////////////////////////
+
+                        new_edge.len      = existing_edge.len - max_lcp;
+                        existing_edge.len = max_lcp;
+
+                        @memcpy(
+                            new_edge.str[0..new_edge.len], 
+                            existing_edge.str[0..new_edge.len],
+                            );
+
+                        existing_edge.child_ptr = new_node;
+                        new_edge.child_ptr      = existing_node;
+
+                        new_node.value = value;
+                        new_node.edge_data.freq_char_bitmask = @intCast(
+                            BITMASKS[self.char_freq_table[new_edge.str[0]]] | BITMASKS[0]
+                            );
+
+                        try new_node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
+                        self.num_keys += 1;
+                    } else {
+                        var existing_edge = &node.edges[max_edge_idx];
+                        const existing_node = existing_edge.child_ptr;
+                        const new_node_1 = try RadixNode(T).init(self.allocator);
+                        const new_edge_2 = try RadixEdge(T).init(self.allocator);
+
+                        /////////////////////////////////////////
+                        //                                     //
+                        // \ - existing_edge                   //
+                        //  O - existing_node                  //
+                        //                                     //
+                        // str:           'AEF'                //
+                        // existing_edge: 'ABCD'               //
+                        //                                     //
+                        // ----------------------------------- //
+                        //             SPLIT CREATE            //
+                        // ----------------------------------- //
+                        //  \ - existing_edge                  // 
+                        //   O - new_node_1                    //
+                        //  / \ - (new_edge_1, new_edge_2)     //
+                        // O   O - (new_node_2, existing_node) //
+                        //                                     //
+                        // existing_edge: 'A'                  //
+                        // new_edge_1:    'BCD'                //
+                        // new_edge_2:    'EF'                 //
+                        //                                     //
+                        /////////////////////////////////////////
+
+                        new_edge_2.len    = existing_edge.len - max_lcp;
+                        existing_edge.len = max_lcp;
+
+                        @memcpy(
+                            new_edge_2.str[0..new_edge_2.len], 
+                            existing_edge.str[max_lcp..max_lcp + new_edge_2.len],
+                            );
+
+                        new_edge_2.child_ptr    = existing_node;
+                        existing_edge.child_ptr = new_node_1;
+
+                        new_node_1.edge_data.freq_char_bitmask = @intCast(
+                            BITMASKS[self.char_freq_table[new_edge_2.str[0]]] | BITMASKS[0]
+                            );
+                        try new_node_1.addEdgePos(&self.char_freq_table, self.allocator, new_edge_2);
+
+                        try self.addNode(key[key.len-rem_chars..], new_node_1, value);
+                    }
+
                     self.num_keys += 1;
                     return;
                 }
+
+                // Traverse
+                node = next_node;
             }
-
-            key_idx += max_lcp;
-
-            // Matched rest of key. Node already exists. Replace.
-            if (!partial and (key_idx == key.len)) {
-                next_node.value = value;
-                return;
-            }
-
-            const rem_chars: usize = key.len - key_idx;
-            if (partial) {
-                // Split
-                if (rem_chars == 0) {
-                    var existing_edge = &node.edges[max_edge_idx];
-                    const existing_node = existing_edge.child_ptr;
-                    const new_node = try RadixNode.init(self.allocator);
-                    const new_edge = try RadixEdge.init(self.allocator);
-
-                    /////////////////////////////////
-                    //                             //
-                    // \ - existing_edge           //
-                    //  O - existing_node          //
-                    //                             //
-                    // str:           'ABC'        //
-                    // existing_edge: 'ABCD'       //
-                    //                             //
-                    // --------------------------- //
-                    //      SPLIT NO-CREATE        //
-                    // --------------------------- //
-                    // \ - existing_edge           // 
-                    //  O - new_node               //
-                    //   \ - new_edge              //
-                    //    O - existing_node        //
-                    //                             //
-                    // existing_edge: 'ABC'        //
-                    // new_edge:      'D'          //
-                    //                             //
-                    /////////////////////////////////
-
-                    new_edge.len      = existing_edge.len - max_lcp;
-                    existing_edge.len = max_lcp;
-
-                    @memcpy(
-                        new_edge.str[0..new_edge.len], 
-                        existing_edge.str[0..new_edge.len],
-                        );
-
-                    existing_edge.child_ptr = new_node;
-                    new_edge.child_ptr      = existing_node;
-
-                    new_node.value = value;
-                    new_node.freq_char_bitmask = (
-                        // BIT_MASKS_u16[CHAR_FREQ_TABLE[new_edge.str[0]]] | BIT_MASKS_u16[0]
-                        self.bitmasks[CHAR_FREQ_TABLE[new_edge.str[0]]] | self.bitmasks[0]
-                        );
-
-                    try new_node.addEdgePos(self.allocator, new_edge);
-                    self.num_keys += 1;
-                } else {
-                    var existing_edge = &node.edges[max_edge_idx];
-                    const existing_node = existing_edge.child_ptr;
-                    const new_node_1 = try RadixNode.init(self.allocator);
-                    const new_edge_2 = try RadixEdge.init(self.allocator);
-
-                    /////////////////////////////////////////
-                    //                                     //
-                    // \ - existing_edge                   //
-                    //  O - existing_node                  //
-                    //                                     //
-                    // str:           'AEF'                //
-                    // existing_edge: 'ABCD'               //
-                    //                                     //
-                    // ----------------------------------- //
-                    //             SPLIT CREATE            //
-                    // ----------------------------------- //
-                    //  \ - existing_edge                  // 
-                    //   O - new_node_1                    //
-                    //  / \ - (new_edge_1, new_edge_2)     //
-                    // O   O - (new_node_2, existing_node) //
-                    //                                     //
-                    // existing_edge: 'A'                  //
-                    // new_edge_1:    'BCD'                //
-                    // new_edge_2:    'EF'                 //
-                    //                                     //
-                    /////////////////////////////////////////
-
-                    new_edge_2.len    = existing_edge.len - max_lcp;
-                    existing_edge.len = max_lcp;
-
-                    @memcpy(
-                        new_edge_2.str[0..new_edge_2.len], 
-                        existing_edge.str[max_lcp..max_lcp + new_edge_2.len],
-                        );
-
-                    new_edge_2.child_ptr    = existing_node;
-                    existing_edge.child_ptr = new_node_1;
-
-                    try new_node_1.addEdgePos(self.allocator, new_edge_2);
-
-                    try self.addNode(key[key.len-rem_chars..], new_node_1, value);
-                }
-
-                self.num_keys += 1;
-                return;
-            }
-
-            // Traverse
-            node = next_node;
         }
-    }
 
-    pub fn find(self: *const RadixTrie, key: []const u8) u32 {
-        var node = self.root;
-        var key_idx: usize = 0;
+        pub fn find(self: *const Self, key: []const u8) !T {
+            var node = self.root;
+            var key_idx: usize = 0;
 
-        while (true) {
-            var matched = false;
-            if (key_idx >= key.len) return std.math.maxInt(u32);
+            while (key_idx < key.len) {
+                const shift_len:  usize = @intCast(self.char_freq_table[key[key_idx]]);
+                const access_idx: usize = @popCount(
+                    node.getMaskU64() & FULL_MASKS[0] & FULL_MASKS[shift_len]
+                    );
 
-            const shift_len:  usize = @intCast(CHAR_FREQ_TABLE[key[key_idx]]);
-            const access_idx: usize = @popCount(
-                node.freq_char_bitmask & FULL_MASKS[0] & FULL_MASKS[shift_len]
-                );
-
-            if (shift_len > 0) {
-                const current_edge   = node.edges[access_idx];
-                const current_prefix = current_edge.str[0..current_edge.len];
-
-                if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
-                    matched  = true;
-                    node     = current_edge.child_ptr;
-                    key_idx += current_prefix.len;
-
-                    // if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
-                    if ((key_idx == key.len) and (node.freq_char_bitmask & self.bitmasks[0] == 0b00000000_00000001)) return node.value;
-                }
-            } else {
-                for (access_idx..node.num_edges) |edge_idx| {
-                    const current_edge   = node.edges[edge_idx];
+                if (shift_len > 0) {
+                    const current_edge   = node.edges[access_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
 
                     if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
-                        matched  = true;
-                        node     = node.edges[edge_idx].child_ptr;
+                        node     = current_edge.child_ptr;
                         key_idx += current_prefix.len;
 
-                        // if ((key_idx == key.len) and (node.freq_char_bitmask & BIT_MASKS_u16[0] == 0b00000000_00000001)) return node.value;
-                        if ((key_idx == key.len) and (node.freq_char_bitmask & self.bitmasks[0] == 0b00000000_00000001)) return node.value;
-                        break;
+                        if ((key_idx == key.len) and (node.getMaskU64() & BITMASKS[0] == 1)) {
+                            return node.value;
+                        }
+                    } else {
+                        return error.ValueNotFound;
+                    }
+                } else {
+                    var matched = false;
+                    for (access_idx..node.edge_data.num_edges) |edge_idx| {
+                        const current_edge   = node.edges[edge_idx];
+                        const current_prefix = current_edge.str[0..current_edge.len];
+
+                        if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                            matched = true;
+                            node     = node.edges[edge_idx].child_ptr;
+                            key_idx += current_prefix.len;
+
+                            if ((key_idx == key.len) and (node.getMaskU64() & BITMASKS[0] == 1)) {
+                                return node.value;
+                            }
+                            break;
+                        }
+                    }
+                    if (!matched) {
+                        return error.ValueNotFound;
                     }
                 }
+
             }
-
-            if (!matched) return std.math.maxInt(u32);
+            return error.ValueNotFound;
         }
-    }
 
-    pub fn printNodes(self: *const RadixTrie) void {
-        self.root.printChildren(0);
-        print("\n\n", .{});
-    }
-};
+        pub fn printNodes(self: *const Self) void {
+            self.root.printChildren(0);
+            print("\n\n", .{});
+        }
+    };
+}
 
 
 test "insertion" {
     print("\n\n", .{});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var trie = try RadixTrie.init(allocator);
+    var trie = try RadixTrie(u32).init(allocator);
 
-    try trie.insert("ostritch", 25);
+    try trie.insert("ostritch", 24);
     try trie.insert("test", 420);
     try trie.insert("testing", 69);
     try trie.insert("tes", 24);
@@ -502,15 +586,20 @@ test "insertion" {
     try std.testing.expectEqual(420, trie.find("test"));
     try std.testing.expectEqual(69, trie.find("testing"));
     try std.testing.expectEqual(54, trie.find("waddup"));
-    try std.testing.expectEqual(std.math.maxInt(u32), trie.find("testin"));
+    try std.testing.expectEqual(error.ValueNotFound, trie.find("testin"));
     try std.testing.expectEqual(121, trie.find("abracadabra"));
+    try std.testing.expectEqual(32, trie.find("initial"));
+    try std.testing.expectEqual(25, trie.find("apocryphol"));
+    try std.testing.expectEqual(25, trie.find("apacryphol"));
+    try std.testing.expectEqual(25, trie.find("apicryphol"));
+    try std.testing.expectEqual(25, trie.find("eager"));
+    try std.testing.expectEqual(25, trie.find("mantequilla"));
     try std.testing.expectEqual(32, trie.find("initial"));
 }
 
 test "bench" {
-    // @breakpoint();
-    // var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
@@ -523,7 +612,7 @@ test "bench" {
     var keys = std.StringHashMap(usize).init(allocator);
     defer keys.deinit();
 
-    var trie = try RadixTrie.init(allocator);
+    var trie = try RadixTrie(u32).init(allocator);
 
     const filename = "data/words.txt";
     const max_bytes_per_line = 4096;
@@ -533,18 +622,24 @@ test "bench" {
     defer file.close();
     var buffered_reader = std.io.bufferedReader(file.reader());
 
-    var raw_keys: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(allocator);
-    defer raw_keys.deinit();
+    var _raw_keys: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(allocator);
 
     const reader = buffered_reader.reader();
     while (try reader.readUntilDelimiterOrEofAlloc(allocator, '\n', max_bytes_per_line)) |line| {
-        try raw_keys.append(line);
+        try _raw_keys.append(line);
     }
-    const _N = raw_keys.items.len;
+
+    const raw_keys = try _raw_keys.toOwnedSlice();
+    const _N = raw_keys.len;
+
+    const start_freq_table = std.time.microTimestamp();
+    _ = trie.buildFrequencyTable(raw_keys);
+    const end_freq_table = std.time.microTimestamp();
+    const elapsed_freq_table = end_freq_table - start_freq_table;
 
     var start = std.time.microTimestamp();
     for (0.._N) |i| {
-        try keys.put(raw_keys.items[i], i);
+        try keys.put(raw_keys[i], i);
     }
     var end = std.time.microTimestamp();
     const elapsed_insert_hashmap = end - start;
@@ -556,7 +651,7 @@ test "bench" {
     start = std.time.microTimestamp();
     var i: u32 = 0;
     for (0..N) |j| {
-        try trie.insert(raw_keys.items[j], i);
+        try trie.insert(raw_keys[j], i);
         i += 1;
     }
     end = std.time.microTimestamp();
@@ -567,20 +662,25 @@ test "bench" {
     print("Capacity used: {d}\n", .{final_capacity - init_capacity});
 
     start = std.time.microTimestamp();
+    var keys_not_found: usize = 0;
     for (0..N) |j| {
-        _ = trie.find(raw_keys.items[j]);
+        _ = trie.find(raw_keys[j]) catch {
+            keys_not_found += 1;
+        };
     }
+    std.debug.print("Keys not found: {d}\n", .{keys_not_found});
     end = std.time.microTimestamp();
     const elapsed_trie_find = end - start;
 
     start = std.time.microTimestamp();
     for (0..N) |j| {
-        _ = keys.get(raw_keys.items[j]);
+        _ = std.mem.doNotOptimizeAway(keys.get(raw_keys[j]));
     }
     end = std.time.microTimestamp();
     const elapsed_hashmap_find = end - start;
 
-    // const big_N: u64 = N * @as(u64, 1_000_000);
+    try std.testing.expectEqual(N, trie.num_keys);
+
     const million_insertions_per_second_trie = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_insert_trie));
     const million_lookups_per_second_trie    = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_trie_find));
     std.debug.print("-------------------  RADIX TRIE  -------------------\n", .{});
@@ -599,6 +699,14 @@ test "bench" {
     std.debug.print("Million lookups per second:    {d}\n", .{million_lookups_per_second_hashmap});
     std.debug.print("Average lookup time:           {}ns\n", .{@divFloor(1000 * elapsed_hashmap_find, N)});
 
+    std.debug.print("\n\n", .{});
 
-    try std.testing.expectEqual(N, trie.num_keys);
+
+    const million_insertions_per_second_freq_table = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(elapsed_freq_table));
+    std.debug.print("------------------  FREQ TABLE ------------------\n", .{});
+    std.debug.print("\nFrequency table construction time: {}ms\n", .{@divFloor(elapsed_freq_table, 1000)});
+    std.debug.print("Million insertions per second:     {d}\n", .{million_insertions_per_second_freq_table});
+
+
+    std.debug.print("\n\n", .{});
 }
