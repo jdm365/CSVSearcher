@@ -165,14 +165,6 @@ pub const EdgeDataLarge = struct {
         };
     }
 
-    pub inline fn getNumEdges(self: *const EdgeDataLarge) u8 {
-        return @truncate(self.data[3] >> 56);
-    }
-
-    pub inline fn getCapacity(self: *const EdgeDataLarge) u8 {
-        return @truncate((self.data[3] >> 48) & 0xFF);
-    }
-
     pub inline fn setNumEdges(self: *EdgeDataLarge, value: u8) void {
         self.data[3] = (self.data[3] & 0x00FFFFFFFFFFFFFF) | 
                        (@as(u64, value) << 56);
@@ -183,10 +175,32 @@ pub const EdgeDataLarge = struct {
                        (@as(u64, value) << 48);
     }
 
+    pub inline fn setBit(self: *EdgeDataLarge, idx: usize) void {
+        const byte_idx = @divFloor(idx, 64);
+        const bit_idx  = idx % 64;
+        self.data[byte_idx] |= bit_idx << idx;
+    }
+
+    pub inline fn unSetBit(self: *EdgeDataLarge, idx: usize) void {
+        const byte_idx = @divFloor(idx, 64);
+        const bit_idx  = idx % 64;
+        self.data[byte_idx] |= bit_idx << idx;
+    }
+
+    pub inline fn getBit(self: *const EdgeDataLarge, idx: usize) u1 {
+        const byte_idx = @divFloor(idx, 64);
+        const bit_idx  = idx % 64;
+        return (self.data[byte_idx] >> bit_idx) & 1;
+    }
+
     pub inline fn getMaskU256(self: *const EdgeDataLarge) @Vector(4, u64) {
         var result = self.data;
         result[3] &= 0x00FFFFFFFFFFFFFF;
         return result;
+    }
+
+    pub inline fn popCountBefore(self: *const EdgeDataLarge, idx: usize) u8 {
+        return @popCount(FULL_MASKS_256[idx] & self.data);
     }
 };
     
@@ -288,14 +302,15 @@ pub fn RadixNode(comptime T: type) type {
 
         pub fn printChildren(
             self: *const Self, 
-            nodes: *std.ArrayList(RadixNode(T)),
+            nodes: *const std.ArrayList(RadixNode(T)),
             depth: u32,
             ) void {
             for (0..self.edge_data.num_edges) |edge_idx| {
                 const edge  = self.edges[edge_idx];
                 const child = nodes.items[edge.child_idx];
-                print("Depth {d} - Edge: {s}\n",  .{depth, edge.str[0..edge.len]});
-                print("Depth {d} - Child: {d}\n\n", .{depth, child.value});
+                print("Depth {d} - Edge:      {s}\n",  .{depth, edge.str[0..edge.len]});
+                print("Depth {d} - Child:     {d}\n", .{depth, child.value});
+                print("Depth {d} - Num Edges: {d}\n\n", .{depth, child.edge_data.num_edges});
                 child.printChildren(nodes, depth + 1);
             }
         }
@@ -324,8 +339,30 @@ pub fn RadixTrie(comptime T: type) type {
 
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            // var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, 16_384);
-            var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, 1);
+            var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, 16_384);
+            const root = RadixNode(T){
+                .edge_data = RadixNode(T).EdgeData{
+                    .num_edges = 0,
+                    .edgelist_capacity = 0,
+                    .freq_char_bitmask = 0,
+                },
+                .value = undefined,
+                .edges = undefined,
+            };
+            try nodes.append(root);
+
+            return Self{
+                .allocator = allocator,
+                .nodes = nodes,
+                .num_nodes = 1,
+                .num_edges = 0,
+                .num_keys = 0,
+                .char_freq_table = getBaseCharFreqTable(T),
+            };
+        }
+
+        pub fn initCapacity(allocator: std.mem.Allocator, n: usize) !Self {
+            var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, n);
             const root = RadixNode(T){
                 .edge_data = RadixNode(T).EdgeData{
                     .num_edges = 0,
@@ -360,6 +397,8 @@ pub fn RadixTrie(comptime T: type) type {
         }
 
         pub fn buildFrequencyTable(self: *Self, words: [][]const u8) void {
+            if (self.nodes.items.len > 1) @panic("Nodes already inserted into trie. Can't build new frequency table.");
+
             var items: [256]FreqStruct = undefined;
             for (0..256) |idx| {
                 items[idx].freq = 0;
@@ -393,7 +432,6 @@ pub fn RadixTrie(comptime T: type) type {
         }
 
         pub fn getMemoryUsage(self: *Self) usize {
-            // const bytes = self.num_nodes * @sizeOf(RadixNode(T)) + self.num_edges * @sizeOf(RadixEdge(T));
             const bytes = self.nodes.capacity * @sizeOf(RadixNode(T)) + self.num_edges * @sizeOf(RadixEdge(T));
             return bytes;
         }
@@ -417,9 +455,6 @@ pub fn RadixTrie(comptime T: type) type {
                     is_leaf = false;
                 }
 
-                // const new_node   = try RadixNode(T).init(self.allocator);
-                // new_node.value   = value;
-                // new_node.edge_data.freq_char_bitmask = @intFromBool(is_leaf);
                 const _new_node   = RadixNode(T){
                     .edge_data = .{
                         .num_edges = 0,
@@ -462,7 +497,7 @@ pub fn RadixTrie(comptime T: type) type {
         }
 
         pub fn insert(self: *Self, key: []const u8, value: T) !void {
-            try self.nodes.ensureUnusedCapacity(32);
+            try self.nodes.ensureUnusedCapacity(256);
 
             var node = &self.nodes.items[0];
             var key_idx: usize = 0;
@@ -474,6 +509,7 @@ pub fn RadixTrie(comptime T: type) type {
                 var partial: bool = false;
 
                 const shift_len: usize = @intCast(self.char_freq_table[key[key_idx]]);
+
 
                 if (shift_len > 0) {
                     if ((BITMASKS[shift_len] & node.getMaskU64()) == 0) {
@@ -525,6 +561,9 @@ pub fn RadixTrie(comptime T: type) type {
 
                 // Matched rest of key. Node already exists. Replace.
                 if (!partial and (key_idx == key.len)) {
+                    // Make terminal if not.
+                    self.num_keys += @intFromBool((next_node.edge_data.freq_char_bitmask & 1) == 0);
+                    next_node.edge_data.freq_char_bitmask |= 1;
                     next_node.value = value;
                     return;
                 }
@@ -576,7 +615,7 @@ pub fn RadixTrie(comptime T: type) type {
 
                         @memcpy(
                             new_edge.str[0..new_edge.len], 
-                            existing_edge.str[0..new_edge.len],
+                            existing_edge.str[max_lcp..max_lcp + new_edge.len],
                             );
 
                         new_edge.child_idx      = existing_edge.child_idx;
@@ -588,7 +627,6 @@ pub fn RadixTrie(comptime T: type) type {
                             );
 
                         try new_node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
-                        self.num_keys += 1;
                     } else {
                         var existing_edge = &node.edges[max_edge_idx];
                         const _new_node_1 = RadixNode(T){
@@ -641,7 +679,7 @@ pub fn RadixTrie(comptime T: type) type {
                         existing_edge.child_idx = self.nodes.items.len - 1;
 
                         new_node_1.edge_data.freq_char_bitmask = @intCast(
-                            BITMASKS[self.char_freq_table[new_edge_2.str[0]]] | BITMASKS[0]
+                            BITMASKS[self.char_freq_table[new_edge_2.str[0]]]
                             );
                         try new_node_1.addEdgePos(&self.char_freq_table, self.allocator, new_edge_2);
 
@@ -664,10 +702,12 @@ pub fn RadixTrie(comptime T: type) type {
             while (key_idx < key.len) {
                 const shift_len:  usize = @intCast(self.char_freq_table[key[key_idx]]);
                 const access_idx: usize = @popCount(
-                    node.getMaskU64() & FULL_MASKS[0] & FULL_MASKS[shift_len]
+                    node.getMaskU64() & FULL_MASKS[shift_len]
                     );
+                @prefetch(&node.edges[access_idx], .{});
 
                 if (shift_len > 0) {
+                    // std.debug.assert(access_idx < node.edge_data.num_edges);
                     const current_edge   = node.edges[access_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
 
@@ -704,6 +744,9 @@ pub fn RadixTrie(comptime T: type) type {
                 }
 
             }
+            if (node.getMaskU64() & BITMASKS[0] == 1) {
+                return node.value;
+            }
             return error.ValueNotFound;
         }
 
@@ -733,8 +776,9 @@ test "insertion" {
     try trie.insert("waddup", 54);
     try trie.insert("newting", 44);
     try trie.insert("tosting", 69);
-    try trie.insert("abracadabra", 121);
     try trie.insert("toaster", 84);
+    try trie.insert("magisterialness", 64);
+    try trie.insert("abracadabra", 121);
     try trie.insert("rapper", 85);
     try trie.insert("apple", 25);
     try trie.insert("apocryphol", 25);
@@ -763,6 +807,7 @@ test "insertion" {
     try std.testing.expectEqual(25, trie.find("eager"));
     try std.testing.expectEqual(25, trie.find("mantequilla"));
     try std.testing.expectEqual(32, trie.find("initial"));
+    try std.testing.expectEqual(64, trie.find("magisterialness"));
 }
 
 test "bench" {
@@ -783,7 +828,9 @@ test "bench" {
     var trie = try RadixTrie(u32).init(allocator);
     defer trie.deinit();
 
-    const filename = "data/words.txt";
+    // const filename = "data/reversed_words.txt";
+    // const filename = "data/words.txt";
+    const filename = "data/words_shuffled.txt";
     const max_bytes_per_line = 4096;
     var file = std.fs.cwd().openFile(filename, .{}) catch {
         return;
@@ -797,6 +844,8 @@ test "bench" {
     while (try reader.readUntilDelimiterOrEofAlloc(allocator, '\n', max_bytes_per_line)) |line| {
         try _raw_keys.append(line);
     }
+
+    try trie.nodes.ensureTotalCapacity(_raw_keys.items.len);
 
     const raw_keys = try _raw_keys.toOwnedSlice();
     const _N = raw_keys.len;
@@ -814,7 +863,6 @@ test "bench" {
     const elapsed_insert_hashmap = end - start;
 
     const N = keys.count();
-    std.debug.print("N: {d}\n", .{N});
 
     start = std.time.microTimestamp();
     var i: u32 = 0;
@@ -845,6 +893,7 @@ test "bench" {
 
     try std.testing.expectEqual(N, trie.num_keys);
 
+    print("Num trie keys:  {d}\n", .{trie.num_keys});
     print("Num trie nodes: {d}\n", .{trie.num_nodes});
     print("Num trie edges: {d}\n", .{trie.num_edges});
     print("Theoretical trie memory usage: {d}MB\n", .{trie.getMemoryUsage() / 1_048_576});
