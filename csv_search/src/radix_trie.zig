@@ -569,8 +569,21 @@ pub fn RadixTrie(comptime T: type) type {
                     self.num_keys += @intFromBool((next_node.edge_data.freq_char_bitmask & 1) == 0);
                     next_node.edge_data.freq_char_bitmask |= 1;
                     next_node.value = value;
+
+                    print("FINAL\n", .{});
+                    print("Key:     {s}\n", .{key});
+                    print("Key:     {s}\n", .{key[key_idx..]});
+                    print("Key idx: {d}\n", .{key_idx});
+                    print("LCP:     {d}\n", .{max_lcp});
+                    print("CP len:  {d}\n", .{node.edges[max_edge_idx].len});
+                    print("CP:      {s}\n\n", .{node.edges[max_edge_idx].str});
                     return;
                 }
+                // print("Key:     {s}\n", .{key});
+                // print("Key:     {s}\n", .{key[key_idx..]});
+                // print("Key idx: {d}\n", .{key_idx});
+                // print("LCP:     {d}\n", .{max_lcp});
+                // print("CP:      {s}\n\n", .{node.edges[max_edge_idx].str});
 
                 const rem_chars: usize = key.len - key_idx;
                 if (partial) {
@@ -832,10 +845,10 @@ test "bench" {
     defer trie.deinit();
 
     // const filename = "data/reversed_words.txt";
-    // const filename = "data/words.txt";
+    const filename = "data/words.txt";
     // const filename = "data/words_shuffled_1k.txt";
     // const filename = "data/words_shuffled.txt";
-    const filename = "data/enwik9";
+    // const filename = "data/enwik9";
     // const filename = "data/duplicate_words.txt";
     const max_bytes_per_line = 65536;
     var file = std.fs.cwd().openFile(filename, .{}) catch {
@@ -849,13 +862,13 @@ test "bench" {
     const reader = buffered_reader.reader();
     while (try reader.readUntilDelimiterOrEofAlloc(allocator, '\n', max_bytes_per_line)) |line| {
         if (line.len == 0) continue;
-        try _raw_keys.append(line);
-        // const num_chars: usize = @min(5, line.len);
-        // for (0..num_chars) |i| {
+        // try _raw_keys.append(line);
+        const num_chars: usize = @min(3, line.len);
+        for (0..num_chars) |i| {
             // line[i] = std.crypto.random.int(u8);
-        // }
-        // try _raw_keys.append(line[0..num_chars]);
-
+            line[i] = 'a' + (std.crypto.random.int(u8) % 12);
+        }
+        try _raw_keys.append(line[0..num_chars]);
     }
 
     try trie.nodes.ensureTotalCapacity(_raw_keys.items.len);
@@ -875,7 +888,7 @@ test "bench" {
 
     var start = std.time.microTimestamp();
     for (0.._N) |i| {
-        try keys.fetchPut(raw_keys[i], i);
+        try keys.put(raw_keys[i], i);
     }
     var end = std.time.microTimestamp();
     const elapsed_insert_hashmap = end - start;
