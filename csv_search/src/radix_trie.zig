@@ -154,7 +154,6 @@ pub const EdgeDataLarge = struct {
 
     pub fn init(num_edges: u8, capacity: u8) EdgeDataLarge {
         // num_edges is highest byte.
-        // edgelist_capacity is second highest byte.
         var data: @Vector(4, u64) = @splat(0);
 
         data[3] = (data[3] & 0x00FFFFFFFFFFFFFF) | 
@@ -217,9 +216,8 @@ pub fn RadixNode(comptime T: type) type {
         edges: [*]RadixEdge(T),
 
         pub const EdgeData = packed struct(u64) {
-            num_edges: u8,
-            edgelist_capacity: u8,
-            freq_char_bitmask: u48,
+            freq_char_bitmask: u55,
+            num_edges: u9,
         };
 
         comptime {
@@ -229,9 +227,8 @@ pub fn RadixNode(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator) !*Self {
             const node = try allocator.create(Self);
             node.edge_data = EdgeData{ 
-                .num_edges = 0, 
-                .edgelist_capacity = 0, 
                 .freq_char_bitmask = 0, 
+                .num_edges = 0, 
             };
             return node;
         }
@@ -247,18 +244,27 @@ pub fn RadixNode(comptime T: type) type {
             ) !void {
             self.edge_data.num_edges += 1;
 
-            if (self.edge_data.num_edges > self.edge_data.edgelist_capacity) {
-                const growth_factor: f32 = if (self.edge_data.edgelist_capacity < 8) 2.0 else 1.5;
-                const new_capacity: usize = @min(256, @as(usize, @intFromFloat(@floor(growth_factor * @as(f32, @floatFromInt(self.edge_data.edgelist_capacity))))) + 1);
+            var new_capacity: usize = std.math.maxInt(usize);
+            switch (self.edge_data.num_edges) {
+                0 => new_capacity = 1,
+                1 => new_capacity = 3,
+                3 => new_capacity = 5,
+                5 => new_capacity = 8,
+                8 => new_capacity = 16,
+                16 => new_capacity = 32,
+                32 => new_capacity = 64,
+                64 => new_capacity = 128,
+                128 => new_capacity = 192,
+                192 => new_capacity = 256,
+                else => {},
+            }
 
-                const old_slice = self.edges[0..self.edge_data.edgelist_capacity];
-
+            if (new_capacity != std.math.maxInt(usize)) {
                 const new_slice: []RadixEdge(T) = try allocator.realloc(
-                        old_slice,
+                        self.edges[0..self.edge_data.num_edges - 1],
                         new_capacity,
                         );
                 self.edges = new_slice.ptr;
-                self.edge_data.edgelist_capacity = @intCast(new_capacity);
             }
             self.edges[self.edge_data.num_edges - 1] = edge.*;
         }
@@ -282,7 +288,6 @@ pub fn RadixNode(comptime T: type) type {
             const old_swap_idx: usize   = @intCast(self.edge_data.num_edges);
 
             std.debug.assert(insert_idx_new <= old_swap_idx);
-            std.debug.assert(self.edge_data.num_edges <= self.edge_data.edgelist_capacity);
 
             try self.addEdge(allocator, edge);
             if (insert_idx_new == old_swap_idx) return;
@@ -332,9 +337,9 @@ pub fn RadixTrie(comptime T: type) type {
 
         allocator: std.mem.Allocator,
         nodes: std.ArrayList(RadixNode(T)),
-        num_nodes: u32,
-        num_edges: u32,
-        num_keys: u32,
+        num_nodes: usize,
+        num_edges: usize,
+        num_keys: usize,
         char_freq_table: [256]u8,
 
 
@@ -342,9 +347,8 @@ pub fn RadixTrie(comptime T: type) type {
             var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, 16_384);
             const root = RadixNode(T){
                 .edge_data = RadixNode(T).EdgeData{
-                    .num_edges = 0,
-                    .edgelist_capacity = 0,
                     .freq_char_bitmask = 0,
+                    .num_edges = 0,
                 },
                 .value = undefined,
                 .edges = undefined,
@@ -365,9 +369,8 @@ pub fn RadixTrie(comptime T: type) type {
             var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, n);
             const root = RadixNode(T){
                 .edge_data = RadixNode(T).EdgeData{
-                    .num_edges = 0,
-                    .edgelist_capacity = 0,
                     .freq_char_bitmask = 0,
+                    .num_edges = 0,
                 },
                 .value = undefined,
                 .edges = undefined,
@@ -457,9 +460,8 @@ pub fn RadixTrie(comptime T: type) type {
 
                 const _new_node   = RadixNode(T){
                     .edge_data = .{
-                        .num_edges = 0,
-                        .edgelist_capacity = 0,
                         .freq_char_bitmask = @intFromBool(is_leaf),
+                        .num_edges = 0,
                     },
                     .value = value,
                     .edges = undefined,
@@ -497,6 +499,8 @@ pub fn RadixTrie(comptime T: type) type {
         }
 
         pub fn insert(self: *Self, key: []const u8, value: T) !void {
+            if (key.len == 0) return;
+
             try self.nodes.ensureUnusedCapacity(256);
 
             var node = &self.nodes.items[0];
@@ -575,9 +579,8 @@ pub fn RadixTrie(comptime T: type) type {
                         var existing_edge = &node.edges[max_edge_idx];
                         const _new_node = RadixNode(T){
                             .edge_data = .{
-                                .num_edges = 0,
-                                .edgelist_capacity = 0,
                                 .freq_char_bitmask = 0,
+                                .num_edges = 0,
                             },
                             .value = value,
                             .edges = undefined,
@@ -631,9 +634,8 @@ pub fn RadixTrie(comptime T: type) type {
                         var existing_edge = &node.edges[max_edge_idx];
                         const _new_node_1 = RadixNode(T){
                             .edge_data = .{
-                                .num_edges = 0,
-                                .edgelist_capacity = 0,
                                 .freq_char_bitmask = 0,
+                                .num_edges = 0,
                             },
                             .value = value,
                             .edges = undefined,
@@ -704,10 +706,10 @@ pub fn RadixTrie(comptime T: type) type {
                 const access_idx: usize = @popCount(
                     node.getMaskU64() & FULL_MASKS[shift_len]
                     );
-                @prefetch(&node.edges[access_idx], .{});
 
                 if (shift_len > 0) {
-                    // std.debug.assert(access_idx < node.edge_data.num_edges);
+                    std.debug.assert(access_idx < node.edge_data.num_edges);
+
                     const current_edge   = node.edges[access_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
 
@@ -813,6 +815,7 @@ test "insertion" {
 test "bench" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    // var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
@@ -830,8 +833,11 @@ test "bench" {
 
     // const filename = "data/reversed_words.txt";
     // const filename = "data/words.txt";
-    const filename = "data/words_shuffled.txt";
-    const max_bytes_per_line = 4096;
+    // const filename = "data/words_shuffled_1k.txt";
+    // const filename = "data/words_shuffled.txt";
+    const filename = "data/enwik9";
+    // const filename = "data/duplicate_words.txt";
+    const max_bytes_per_line = 65536;
     var file = std.fs.cwd().openFile(filename, .{}) catch {
         return;
     };
@@ -842,7 +848,14 @@ test "bench" {
 
     const reader = buffered_reader.reader();
     while (try reader.readUntilDelimiterOrEofAlloc(allocator, '\n', max_bytes_per_line)) |line| {
+        if (line.len == 0) continue;
         try _raw_keys.append(line);
+        // const num_chars: usize = @min(5, line.len);
+        // for (0..num_chars) |i| {
+            // line[i] = std.crypto.random.int(u8);
+        // }
+        // try _raw_keys.append(line[0..num_chars]);
+
     }
 
     try trie.nodes.ensureTotalCapacity(_raw_keys.items.len);
@@ -850,17 +863,23 @@ test "bench" {
     const raw_keys = try _raw_keys.toOwnedSlice();
     const _N = raw_keys.len;
 
+    print("Finished reading file\n", .{});
+    print("Num keys: {d}\n", .{_N});
+
     const start_freq_table = std.time.microTimestamp();
     _ = trie.buildFrequencyTable(raw_keys);
     const end_freq_table = std.time.microTimestamp();
     const elapsed_freq_table = end_freq_table - start_freq_table;
 
+    print("Finished building frequency table\n", .{});
+
     var start = std.time.microTimestamp();
     for (0.._N) |i| {
-        try keys.put(raw_keys[i], i);
+        try keys.fetchPut(raw_keys[i], i);
     }
     var end = std.time.microTimestamp();
     const elapsed_insert_hashmap = end - start;
+    print("Finished inserting into hashmap\n", .{});
 
     const N = keys.count();
 
@@ -872,6 +891,7 @@ test "bench" {
     }
     end = std.time.microTimestamp();
     const elapsed_insert_trie = end - start;
+    print("Finished inserting into trie\n", .{});
 
     start = std.time.microTimestamp();
     var keys_not_found: usize = 0;
