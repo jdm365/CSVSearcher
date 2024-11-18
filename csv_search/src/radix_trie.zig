@@ -841,10 +841,10 @@ test "bench" {
     defer trie.deinit();
 
     // const filename = "data/reversed_words.txt";
-    // const filename = "data/words.txt";
+    const filename = "data/words.txt";
     // const filename = "data/words_shuffled_1k.txt";
     // const filename = "data/words_shuffled.txt";
-    const filename = "data/enwik9";
+    // const filename = "data/enwik9";
     // const filename = "data/duplicate_words.txt";
     const max_bytes_per_line = 65536;
     var file = std.fs.cwd().openFile(filename, .{}) catch {
@@ -876,9 +876,17 @@ test "bench" {
 
     print("Finished building frequency table\n", .{});
 
+    var dup_map = std.StringHashMap(u32).init(allocator);
+    defer dup_map.deinit();
+
     var start = std.time.microTimestamp();
     for (0.._N) |i| {
-        try keys.put(raw_keys[i], i);
+        if (raw_keys[i].len == 0) continue;
+        // try keys.put(raw_keys[i], i);
+        const val = try keys.fetchPut(raw_keys[i], i);
+        if (val) |_| {
+            try dup_map.put(raw_keys[i], 0);
+        }
     }
     var end = std.time.microTimestamp();
     const elapsed_insert_hashmap = end - start;
@@ -889,7 +897,11 @@ test "bench" {
     start = std.time.microTimestamp();
     var i: u32 = 0;
     for (0.._N) |j| {
+        const init_count = trie.num_keys;
         try trie.insert(raw_keys[j], i);
+        if ((trie.num_keys == init_count) and (dup_map.get(raw_keys[j]) == null)) {
+            print("Failed to insert key: {s}\n", .{raw_keys[j]});
+        }
         i += 1;
     }
     end = std.time.microTimestamp();
