@@ -8,7 +8,7 @@ const MAX_STRING_LEN = 7;
 
 
 // Most frequent characters in English.
-pub fn getBaseCharFreqTable(comptime T: type) [256]u8 {
+pub fn getBaseCharFreqTable(comptime num_bits: usize) [256]u8 {
     var table: [256]u8 = undefined;
     for (0..256) |idx| {
         table[idx] = 0;
@@ -34,7 +34,6 @@ pub fn getBaseCharFreqTable(comptime T: type) [256]u8 {
         242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 127
     };
 
-    const num_bits = @bitSizeOf(T);
     for (0..num_bits) |idx| {
         table[enwik9_byte_freq_ordering[idx]] = @intCast(idx + 1);
     }
@@ -354,6 +353,7 @@ pub fn RadixTrie(comptime T: type) type {
                 .edges = undefined,
             };
             try nodes.append(root);
+            const num_bits = @bitSizeOf(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
 
             return Self{
                 .allocator = allocator,
@@ -361,7 +361,7 @@ pub fn RadixTrie(comptime T: type) type {
                 .num_nodes = 1,
                 .num_edges = 0,
                 .num_keys = 0,
-                .char_freq_table = getBaseCharFreqTable(T),
+                .char_freq_table = getBaseCharFreqTable(num_bits),
             };
         }
 
@@ -376,6 +376,7 @@ pub fn RadixTrie(comptime T: type) type {
                 .edges = undefined,
             };
             try nodes.append(root);
+            const num_bits = @bitSizeOf(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
 
             return Self{
                 .allocator = allocator,
@@ -383,7 +384,7 @@ pub fn RadixTrie(comptime T: type) type {
                 .num_nodes = 1,
                 .num_edges = 0,
                 .num_keys = 0,
-                .char_freq_table = getBaseCharFreqTable(T),
+                .char_freq_table = getBaseCharFreqTable(num_bits),
             };
         }
 
@@ -443,7 +444,7 @@ pub fn RadixTrie(comptime T: type) type {
             self: *Self, 
             key: []const u8, 
             _node: *RadixNode(T),
-            value: u32,
+            value: T,
         ) !void {
             var node      = _node;
             var rem_chars = key.len;
@@ -514,7 +515,6 @@ pub fn RadixTrie(comptime T: type) type {
 
                 const shift_len: usize = @intCast(self.char_freq_table[key[key_idx]]);
 
-
                 if (shift_len > 0) {
                     if ((BITMASKS[shift_len] & node.getMaskU64()) == 0) {
 
@@ -561,14 +561,6 @@ pub fn RadixTrie(comptime T: type) type {
                         return;
                     }
                 }
-
-                // print("Key:     {s}\n", .{key});
-                // print("Key:     {s}\n", .{key[key_idx..]});
-                // print("Key idx: {d}\n", .{key_idx});
-                // print("LCP:     {d}\n", .{max_lcp});
-                // print("partial: {}\n", .{partial});
-                // print("CP len:  {d}\n", .{node.edges[max_edge_idx].len});
-                // print("CP:      {s}\n\n", .{node.edges[max_edge_idx].str});
 
                 key_idx += max_lcp;
 
@@ -711,6 +703,10 @@ pub fn RadixTrie(comptime T: type) type {
             var key_idx: usize = 0;
 
             while (key_idx < key.len) {
+                if (node.edge_data.num_edges == 0) {
+                    return error.ValueNotFound;
+                }
+
                 const shift_len:  usize = @intCast(self.char_freq_table[key[key_idx]]);
                 const access_idx: usize = @popCount(
                     node.getMaskU64() & FULL_MASKS[shift_len]
@@ -841,12 +837,13 @@ test "bench" {
     defer trie.deinit();
 
     // const filename = "data/reversed_words.txt";
-    const filename = "data/words.txt";
+    // const filename = "data/words.txt";
     // const filename = "data/words_shuffled_1k.txt";
     // const filename = "data/words_shuffled.txt";
-    // const filename = "data/enwik9";
+    const filename = "data/enwik9";
     // const filename = "data/duplicate_words.txt";
-    const max_bytes_per_line = 65536;
+    // const max_bytes_per_line = 65536;
+    const max_bytes_per_line = 1_048_576;
     var file = std.fs.cwd().openFile(filename, .{}) catch {
         return;
     };

@@ -60,4 +60,30 @@ pub fn build(b: *std.Build) void {
     test_cmd.step.dependOn(b.getInstallStep());
     const test_step = b.step("test", "Run the tests");
     test_step.dependOn(&test_cmd.step);
+
+
+    const radix_lib = b.addSharedLibrary(.{
+        .name = "radix_trie",
+        .root_source_file = b.path("src/radix_bindings.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    radix_lib.linkLibC();
+    b.installArtifact(radix_lib);
+    
+    // Install header file
+    // const header_install = b.addInstallFileWithDir(
+        // b.path("include/radix.h"),
+        // b.path("include"),
+        // b.path("src/radix.h"),
+    // );
+    const header_install = b.addInstallFileWithDir(
+        // .{ .path = "src/radix.h" },
+        b.path("src/radix.h"),
+        .{ .custom = "include" },
+        "radix.h"
+    );
+    
+    // Make header installation part of the default install step
+    b.getInstallStep().dependOn(&header_install.step);
 }
