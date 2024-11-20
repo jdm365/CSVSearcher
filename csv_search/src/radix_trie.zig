@@ -464,7 +464,7 @@ pub fn RadixTrie(comptime T: type) type {
                         .freq_char_bitmask = @intFromBool(is_leaf),
                         .num_edges = 0,
                     },
-                    .value = value,
+                    .value = if (is_leaf) value else undefined,
                     .edges = undefined,
                 };
                 try self.nodes.append(_new_node);
@@ -626,7 +626,7 @@ pub fn RadixTrie(comptime T: type) type {
                         existing_edge.child_idx = self.nodes.items.len - 1;
 
                         new_node.value = value;
-                        new_node.edge_data.freq_char_bitmask = @intCast(
+                        new_node.edge_data.freq_char_bitmask = @truncate(
                             BITMASKS[self.char_freq_table[new_edge.str[0]]] | BITMASKS[0]
                             );
 
@@ -682,7 +682,7 @@ pub fn RadixTrie(comptime T: type) type {
                         existing_edge.child_idx = self.nodes.items.len - 1;
 
                         new_node_1.edge_data.freq_char_bitmask = @intCast(
-                            BITMASKS[self.char_freq_table[new_edge_2.str[0]]]
+                            BITMASKS[self.char_freq_table[new_edge_2.str[0]]] & FULL_MASKS[0]
                             );
                         try new_node_1.addEdgePos(&self.char_freq_table, self.allocator, new_edge_2);
 
@@ -696,6 +696,7 @@ pub fn RadixTrie(comptime T: type) type {
                 // Traverse
                 node = next_node;
             }
+            @panic("This should be unreachable.\n");
         }
 
         pub fn find(self: *const Self, key: []const u8) !T {
