@@ -840,8 +840,8 @@ test "bench" {
     // const filename = "data/reversed_words.txt";
     // const filename = "data/words.txt";
     // const filename = "data/words_shuffled_1k.txt";
-    // const filename = "data/words_shuffled.txt";
-    const filename = "data/enwik9";
+    const filename = "data/words_shuffled.txt";
+    // const filename = "data/enwik9";
     // const filename = "data/duplicate_words.txt";
     // const max_bytes_per_line = 65536;
     const max_bytes_per_line = 1_048_576;
@@ -880,7 +880,6 @@ test "bench" {
     var start = std.time.microTimestamp();
     for (0.._N) |i| {
         if (raw_keys[i].len == 0) continue;
-        // try keys.put(raw_keys[i], i);
         const val = try keys.fetchPut(raw_keys[i], i);
         if (val) |_| {
             try dup_map.put(raw_keys[i], 0);

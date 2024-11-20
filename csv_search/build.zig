@@ -71,14 +71,7 @@ pub fn build(b: *std.Build) void {
     radix_lib.linkLibC();
     b.installArtifact(radix_lib);
     
-    // Install header file
-    // const header_install = b.addInstallFileWithDir(
-        // b.path("include/radix.h"),
-        // b.path("include"),
-        // b.path("src/radix.h"),
-    // );
     const header_install = b.addInstallFileWithDir(
-        // .{ .path = "src/radix.h" },
         b.path("src/radix.h"),
         .{ .custom = "include" },
         "radix.h"
@@ -86,4 +79,10 @@ pub fn build(b: *std.Build) void {
     
     // Make header installation part of the default install step
     b.getInstallStep().dependOn(&header_install.step);
+
+    const py_install = b.addSystemCommand(&.{
+        "bash",
+        "py_install.sh",
+    });
+    b.getInstallStep().dependOn(&py_install.step);
 }

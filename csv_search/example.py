@@ -1,4 +1,4 @@
-from radix import RadixTrie
+from radixtrie import RadixTrie
 from tqdm import tqdm
 import random
 import string
