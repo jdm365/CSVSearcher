@@ -342,6 +342,11 @@ pub fn RadixTrie(comptime T: type) type {
         char_freq_table: [256]u8,
 
 
+        pub const Entry = struct {
+            key: []const u8,
+            value: T,
+        };
+
         pub fn init(allocator: std.mem.Allocator) !Self {
             var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, 16_384);
             const root = RadixNode(T){
@@ -758,6 +763,146 @@ pub fn RadixTrie(comptime T: type) type {
             return error.ValueNotFound;
         }
 
+        fn gatherChildrenBFS(
+            self: *const Self, 
+            starting_node: *const RadixNode(T), 
+            nodes_array: *[]Entry,
+            current_node_idx: *usize,
+            current_prefix: []const u8,
+            ) !void {
+
+            for (0..starting_node.edge_data.num_edges) |edge_idx| {
+                if (current_node_idx.* == nodes_array.len) return;
+
+                const edge  = starting_node.edges[edge_idx];
+                const child = self.nodes.items[edge.child_idx];
+
+                const new_prefix = try std.mem.concat(
+                    self.allocator, 
+                    u8, 
+                    &[_][]const u8{current_prefix, edge.str[0..edge.len]},
+                    );
+
+                if ((child.edge_data.freq_char_bitmask & 1) == 1) {
+                    nodes_array.*[current_node_idx.*] = Entry{
+                        .key = new_prefix,
+                        .value = child.value,
+                    };
+                    current_node_idx.* += 1;
+                }
+
+                if (current_node_idx.* == nodes_array.len) return;
+                try self.gatherChildrenBFS(&child, nodes_array, current_node_idx, new_prefix);
+            }
+        }
+
+        pub fn getPrefixNodes(
+            self: *const Self, 
+            key: []const u8, 
+            matching_nodes: *[]Entry,
+            ) !usize {
+            var node = self.nodes.items[0];
+            var key_idx: usize = 0;
+
+            var result_idx: usize = 0;
+
+            while (key_idx < key.len) {
+                if (node.edge_data.num_edges == 0) {
+                    return error.ValueNotFound;
+                }
+
+                const shift_len:  usize = @intCast(self.char_freq_table[key[key_idx]]);
+                const access_idx: usize = @popCount(
+                    node.getMaskU64() & FULL_MASKS[shift_len]
+                    );
+
+                if (shift_len > 0) {
+                    std.debug.assert(access_idx < node.edge_data.num_edges);
+
+                    const current_edge   = node.edges[access_idx];
+                    const current_prefix = current_edge.str[0..current_edge.len];
+
+                    if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                        node     = self.nodes.items[current_edge.child_idx];
+                        key_idx += current_prefix.len;
+
+                        if ((key_idx == key.len) and (node.getMaskU64() & BITMASKS[0] == 1)) {
+                            if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                matching_nodes.*[result_idx] = Entry{
+                                    .key = key,
+                                    .value = node.value,
+                                };
+                                result_idx += 1;
+                            }
+
+                            try self.gatherChildrenBFS(
+                                &node, 
+                                matching_nodes, 
+                                &result_idx,
+                                key,
+                                );
+                            return result_idx;
+                        }
+                    } else {
+                        return error.ValueNotFound;
+                    }
+                } else {
+                    var matched = false;
+                    for (access_idx..node.edge_data.num_edges) |edge_idx| {
+                        const current_edge   = node.edges[edge_idx];
+                        const current_prefix = current_edge.str[0..current_edge.len];
+
+                        if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                            matched = true;
+                            node     = self.nodes.items[node.edges[edge_idx].child_idx];
+                            key_idx += current_prefix.len;
+
+                            if ((key_idx == key.len) and (node.getMaskU64() & BITMASKS[0] == 1)) {
+                                if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                    matching_nodes.*[result_idx] = Entry{
+                                        .key = key,
+                                        .value = node.value,
+                                    };
+                                    result_idx += 1;
+                                }
+
+                                try self.gatherChildrenBFS(
+                                    &node, 
+                                    matching_nodes, 
+                                    &result_idx,
+                                    key,
+                                    );
+                                return result_idx;
+                            }
+                            break;
+                        }
+                    }
+                    if (!matched) {
+                        return error.ValueNotFound;
+                    }
+                }
+
+            }
+            if (node.getMaskU64() & BITMASKS[0] == 1) {
+                if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                    matching_nodes.*[result_idx] = Entry{
+                        .key = key,
+                        .value = node.value,
+                    };
+                    result_idx += 1;
+                }
+
+                try self.gatherChildrenBFS(
+                    &node, 
+                    matching_nodes, 
+                    &result_idx,
+                    key,
+                    );
+                return result_idx;
+            }
+            return error.ValueNotFound;
+        }
+
         pub fn printNodes(self: *const Self) void {
             self.nodes.items[0].printChildren(&self.nodes, 0);
             print("\n\n", .{});
@@ -796,6 +941,14 @@ test "insertion" {
     try trie.insert("mantequilla", 25);
     try trie.insert("initial", 25);
     try trie.insert("initial", 32);
+
+    const limit: usize = 10;
+    var matching_nodes = try trie.allocator.alloc(RadixTrie(u32).Entry, limit);
+
+    const nodes_found = try trie.getPrefixNodes("tes", &matching_nodes);
+    for (0..nodes_found) |i| {
+        print("Node {d} - Key: {s} Value: {d}\n", .{i, matching_nodes[i].key, matching_nodes[i].value});
+    }
 
     // trie.printNodes();
     // trie.nodes.items[0].printEdges();
@@ -840,7 +993,8 @@ test "bench" {
     // const filename = "data/reversed_words.txt";
     // const filename = "data/words.txt";
     // const filename = "data/words_shuffled_1k.txt";
-    const filename = "data/words_shuffled.txt";
+    // const filename = "data/words_shuffled.txt";
+    const filename = "data/terms_no_num.txt";
     // const filename = "data/enwik9";
     // const filename = "data/duplicate_words.txt";
     // const max_bytes_per_line = 65536;
@@ -958,4 +1112,19 @@ test "bench" {
 
 
     std.debug.print("\n\n", .{});
+
+    const limit: usize = 10;
+
+    var matching_nodes = try trie.allocator.alloc(RadixTrie(u32).Entry, limit);
+    const start_prefix = std.time.microTimestamp();
+    const nodes_found = try trie.getPrefixNodes("microsof", &matching_nodes);
+    const end_prefix = std.time.microTimestamp();
+
+    const elapsed_prefix = end_prefix - start_prefix;
+    print("Prefix search time: {}us\n", .{elapsed_prefix});
+    print("Num nodes found: {d}\n", .{nodes_found});
+
+    for (0..nodes_found) |idx| {
+        print("Node {d} - Key: {s} Value: {d}\n", .{idx, matching_nodes[idx].key, matching_nodes[idx].value});
+    }
 }
