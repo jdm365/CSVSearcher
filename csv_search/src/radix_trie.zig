@@ -73,45 +73,6 @@ fn getFullMasksU64(comptime T: type) [@bitSizeOf(T)]u64 {
 }
 const FULL_MASKS = getFullMasksU64(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
 
-
-fn getBitMasksU256() [240]@Vector(4, u64) {
-    var value: @Vector(4, u64) = @splat(0);
-    value[0] += 1;
-
-    var masks: [240]@Vector(4, u64) = undefined;
-    for (0..240) |idx| {
-        masks[idx] = value;
-
-        const byte_idx = @divFloor(idx+1, 64);
-        if (value[byte_idx] == 0) {
-            value[byte_idx - 1] = 0;
-            value[byte_idx] += 1;
-        } else {
-            value[byte_idx] <<= 1;
-        }
-    }
-    return masks;
-}
-const BITMASKS_256 = getBitMasksU256();
-
-fn getFullMasksU256() [240]@Vector(4, u64) {
-    var value: @Vector(4, u64) = @splat(std.math.maxInt(u64));
-    value[3] &= 0x00FFFFFFFFFFFFFF;
-    value[0] -= 1;
-
-    const overall_mask = value;
-
-    var masks: [240]@Vector(4, u64) = undefined;
-    for (0..240) |idx| {
-        masks[idx] = value & overall_mask;
-
-        const byte_idx = @divFloor(idx+1, 64);
-        value[byte_idx] <<= 1;
-    }
-    return masks;
-}
-const FULL_MASKS_256 = getFullMasksU256();
-
 pub inline fn getInsertIdx(
     char_freq_table: *const [256]u8,
     bitmask: u64,
@@ -144,64 +105,6 @@ pub fn RadixEdge(comptime _: type) type {
         }
     };
 }
-
-/////////////////////////////////////////
-///           RadixNodeLarge          ///
-/////////////////////////////////////////
-pub const EdgeDataLarge = struct {
-    data: @Vector(4, u64),
-
-    pub fn init(num_edges: u8, capacity: u8) EdgeDataLarge {
-        // num_edges is highest byte.
-        var data: @Vector(4, u64) = @splat(0);
-
-        data[3] = (data[3] & 0x00FFFFFFFFFFFFFF) | 
-                  (@as(u64, num_edges) << 56) | 
-                  (@as(u64, capacity) << 48);
-        return EdgeDataLarge{ 
-            .data = data,
-        };
-    }
-
-    pub inline fn setNumEdges(self: *EdgeDataLarge, value: u8) void {
-        self.data[3] = (self.data[3] & 0x00FFFFFFFFFFFFFF) | 
-                       (@as(u64, value) << 56);
-    }
-
-    pub inline fn setCapacity(self: *EdgeDataLarge, value: u8) void {
-        self.data[3] = (self.data[3] & 0xFF00FFFFFFFFFFFF) | 
-                       (@as(u64, value) << 48);
-    }
-
-    pub inline fn setBit(self: *EdgeDataLarge, idx: usize) void {
-        const byte_idx = @divFloor(idx, 64);
-        const bit_idx  = idx % 64;
-        self.data[byte_idx] |= bit_idx << idx;
-    }
-
-    pub inline fn unSetBit(self: *EdgeDataLarge, idx: usize) void {
-        const byte_idx = @divFloor(idx, 64);
-        const bit_idx  = idx % 64;
-        self.data[byte_idx] |= bit_idx << idx;
-    }
-
-    pub inline fn getBit(self: *const EdgeDataLarge, idx: usize) u1 {
-        const byte_idx = @divFloor(idx, 64);
-        const bit_idx  = idx % 64;
-        return (self.data[byte_idx] >> bit_idx) & 1;
-    }
-
-    pub inline fn getMaskU256(self: *const EdgeDataLarge) @Vector(4, u64) {
-        var result = self.data;
-        result[3] &= 0x00FFFFFFFFFFFFFF;
-        return result;
-    }
-
-    pub inline fn popCountBefore(self: *const EdgeDataLarge, idx: usize) u8 {
-        return @popCount(FULL_MASKS_256[idx] & self.data);
-    }
-};
-    
 
 pub fn RadixNode(comptime T: type) type {
 
@@ -844,6 +747,23 @@ pub fn RadixTrie(comptime T: type) type {
                             return result_idx;
                         }
                     } else {
+                        if (key_idx > 0) {
+                            if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                matching_nodes.*[result_idx] = Entry{
+                                    .key = key,
+                                    .value = node.value,
+                                };
+                                result_idx += 1;
+                            }
+
+                            try self.gatherChildrenBFS(
+                                &node, 
+                                matching_nodes, 
+                                &result_idx,
+                                key[0..key_idx],
+                                );
+                            return result_idx;
+                        }
                         return error.ValueNotFound;
                     }
                 } else {
@@ -878,6 +798,23 @@ pub fn RadixTrie(comptime T: type) type {
                         }
                     }
                     if (!matched) {
+                        if (key_idx > 0) {
+                            if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                matching_nodes.*[result_idx] = Entry{
+                                    .key = key,
+                                    .value = node.value,
+                                };
+                                result_idx += 1;
+                            }
+
+                            try self.gatherChildrenBFS(
+                                &node, 
+                                matching_nodes, 
+                                &result_idx,
+                                key[0..key_idx],
+                                );
+                            return result_idx;
+                        }
                         return error.ValueNotFound;
                     }
                 }
@@ -897,6 +834,23 @@ pub fn RadixTrie(comptime T: type) type {
                     matching_nodes, 
                     &result_idx,
                     key,
+                    );
+                return result_idx;
+            }
+            if (key_idx > 0) {
+                if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                    matching_nodes.*[result_idx] = Entry{
+                        .key = key,
+                        .value = node.value,
+                    };
+                    result_idx += 1;
+                }
+
+                try self.gatherChildrenBFS(
+                    &node, 
+                    matching_nodes, 
+                    &result_idx,
+                    key[0..key_idx],
                     );
                 return result_idx;
             }
@@ -1113,18 +1067,18 @@ test "bench" {
 
     std.debug.print("\n\n", .{});
 
-    const limit: usize = 10;
+    const limit: usize = 10000000;
 
     var matching_nodes = try trie.allocator.alloc(RadixTrie(u32).Entry, limit);
     const start_prefix = std.time.microTimestamp();
-    const nodes_found = try trie.getPrefixNodes("microsof", &matching_nodes);
+    const nodes_found = try trie.getPrefixNodes("m", &matching_nodes);
     const end_prefix = std.time.microTimestamp();
 
     const elapsed_prefix = end_prefix - start_prefix;
     print("Prefix search time: {}us\n", .{elapsed_prefix});
     print("Num nodes found: {d}\n", .{nodes_found});
 
-    for (0..nodes_found) |idx| {
+    for (0..@min(nodes_found, 100)) |idx| {
         print("Node {d} - Key: {s} Value: {d}\n", .{idx, matching_nodes[idx].key, matching_nodes[idx].value});
     }
 }
