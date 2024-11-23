@@ -83,6 +83,7 @@ pub fn SortedScoreArray(comptime T: type) type {
 
         pub fn insert(self: *Self, item: T) void {
             const insert_idx = self.search(item);
+            if (insert_idx == self.capacity) return;
 
             self.count = @min(self.count + 1, self.capacity);
 
@@ -93,6 +94,28 @@ pub fn SortedScoreArray(comptime T: type) type {
             }
 
             self.items[insert_idx] = item;
+        }
+
+        pub fn insertCheck(self: *Self, item: T) bool {
+            // Returns true if inserted item was inserted, false if not.
+            const insert_idx = self.search(item);
+            if (insert_idx == self.capacity) return false;
+
+            self.count = @min(self.count + 1, self.capacity);
+
+            var idx: usize = self.count;
+            while (idx > insert_idx) {
+                self.items[idx] = self.items[idx - 1];
+                idx -= 1;
+            }
+
+            self.items[insert_idx] = item;
+
+            return true;
+        }
+
+        pub inline fn getMinScore(self: *Self) f32 {
+            return self.items[self.count].score;
         }
 
         pub fn check(self: *Self) void {

@@ -10,15 +10,15 @@ pub export fn radix_trie_create() ?RadixTrieHandle {
     const allocator = std.heap.c_allocator;
     
     // Create the trie
-    const trie = allocator.create(RadixTrie(*anyopaque)) catch return null;
-    trie.* = RadixTrie(*anyopaque).init(allocator) catch return null;
+    const trie = allocator.create(RadixTrie(*anyopaque, false)) catch return null;
+    trie.* = RadixTrie(*anyopaque, false).init(allocator) catch return null;
     
     return @ptrCast(trie);
 }
 
 pub export fn radix_trie_destroy(handle: ?RadixTrieHandle) void {
     if (handle) |h| {
-        const trie = @as(*RadixTrie(*anyopaque), @ptrCast(@alignCast(h)));
+        const trie = @as(*RadixTrie(*anyopaque, false), @ptrCast(@alignCast(h)));
         trie.deinit();
         std.heap.c_allocator.destroy(trie);
     }
@@ -31,7 +31,7 @@ pub export fn radix_trie_insert(
     value: *anyopaque,
 ) bool {
     if (handle) |h| {
-        const trie = @as(*RadixTrie(*anyopaque), @ptrCast(@alignCast(h)));
+        const trie = @as(*RadixTrie(*anyopaque, false), @ptrCast(@alignCast(h)));
         const key = key_ptr[0..key_len];
         trie.insert(key, value) catch return false;
         return true;
@@ -46,7 +46,7 @@ pub export fn radix_trie_find(
     value: **anyopaque,
 ) bool {
     if (handle) |h| {
-        const trie = @as(*RadixTrie(*anyopaque), @ptrCast(@alignCast(h)));
+        const trie = @as(*RadixTrie(*anyopaque, false), @ptrCast(@alignCast(h)));
         const key = key_ptr[0..key_len];
         if (trie.find(key)) |found_value| {
             value.* = found_value;
@@ -61,7 +61,7 @@ pub export fn radix_trie_find(
 
 pub export fn radix_trie_get_memory_usage(handle: ?RadixTrieHandle) usize {
     if (handle) |h| {
-        const trie = @as(*RadixTrie(*anyopaque), @ptrCast(@alignCast(h)));
+        const trie = @as(*RadixTrie(*anyopaque, false), @ptrCast(@alignCast(h)));
         return trie.getMemoryUsage();
     }
     return 0;

@@ -1,6 +1,8 @@
 const std = @import("std");
 const print = std.debug.print;
 
+const SortedArray = @import("sorted_array.zig").SortedScoreArray;
+
 // TODO: Define second node type for nodes with more than ~48 values.
 //       Use all charachter frequencies here and do popCount with AVX2 instructions.
 
@@ -126,13 +128,147 @@ pub fn RadixNode(comptime T: type) type {
             std.debug.assert(@sizeOf(Self) <= 24);
         }
 
-        pub fn init(allocator: std.mem.Allocator) !*Self {
-            const node = try allocator.create(Self);
-            node.edge_data = EdgeData{ 
-                .freq_char_bitmask = 0, 
-                .num_edges = 0, 
+        pub fn init() Self {
+            return Self{
+                .edge_data = EdgeData{
+                    .freq_char_bitmask = 0,
+                    .num_edges = 0,
+                },
+                .value = undefined,
+                .edges = undefined,
             };
-            return node;
+        }
+
+        pub inline fn getMaskU64(self: *const Self) u64 {
+            return @intCast(self.edge_data.freq_char_bitmask);
+        }
+
+        pub inline fn addEdge(
+            self: *Self, 
+            allocator: std.mem.Allocator,
+            edge: *RadixEdge(T),
+            ) !void {
+            self.edge_data.num_edges += 1;
+
+            var new_capacity: usize = std.math.maxInt(usize);
+            switch (self.edge_data.num_edges) {
+                0 => new_capacity = 1,
+                1 => new_capacity = 3,
+                3 => new_capacity = 5,
+                5 => new_capacity = 8,
+                8 => new_capacity = 16,
+                16 => new_capacity = 32,
+                32 => new_capacity = 64,
+                64 => new_capacity = 128,
+                128 => new_capacity = 192,
+                192 => new_capacity = 256,
+                else => {},
+            }
+
+            if (new_capacity != std.math.maxInt(usize)) {
+                const new_slice: []RadixEdge(T) = try allocator.realloc(
+                        self.edges[0..self.edge_data.num_edges - 1],
+                        new_capacity,
+                        );
+                self.edges = new_slice.ptr;
+            }
+            self.edges[self.edge_data.num_edges - 1] = edge.*;
+        }
+
+        pub inline fn addEdgePos(
+            self: *Self, 
+            char_freq_table: *const [256]u8,
+            allocator: std.mem.Allocator,
+            edge: *RadixEdge(T),
+            ) !void {
+            if (char_freq_table[edge.str[0]] == 0) {
+                try self.addEdge(allocator, edge);
+                return;
+            }
+
+            const insert_idx_new: usize = getInsertIdx(
+                char_freq_table,
+                self.getMaskU64(), 
+                edge.str[0],
+                );
+            const old_swap_idx: usize   = @intCast(self.edge_data.num_edges);
+
+            std.debug.assert(insert_idx_new <= old_swap_idx);
+
+            try self.addEdge(allocator, edge);
+            if (insert_idx_new == old_swap_idx) return;
+
+            // Save for swap. Will be overwritten in memmove.
+            const temp = self.edges[old_swap_idx];
+
+            // Memmove
+            var idx: usize = @intCast(self.edge_data.num_edges - 1);
+            while (idx > insert_idx_new) : (idx -= 1) {
+                self.edges[idx] = self.edges[idx - 1];
+            }
+
+            // Swap
+            self.edges[insert_idx_new] = temp;
+        }
+
+        pub fn printChildren(
+            self: *const Self, 
+            nodes: *const std.ArrayList(RadixNode(T)),
+            depth: u32,
+            ) void {
+            for (0..self.edge_data.num_edges) |edge_idx| {
+                const edge  = self.edges[edge_idx];
+                const child = nodes.items[edge.child_idx];
+                print("Depth {d} - Edge:      {s}\n",  .{depth, edge.str[0..edge.len]});
+                print("Depth {d} - Child:     {d}\n", .{depth, child.value});
+                print("Depth {d} - Num Edges: {d}\n\n", .{depth, child.edge_data.num_edges});
+                child.printChildren(nodes, depth + 1);
+            }
+        }
+
+        pub fn printEdges(self: *const Self) void {
+            for (0..self.edge_data.num_edges) |i| {
+                const edge = self.edges[i];
+                print("{d}: {s}\n", .{i, edge.str[0..edge.len]});
+            }
+            print("\n", .{});
+        }
+    };
+}
+
+pub fn PruningRadixNode(comptime T: type) type {
+
+    return extern struct {
+        const Self = @This();
+        const value_type = if (@sizeOf(T) <= 8) T else *T;
+
+        // is_leaf is stored in lowest bit of freq_char_bitmask
+        edge_data: EdgeData,
+        value: value_type,
+        edges: [*]RadixEdge(T),
+        score: f32,
+        max_score_below: f32,
+
+        pub const EdgeData = packed struct(u64) {
+            freq_char_bitmask: u55,
+            num_edges: u9,
+        };
+
+        comptime {
+            std.debug.assert(@sizeOf(Self) <= 32);
+        }
+
+        pub fn init() Self {
+            return Self{
+                .edge_data = EdgeData{
+                    .freq_char_bitmask = 0,
+                    .num_edges = 0,
+                },
+                .value = undefined,
+                .edges = undefined,
+                .score = std.math.floatMin(f32),
+                .max_score_below = std.math.floatMin(f32),
+            };
         }
 
         pub inline fn getMaskU64(self: *const Self) u64 {
@@ -233,12 +369,13 @@ pub fn RadixNode(comptime T: type) type {
 }
 
 
-pub fn RadixTrie(comptime T: type) type {
+pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
     return struct {
         const Self = @This();
+        const NodeType = if (is_pruning) PruningRadixNode(T) else RadixNode(T);
 
         allocator: std.mem.Allocator,
-        nodes: std.ArrayList(RadixNode(T)),
+        nodes: std.ArrayList(NodeType),
         num_nodes: usize,
         num_edges: usize,
         num_keys: usize,
@@ -250,18 +387,17 @@ pub fn RadixTrie(comptime T: type) type {
             value: T,
         };
 
+        pub const PruningEntry = struct {
+            key: []const u8,
+            value: T,
+            score: f32,
+        };
+
         pub fn init(allocator: std.mem.Allocator) !Self {
-            var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, 16_384);
-            const root = RadixNode(T){
-                .edge_data = RadixNode(T).EdgeData{
-                    .freq_char_bitmask = 0,
-                    .num_edges = 0,
-                },
-                .value = undefined,
-                .edges = undefined,
-            };
+            var nodes = try std.ArrayList(NodeType).initCapacity(allocator, 16_384);
+            const root = NodeType.init();
             try nodes.append(root);
-            const num_bits = @bitSizeOf(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
+            const num_bits = @bitSizeOf(std.meta.FieldType(NodeType.EdgeData, .freq_char_bitmask));
 
             return Self{
                 .allocator = allocator,
@@ -274,9 +410,9 @@ pub fn RadixTrie(comptime T: type) type {
         }
 
         pub fn initCapacity(allocator: std.mem.Allocator, n: usize) !Self {
-            var nodes = try std.ArrayList(RadixNode(T)).initCapacity(allocator, n);
-            const root = RadixNode(T){
-                .edge_data = RadixNode(T).EdgeData{
+            var nodes = try std.ArrayList(NodeType).initCapacity(allocator, n);
+            const root = NodeType{
+                .edge_data = NodeType.EdgeData{
                     .freq_char_bitmask = 0,
                     .num_edges = 0,
                 },
@@ -284,7 +420,7 @@ pub fn RadixTrie(comptime T: type) type {
                 .edges = undefined,
             };
             try nodes.append(root);
-            const num_bits = @bitSizeOf(std.meta.FieldType(RadixNode(void).EdgeData, .freq_char_bitmask));
+            const num_bits = @bitSizeOf(std.meta.FieldType(NodeType.EdgeData, .freq_char_bitmask));
 
             return Self{
                 .allocator = allocator,
@@ -331,7 +467,7 @@ pub fn RadixTrie(comptime T: type) type {
                 argSortDesc,
                 );
 
-            const num_entries = (@bitSizeOf(std.meta.FieldType(RadixNode(T).EdgeData, .freq_char_bitmask))) - 1;
+            const num_entries = (@bitSizeOf(std.meta.FieldType(NodeType.EdgeData, .freq_char_bitmask))) - 1;
 
             // Sort by frequency
             for (0..num_entries) |idx| {
@@ -344,16 +480,20 @@ pub fn RadixTrie(comptime T: type) type {
         }
 
         pub fn getMemoryUsage(self: *Self) usize {
-            const bytes = self.nodes.capacity * @sizeOf(RadixNode(T)) + self.num_edges * @sizeOf(RadixEdge(T));
+            const bytes = self.nodes.capacity * @sizeOf(NodeType) + self.num_edges * @sizeOf(RadixEdge(T));
             return bytes;
         }
 
-        inline fn addNode(
+        fn addNode(
             self: *Self, 
             key: []const u8, 
-            _node: *RadixNode(T),
+            _node: *NodeType,
             value: T,
         ) !void {
+            comptime if (is_pruning) {
+                @panic("This function can only be called if is_pruning is false.\n");
+            };
+
             var node      = _node;
             var rem_chars = key.len;
 
@@ -367,7 +507,7 @@ pub fn RadixTrie(comptime T: type) type {
                     is_leaf = false;
                 }
 
-                const _new_node   = RadixNode(T){
+                const _new_node = NodeType{
                     .edge_data = .{
                         .freq_char_bitmask = @intFromBool(is_leaf),
                         .num_edges = 0,
@@ -407,7 +547,80 @@ pub fn RadixTrie(comptime T: type) type {
             }
         }
 
+        fn addNodePruning(
+            self: *Self, 
+            key: []const u8, 
+            _node: *NodeType,
+            value: T,
+            score: f32,
+        ) !void {
+            comptime if (!is_pruning) {
+                @panic("This function can only be called if is_pruning is true.\n");
+            };
+
+            var node      = _node;
+            var rem_chars = key.len;
+
+            // New
+            node.max_score_below = @max(score, node.max_score_below);
+
+            var current_idx: usize = 0;
+            while (true) {
+                var num_chars_edge = rem_chars;
+                var is_leaf = true;
+
+                if (rem_chars > MAX_STRING_LEN) {
+                    num_chars_edge = MAX_STRING_LEN;
+                    is_leaf = false;
+                }
+
+                const _new_node   = NodeType{
+                    .edge_data = .{
+                        .freq_char_bitmask = @intFromBool(is_leaf),
+                        .num_edges = 0,
+                    },
+                    .value = if (is_leaf) value else undefined,
+                    .edges = undefined,
+                    .score = if (is_leaf) score else std.math.floatMin(f32),
+                    .max_score_below = score,
+                };
+                try self.nodes.append(_new_node);
+
+                const new_node = &self.nodes.items[self.nodes.items.len - 1];
+
+                const new_edge     = try RadixEdge(T).init(self.allocator);
+                new_edge.len       = @truncate(num_chars_edge);
+                new_edge.child_idx = self.nodes.items.len - 1;
+
+                @memcpy(
+                    new_edge.str[0..num_chars_edge], 
+                    key[current_idx..current_idx+num_chars_edge],
+                    );
+
+                const mask_idx = @as(usize, @intCast(self.char_freq_table[new_edge.str[0]]));
+                node.edge_data.freq_char_bitmask |= @intCast(
+                    BITMASKS[mask_idx] & FULL_MASKS[0]
+                    );
+
+                if (mask_idx == 0) {
+                    try node.addEdge(self.allocator, new_edge);
+                } else {
+                    try node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
+                }
+
+                if (is_leaf) break;
+
+                rem_chars   -= MAX_STRING_LEN;
+                current_idx += num_chars_edge;
+                node         = new_node;
+            }
+        }
+
         pub fn insert(self: *Self, key: []const u8, value: T) !void {
+            comptime if (is_pruning) {
+                @panic("This function can only be called if is_pruning is false.\n");
+            };
+
             if (key.len == 0) return;
 
             try self.nodes.ensureUnusedCapacity(256);
@@ -416,7 +629,7 @@ pub fn RadixTrie(comptime T: type) type {
             var key_idx: usize = 0;
 
             while (true) {
-                var next_node: *RadixNode(T) = undefined;
+                var next_node: *NodeType = undefined;
                 var max_edge_idx: usize = 0;
                 var max_lcp: u8 = 0;
                 var partial: bool = false;
@@ -486,7 +699,7 @@ pub fn RadixTrie(comptime T: type) type {
                     // Split
                     if (rem_chars == 0) {
                         var existing_edge = &node.edges[max_edge_idx];
-                        const _new_node = RadixNode(T){
+                        const _new_node = NodeType{
                             .edge_data = .{
                                 .freq_char_bitmask = 0,
                                 .num_edges = 0,
@@ -541,7 +754,7 @@ pub fn RadixTrie(comptime T: type) type {
                         try new_node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
                     } else {
                         var existing_edge = &node.edges[max_edge_idx];
-                        const _new_node_1 = RadixNode(T){
+                        const _new_node_1 = NodeType{
                             .edge_data = .{
                                 .freq_char_bitmask = 0,
                                 .num_edges = 0,
@@ -602,6 +815,225 @@ pub fn RadixTrie(comptime T: type) type {
                 }
 
                 // Traverse
+                node = next_node;
+            }
+            @panic("This should be unreachable.\n");
+        }
+
+        pub fn insertPruning(self: *Self, key: []const u8, value: T, score: f32) !void {
+            comptime if (!is_pruning) {
+                @panic("This function can only be called if is_pruning is true.\n");
+            };
+
+            if (key.len == 0) return;
+
+            try self.nodes.ensureUnusedCapacity(256);
+
+            var node = &self.nodes.items[0];
+            var key_idx: usize = 0;
+
+            while (true) {
+                var next_node: *NodeType = undefined;
+                var max_edge_idx: usize = 0;
+                var max_lcp: u8 = 0;
+                var partial: bool = false;
+
+                const shift_len: usize = @intCast(self.char_freq_table[key[key_idx]]);
+
+                if (shift_len > 0) {
+                    if ((BITMASKS[shift_len] & node.getMaskU64()) == 0) {
+
+                        // Node doesn't exist. Insert.
+                        try self.addNodePruning(key[key_idx..], node, value, score);
+                        self.num_keys += 1;
+                        self.num_nodes += 1;
+                        self.num_edges += 1;
+                        return;
+                    }
+
+                    const access_idx: usize = getInsertIdx(
+                        &self.char_freq_table, 
+                        node.getMaskU64(),
+                        key[key_idx],
+                        );
+
+                    const edge   = node.edges[access_idx];
+                    max_lcp      = LCP(key[key_idx..], edge.str[0..edge.len]);
+                    next_node    = &self.nodes.items[node.edges[access_idx].child_idx];
+                    partial      = max_lcp < edge.len;
+                    max_edge_idx = access_idx;
+
+                } else {
+                    const start_idx: usize = @popCount(node.getMaskU64() & FULL_MASKS[0]);
+                    for (start_idx..node.edge_data.num_edges) |edge_idx| {
+                        const current_edge   = node.edges[edge_idx];
+                        const current_prefix = current_edge.str[0..current_edge.len];
+                        const lcp = LCP(key[key_idx..], current_prefix);
+
+                        if (lcp > max_lcp) {
+                            max_lcp   = lcp;
+                            max_edge_idx = edge_idx;
+                            next_node = &self.nodes.items[node.edges[edge_idx].child_idx];
+                            partial   = lcp < current_prefix.len;
+                            break;
+                        }
+                    }
+                    if (max_lcp == 0) {
+                        try self.addNodePruning(key[key_idx..], node, value, score);
+                        self.num_keys += 1;
+                        self.num_nodes += 1;
+                        self.num_edges += 1;
+                        return;
+                    }
+                }
+
+                key_idx += max_lcp;
+
+                // Matched rest of key. Node already exists. Replace.
+                if (!partial and (key_idx == key.len)) {
+                    // Make terminal if not.
+                    self.num_keys += @intFromBool((next_node.edge_data.freq_char_bitmask & 1) == 0);
+                    next_node.edge_data.freq_char_bitmask |= 1;
+                    next_node.value = value;
+                    next_node.score = score;
+                    next_node.max_score_below = @max(score, next_node.max_score_below);
+
+                    // New
+                    node.max_score_below = @max(score, node.max_score_below);
+                    return;
+                }
+
+                const rem_chars: usize = key.len - key_idx;
+                if (partial) {
+                    // Split
+                    if (rem_chars == 0) {
+                        var existing_edge = &node.edges[max_edge_idx];
+                        const _new_node = NodeType{
+                            .edge_data = .{
+                                .freq_char_bitmask = 0,
+                                .num_edges = 0,
+                            },
+                            .value = value,
+                            .edges = undefined,
+                            .score = score,
+                            .max_score_below = @max(score, node.max_score_below),
+                        };
+                        try self.nodes.append(_new_node);
+                        const new_node = &self.nodes.items[self.nodes.items.len - 1];
+                        const new_edge = try RadixEdge(T).init(self.allocator);
+
+                        self.num_nodes += 1;
+                        self.num_edges += 1;
+
+                        /////////////////////////////////
+                        //                             //
+                        // \ - existing_edge           //
+                        //  O - existing_node          //
+                        //                             //
+                        // str:           'ABC'        //
+                        // existing_edge: 'ABCD'       //
+                        //                             //
+                        // --------------------------- //
+                        //      SPLIT NO-CREATE        //
+                        // --------------------------- //
+                        // \ - existing_edge           // 
+                        //  O - new_node               //
+                        //   \ - new_edge              //
+                        //    O - existing_node        //
+                        //                             //
+                        // existing_edge: 'ABC'        //
+                        // new_edge:      'D'          //
+                        //                             //
+                        /////////////////////////////////
+
+                        new_edge.len      = existing_edge.len - max_lcp;
+                        existing_edge.len = max_lcp;
+
+                        @memcpy(
+                            new_edge.str[0..new_edge.len], 
+                            existing_edge.str[max_lcp..max_lcp + new_edge.len],
+                            );
+
+                        new_edge.child_idx      = existing_edge.child_idx;
+                        existing_edge.child_idx = self.nodes.items.len - 1;
+
+                        new_node.value = value;
+                        new_node.edge_data.freq_char_bitmask = @truncate(
+                            BITMASKS[self.char_freq_table[new_edge.str[0]]] | BITMASKS[0]
+                            );
+
+                        try new_node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
+                    } else {
+                        var existing_edge = &node.edges[max_edge_idx];
+                        const _new_node_1 = NodeType{
+                            .edge_data = .{
+                                .freq_char_bitmask = 0,
+                                .num_edges = 0,
+                            },
+                            .value = value,
+                            .edges = undefined,
+                            .score = std.math.floatMin(f32),
+                            .max_score_below = @max(score, node.max_score_below),
+                        };
+                        try self.nodes.append(_new_node_1);
+                        const new_node_1 = &self.nodes.items[self.nodes.items.len - 1];
+                        const new_edge_2 = try RadixEdge(T).init(self.allocator);
+
+                        self.num_nodes += 2;
+                        self.num_edges += 2;
+
+                        /////////////////////////////////////////
+                        //                                     //
+                        // \ - existing_edge                   //
+                        //  O - existing_node                  //
+                        //                                     //
+                        // str:           'AEF'                //
+                        // existing_edge: 'ABCD'               //
+                        //                                     //
+                        // ----------------------------------- //
+                        //             SPLIT CREATE            //
+                        // ----------------------------------- //
+                        //  \ - existing_edge                  // 
+                        //   O - new_node_1                    //
+                        //  / \ - (new_edge_1, new_edge_2)     //
+                        // O   O - (new_node_2, existing_node) //
+                        //                                     //
+                        // existing_edge: 'A'                  //
+                        // new_edge_1:    'BCD'                //
+                        // new_edge_2:    'EF'                 //
+                        //                                     //
+                        /////////////////////////////////////////
+
+                        new_edge_2.len    = existing_edge.len - max_lcp;
+                        existing_edge.len = max_lcp;
+
+                        @memcpy(
+                            new_edge_2.str[0..new_edge_2.len], 
+                            existing_edge.str[max_lcp..max_lcp + new_edge_2.len],
+                            );
+
+                        new_edge_2.child_idx    = existing_edge.child_idx;
+                        existing_edge.child_idx = self.nodes.items.len - 1;
+
+                        new_node_1.edge_data.freq_char_bitmask = @intCast(
+                            BITMASKS[self.char_freq_table[new_edge_2.str[0]]] & FULL_MASKS[0]
+                            );
+                        try new_node_1.addEdgePos(&self.char_freq_table, self.allocator, new_edge_2);
+
+                        try self.addNodePruning(
+                            key[key.len-rem_chars..], 
+                            new_node_1, 
+                            value,
+                            score,
+                            );
+                    }
+
+                    self.num_keys += 1;
+                    return;
+                }
+
+                // Traverse
+                node.max_score_below = @max(score, node.max_score_below);
                 node = next_node;
             }
             @panic("This should be unreachable.\n");
@@ -668,7 +1100,7 @@ pub fn RadixTrie(comptime T: type) type {
 
         fn gatherChildrenBFS(
             self: *const Self, 
-            starting_node: *const RadixNode(T), 
+            starting_node: *const NodeType, 
             nodes_array: *[]Entry,
             current_node_idx: *usize,
             current_prefix: []const u8,
@@ -704,6 +1136,10 @@ pub fn RadixTrie(comptime T: type) type {
             key: []const u8, 
             matching_nodes: *[]Entry,
             ) !usize {
+            comptime if (is_pruning) {
+                @panic("This function can only be called if is_pruning is false.\n");
+            };
+
             var node = self.nodes.items[0];
             var key_idx: usize = 0;
 
@@ -857,6 +1293,246 @@ pub fn RadixTrie(comptime T: type) type {
             return error.ValueNotFound;
         }
 
+        fn gatherChildrenBFSPruning(
+            self: *const Self, 
+            starting_node: *const NodeType, 
+            current_prefix: []const u8,
+            sorted_array: *SortedArray(PruningEntry),
+            debug_count: *usize,
+            ) !void {
+
+            debug_count.* += 1;
+
+            var all_scores: [256]f32 = undefined;
+            for (0..256) |idx| {
+                all_scores[idx] = std.math.floatMin(f32);
+            }
+            var indices: [256]usize = undefined;
+            for (0..256) |idx| {
+                indices[idx] = idx;
+            }
+
+            // Sort edges by child node's max_score_below
+            for (0..starting_node.edge_data.num_edges) |edge_idx| {
+                const edge  = starting_node.edges[edge_idx];
+                const child = self.nodes.items[edge.child_idx];
+
+                all_scores[edge.str[0]] = child.max_score_below;
+            }
+
+            for (0..starting_node.edge_data.num_edges) |edge_idx| {
+                const edge  = starting_node.edges[edge_idx];
+                const child = self.nodes.items[edge.child_idx];
+
+                if (child.max_score_below <= sorted_array.getMinScore()) continue;
+
+                const new_prefix = try std.mem.concat(
+                    self.allocator, 
+                    u8, 
+                    &[_][]const u8{current_prefix, edge.str[0..edge.len]},
+                    );
+
+                if ((child.edge_data.freq_char_bitmask & 1) == 1) {
+                    sorted_array.insert(PruningEntry{
+                        .key = new_prefix,
+                        .value = child.value,
+                        .score = child.score,
+                    });
+                }
+
+                try self.gatherChildrenBFSPruning(&child, new_prefix, sorted_array, debug_count);
+            }
+        }
+
+        pub fn getPrefixNodesPruning(
+            self: *const Self, 
+            key: []const u8, 
+            matching_nodes: *[]PruningEntry,
+            ) !usize {
+            comptime if (!is_pruning) {
+                @panic("This function can only be called if is_pruning is true.\n");
+            };
+
+            // TODO: Allocate this at comptime for ~1000 records. Grow if needed or declare max k value.
+            var sorted_array = try SortedArray(PruningEntry).init(self.allocator, matching_nodes.len);
+            defer sorted_array.deinit();
+
+            var node = self.nodes.items[0];
+            var key_idx: usize = 0;
+            var debug_count: usize = 0;
+
+            while (key_idx < key.len) {
+                if (node.edge_data.num_edges == 0) {
+                    return error.ValueNotFound;
+                }
+
+                const shift_len:  usize = @intCast(self.char_freq_table[key[key_idx]]);
+                const access_idx: usize = @popCount(
+                    node.getMaskU64() & FULL_MASKS[shift_len]
+                    );
+
+                if (shift_len > 0) {
+                    std.debug.assert(access_idx < node.edge_data.num_edges);
+
+                    const current_edge   = node.edges[access_idx];
+                    const current_prefix = current_edge.str[0..current_edge.len];
+
+                    if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                        node     = self.nodes.items[current_edge.child_idx];
+                        key_idx += current_prefix.len;
+
+                        if ((key_idx == key.len) and (node.getMaskU64() & BITMASKS[0] == 1)) {
+                            if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                sorted_array.insert(PruningEntry{
+                                    .key = key,
+                                    .value = node.value,
+                                    .score = node.score,
+                                });
+                            }
+
+                            try self.gatherChildrenBFSPruning(
+                                &node, 
+                                key,
+                                &sorted_array,
+                                &debug_count,
+                                );
+                            for (0..sorted_array.count) |idx| {
+                                matching_nodes.*[idx] = sorted_array.items[idx];
+                            }
+                            print("NUM NODES SEARCHED: {d}\n", .{debug_count});
+                            return sorted_array.count;
+                        }
+                    } else {
+                        if (key_idx > 0) {
+                            if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                sorted_array.insert(PruningEntry{
+                                    .key = key,
+                                    .value = node.value,
+                                    .score = node.score,
+                                });
+                            }
+
+                            try self.gatherChildrenBFSPruning(
+                                &node, 
+                                key,
+                                &sorted_array,
+                                &debug_count,
+                                );
+                            for (0..sorted_array.count) |idx| {
+                                matching_nodes.*[idx] = sorted_array.items[idx];
+                            }
+                            print("NUM NODES SEARCHED: {d}\n", .{debug_count});
+                            return sorted_array.count;
+                        }
+                        return error.ValueNotFound;
+                    }
+                } else {
+                    var matched = false;
+                    for (access_idx..node.edge_data.num_edges) |edge_idx| {
+                        const current_edge   = node.edges[edge_idx];
+                        const current_prefix = current_edge.str[0..current_edge.len];
+
+                        if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                            matched = true;
+                            node     = self.nodes.items[node.edges[edge_idx].child_idx];
+                            key_idx += current_prefix.len;
+
+                            if ((key_idx == key.len) and (node.getMaskU64() & BITMASKS[0] == 1)) {
+                                if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                    sorted_array.insert(PruningEntry{
+                                        .key = key,
+                                        .value = node.value,
+                                        .score = node.score,
+                                    });
+                                }
+
+                                try self.gatherChildrenBFSPruning(
+                                    &node, 
+                                    key,
+                                    &sorted_array,
+                                    &debug_count,
+                                    );
+                                for (0..sorted_array.count) |idx| {
+                                    matching_nodes.*[idx] = sorted_array.items[idx];
+                                }
+                                print("NUM NODES SEARCHED: {d}\n", .{debug_count});
+                                return sorted_array.count;
+                            }
+                            break;
+                        }
+                    }
+                    if (!matched) {
+                        if (key_idx > 0) {
+                            if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                                sorted_array.insert(PruningEntry{
+                                    .key = key,
+                                    .value = node.value,
+                                    .score = node.score,
+                                });
+                            }
+
+                            try self.gatherChildrenBFSPruning(
+                                &node, 
+                                key,
+                                &sorted_array,
+                                &debug_count,
+                                );
+                            for (0..sorted_array.count) |idx| {
+                                matching_nodes.*[idx] = sorted_array.items[idx];
+                            }
+                            print("NUM NODES SEARCHED: {d}\n", .{debug_count});
+                            return sorted_array.count;
+                        }
+                        return error.ValueNotFound;
+                    }
+                }
+
+            }
+            if (node.getMaskU64() & BITMASKS[0] == 1) {
+                if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                    sorted_array.insert(PruningEntry{
+                        .key = key,
+                        .value = node.value,
+                        .score = node.score,
+                    });
+                }
+
+                try self.gatherChildrenBFSPruning(
+                    &node, 
+                    key,
+                    &sorted_array,
+                    &debug_count,
+                    );
+                for (0..sorted_array.count) |idx| {
+                    matching_nodes.*[idx] = sorted_array.items[idx];
+                }
+                print("NUM NODES SEARCHED: {d}\n", .{debug_count});
+                return sorted_array.count;
+            }
+            if (key_idx > 0) {
+                if ((node.edge_data.freq_char_bitmask & 1) == 1) {
+                    sorted_array.insert(PruningEntry{
+                        .key = key,
+                        .value = node.value,
+                        .score = node.score,
+                    });
+                }
+
+                try self.gatherChildrenBFSPruning(
+                    &node, 
+                    key,
+                    &sorted_array,
+                    &debug_count,
+                    );
+                for (0..sorted_array.count) |idx| {
+                    matching_nodes.*[idx] = sorted_array.items[idx];
+                }
+                print("NUM NODES SEARCHED: {d}\n", .{debug_count});
+                return sorted_array.count;
+            }
+            return error.ValueNotFound;
+        }
+
         pub fn printNodes(self: *const Self) void {
             self.nodes.items[0].printChildren(&self.nodes, 0);
             print("\n\n", .{});
@@ -873,7 +1549,7 @@ test "insertion" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var trie = try RadixTrie(u32).init(allocator);
+    var trie = try RadixTrie(u32, false).init(allocator);
     defer trie.deinit();
 
     try trie.insert("ostritch", 24);
@@ -897,7 +1573,7 @@ test "insertion" {
     try trie.insert("initial", 32);
 
     const limit: usize = 10;
-    var matching_nodes = try trie.allocator.alloc(RadixTrie(u32).Entry, limit);
+    var matching_nodes = try trie.allocator.alloc(RadixTrie(u32, false).Entry, limit);
 
     const nodes_found = try trie.getPrefixNodes("tes", &matching_nodes);
     for (0..nodes_found) |i| {
@@ -941,14 +1617,14 @@ test "bench" {
     var keys = std.StringHashMap(usize).init(allocator);
     defer keys.deinit();
 
-    var trie = try RadixTrie(u32).init(allocator);
+    var trie = try RadixTrie(u32, true).init(allocator);
     defer trie.deinit();
 
     // const filename = "data/reversed_words.txt";
     // const filename = "data/words.txt";
     // const filename = "data/words_shuffled_1k.txt";
     // const filename = "data/words_shuffled.txt";
-    const filename = "data/terms_no_num.txt";
+    const filename = "data/terms.txt";
     // const filename = "data/enwik9";
     // const filename = "data/duplicate_words.txt";
     // const max_bytes_per_line = 65536;
@@ -960,11 +1636,30 @@ test "bench" {
     var buffered_reader = std.io.bufferedReader(file.reader());
 
     var _raw_keys: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(allocator);
+    var _scores: std.ArrayList(f32) = std.ArrayList(f32).init(allocator);
+    defer {
+        _ = _raw_keys.deinit();
+        _ = _scores.deinit();
+    }
 
     const reader = buffered_reader.reader();
     while (try reader.readUntilDelimiterOrEofAlloc(allocator, '\n', max_bytes_per_line)) |line| {
         if (line.len == 0) continue;
-        try _raw_keys.append(line);
+        var it = std.mem.splitSequence(u8, line, "\t");
+
+        var idx: usize = 0;
+        while (it.next()) |field| {
+            if (field.len == 0) continue;
+
+            if (idx == 0) {
+                try _raw_keys.append(field);
+                idx += 1;
+                continue;
+            }
+
+            try _scores.append(try std.fmt.parseFloat(f32, field));
+            idx += 1;
+        }
     }
 
     try trie.nodes.ensureTotalCapacity(_raw_keys.items.len);
@@ -999,11 +1694,14 @@ test "bench" {
 
     const N = keys.count();
 
+    print("N: {d}\n", .{N});
+    print("num_scores: {d}\n", .{_scores.items.len});
+
     start = std.time.microTimestamp();
     var i: u32 = 0;
     for (0.._N) |j| {
         const init_count = trie.num_keys;
-        try trie.insert(raw_keys[j], i);
+        try trie.insertPruning(raw_keys[j], i, _scores.items[j]);
         if ((trie.num_keys == init_count) and (dup_map.get(raw_keys[j]) == null)) {
             print("Failed to insert key: {s}\n", .{raw_keys[j]});
         }
@@ -1067,11 +1765,11 @@ test "bench" {
 
     std.debug.print("\n\n", .{});
 
-    const limit: usize = 10000000;
+    const limit: usize = 10;
 
-    var matching_nodes = try trie.allocator.alloc(RadixTrie(u32).Entry, limit);
+    var matching_nodes = try trie.allocator.alloc(RadixTrie(u32, true).PruningEntry, limit);
     const start_prefix = std.time.microTimestamp();
-    const nodes_found = try trie.getPrefixNodes("m", &matching_nodes);
+    const nodes_found = try trie.getPrefixNodesPruning("m", &matching_nodes);
     const end_prefix = std.time.microTimestamp();
 
     const elapsed_prefix = end_prefix - start_prefix;
@@ -1079,6 +1777,6 @@ test "bench" {
     print("Num nodes found: {d}\n", .{nodes_found});
 
     for (0..@min(nodes_found, 100)) |idx| {
-        print("Node {d} - Key: {s} Value: {d}\n", .{idx, matching_nodes[idx].key, matching_nodes[idx].value});
+        print("Node {d} - Key: {s} Value: {d} - Score: {d}\n", .{idx, matching_nodes[idx].key, matching_nodes[idx].value, matching_nodes[idx].score});
     }
 }
