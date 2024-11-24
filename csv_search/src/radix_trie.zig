@@ -246,8 +246,8 @@ pub fn PruningRadixNode(comptime T: type) type {
         edge_data: EdgeData,
         value: value_type,
         edges: [*]RadixEdge(T),
-        score: f32,
-        max_score_below: f32,
+        edge_scores: [*]f32,
+        edge_max_scores_below: [*]f32,
 
         pub const EdgeData = packed struct(u64) {
             freq_char_bitmask: u55,
@@ -255,7 +255,7 @@ pub fn PruningRadixNode(comptime T: type) type {
         };
 
         comptime {
-            std.debug.assert(@sizeOf(Self) <= 32);
+            std.debug.assert(@sizeOf(Self) <= 40);
         }
 
         pub fn init() Self {
@@ -266,8 +266,8 @@ pub fn PruningRadixNode(comptime T: type) type {
                 },
                 .value = undefined,
                 .edges = undefined,
-                .score = std.math.floatMin(f32),
-                .max_score_below = std.math.floatMin(f32),
+                .edge_scores = undefined,
+                .edge_max_scores_below = undefined,
             };
         }
 
@@ -279,6 +279,7 @@ pub fn PruningRadixNode(comptime T: type) type {
             self: *Self, 
             allocator: std.mem.Allocator,
             edge: *RadixEdge(T),
+            score: f32,
             ) !void {
             self.edge_data.num_edges += 1;
 
@@ -303,8 +304,22 @@ pub fn PruningRadixNode(comptime T: type) type {
                         new_capacity,
                         );
                 self.edges = new_slice.ptr;
+
+                const new_slice2: []f32 = try allocator.realloc(
+                        self.edge_scores[0..self.edge_data.num_edges - 1],
+                        new_capacity,
+                        );
+                self.edge_scores = new_slice2.ptr;
+
+                const new_slice3: []f32 = try allocator.realloc(
+                        self.edge_max_scores_below[0..self.edge_data.num_edges - 1],
+                        new_capacity,
+                        );
+                self.edge_max_scores_below = new_slice3.ptr;
             }
             self.edges[self.edge_data.num_edges - 1] = edge.*;
+            self.edge_scores[self.edge_data.num_edges - 1] = score;
+            self.edge_max_scores_below[self.edge_data.num_edges - 1] = score;
         }
 
         pub inline fn addEdgePos(
@@ -312,9 +327,10 @@ pub fn PruningRadixNode(comptime T: type) type {
             char_freq_table: *const [256]u8,
             allocator: std.mem.Allocator,
             edge: *RadixEdge(T),
+            score: f32,
             ) !void {
             if (char_freq_table[edge.str[0]] == 0) {
-                try self.addEdge(allocator, edge);
+                try self.addEdge(allocator, edge, score);
                 return;
             }
 
@@ -327,20 +343,28 @@ pub fn PruningRadixNode(comptime T: type) type {
 
             std.debug.assert(insert_idx_new <= old_swap_idx);
 
-            try self.addEdge(allocator, edge);
+            // TODO: Swap score and max_score_below
+
+            try self.addEdge(allocator, edge, score);
             if (insert_idx_new == old_swap_idx) return;
 
             // Save for swap. Will be overwritten in memmove.
-            const temp = self.edges[old_swap_idx];
+            const temp  = self.edges[old_swap_idx];
+            const temp2 = self.edge_scores[old_swap_idx];
+            const temp3 = self.edge_max_scores_below[old_swap_idx];
 
             // Memmove
             var idx: usize = @intCast(self.edge_data.num_edges - 1);
             while (idx > insert_idx_new) : (idx -= 1) {
                 self.edges[idx] = self.edges[idx - 1];
+                self.edge_scores[idx] = self.edge_scores[idx - 1];
+                self.edge_max_scores_below[idx] = self.edge_max_scores_below[idx - 1];
             }
 
             // Swap
             self.edges[insert_idx_new] = temp;
+            self.edge_scores[insert_idx_new] = temp2;
+            self.edge_max_scores_below[insert_idx_new] = temp3;
         }
 
         pub fn printChildren(
@@ -491,7 +515,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
             value: T,
         ) !void {
             comptime if (is_pruning) {
-                @panic("This function can only be called if is_pruning is false.\n");
+                @compileError("This function can only be called if is_pruning is false.\n");
             };
 
             var node      = _node;
@@ -555,14 +579,11 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
             score: f32,
         ) !void {
             comptime if (!is_pruning) {
-                @panic("This function can only be called if is_pruning is true.\n");
+                @compileError("This function can only be called if is_pruning is true.\n");
             };
 
             var node      = _node;
             var rem_chars = key.len;
-
-            // New
-            node.max_score_below = @max(score, node.max_score_below);
 
             var current_idx: usize = 0;
             while (true) {
@@ -581,8 +602,8 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                     },
                     .value = if (is_leaf) value else undefined,
                     .edges = undefined,
-                    .score = if (is_leaf) score else std.math.floatMin(f32),
-                    .max_score_below = score,
+                    .edge_scores = undefined,
+                    .edge_max_scores_below = undefined,
                 };
                 try self.nodes.append(_new_node);
 
@@ -603,9 +624,18 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                     );
 
                 if (mask_idx == 0) {
-                    try node.addEdge(self.allocator, new_edge);
+                    try node.addEdge(
+                        self.allocator, 
+                        new_edge, 
+                        score, 
+                        );
                 } else {
-                    try node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
+                    try node.addEdgePos(
+                        &self.char_freq_table, 
+                        self.allocator, 
+                        new_edge, 
+                        score, 
+                        );
                 }
 
                 if (is_leaf) break;
@@ -618,7 +648,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
 
         pub fn insert(self: *Self, key: []const u8, value: T) !void {
             comptime if (is_pruning) {
-                @panic("This function can only be called if is_pruning is false.\n");
+                @compileError("This function can only be called if is_pruning is false.\n");
             };
 
             if (key.len == 0) return;
@@ -822,7 +852,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
 
         pub fn insertPruning(self: *Self, key: []const u8, value: T, score: f32) !void {
             comptime if (!is_pruning) {
-                @panic("This function can only be called if is_pruning is true.\n");
+                @compileError("This function can only be called if is_pruning is true.\n");
             };
 
             if (key.len == 0) return;
@@ -895,11 +925,12 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                     self.num_keys += @intFromBool((next_node.edge_data.freq_char_bitmask & 1) == 0);
                     next_node.edge_data.freq_char_bitmask |= 1;
                     next_node.value = value;
-                    next_node.score = score;
-                    next_node.max_score_below = @max(score, next_node.max_score_below);
 
-                    // New
-                    node.max_score_below = @max(score, node.max_score_below);
+                    node.edge_scores[max_edge_idx] = score;
+                    node.edge_max_scores_below[max_edge_idx] = @max(
+                        score, 
+                        node.edge_max_scores_below[max_edge_idx],
+                        );
                     return;
                 }
 
@@ -915,8 +946,8 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                             },
                             .value = value,
                             .edges = undefined,
-                            .score = score,
-                            .max_score_below = @max(score, node.max_score_below),
+                            .edge_scores = undefined,
+                            .edge_max_scores_below = undefined,
                         };
                         try self.nodes.append(_new_node);
                         const new_node = &self.nodes.items[self.nodes.items.len - 1];
@@ -962,7 +993,12 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                             BITMASKS[self.char_freq_table[new_edge.str[0]]] | BITMASKS[0]
                             );
 
-                        try new_node.addEdgePos(&self.char_freq_table, self.allocator, new_edge);
+                        try new_node.addEdgePos(
+                            &self.char_freq_table, 
+                            self.allocator, 
+                            new_edge, 
+                            score,
+                            );
                     } else {
                         var existing_edge = &node.edges[max_edge_idx];
                         const _new_node_1 = NodeType{
@@ -972,8 +1008,8 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                             },
                             .value = value,
                             .edges = undefined,
-                            .score = std.math.floatMin(f32),
-                            .max_score_below = @max(score, node.max_score_below),
+                            .edge_scores = undefined,
+                            .edge_max_scores_below = undefined,
                         };
                         try self.nodes.append(_new_node_1);
                         const new_node_1 = &self.nodes.items[self.nodes.items.len - 1];
@@ -1018,7 +1054,12 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                         new_node_1.edge_data.freq_char_bitmask = @intCast(
                             BITMASKS[self.char_freq_table[new_edge_2.str[0]]] & FULL_MASKS[0]
                             );
-                        try new_node_1.addEdgePos(&self.char_freq_table, self.allocator, new_edge_2);
+                        try new_node_1.addEdgePos(
+                            &self.char_freq_table, 
+                            self.allocator, 
+                            new_edge_2,
+                            score,
+                            );
 
                         try self.addNodePruning(
                             key[key.len-rem_chars..], 
@@ -1033,7 +1074,10 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                 }
 
                 // Traverse
-                node.max_score_below = @max(score, node.max_score_below);
+                node.edge_max_scores_below[max_edge_idx] = @max(
+                    score, 
+                    node.edge_max_scores_below[max_edge_idx],
+                    );
                 node = next_node;
             }
             @panic("This should be unreachable.\n");
@@ -1137,7 +1181,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
             matching_nodes: *[]Entry,
             ) !usize {
             comptime if (is_pruning) {
-                @panic("This function can only be called if is_pruning is false.\n");
+                @compileError("This function can only be called if is_pruning is false.\n");
             };
 
             var node = self.nodes.items[0];
@@ -1300,31 +1344,22 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
             sorted_array: *SortedArray(PruningEntry),
             debug_count: *usize,
             ) !void {
-
             debug_count.* += 1;
 
-            var all_scores: [256]f32 = undefined;
-            for (0..256) |idx| {
-                all_scores[idx] = std.math.floatMin(f32);
-            }
-            var indices: [256]usize = undefined;
-            for (0..256) |idx| {
-                indices[idx] = idx;
-            }
-
-            // Sort edges by child node's max_score_below
+            // for (0..starting_node.edge_data.num_edges) |edge_idx| {
+                // const max_score_below = starting_node.edge_max_scores_below[edge_idx];
+                // print("idx: {d} - MAX SCORE BELOW: {d}\n", .{edge_idx, max_score_below});
+            // }
+            // @breakpoint();
+            var min_score = sorted_array.getMinScore();
             for (0..starting_node.edge_data.num_edges) |edge_idx| {
+                const max_score_below = starting_node.edge_max_scores_below[edge_idx];
+                if (max_score_below <= min_score) continue;
+
+                const score = starting_node.edge_scores[edge_idx];
+
                 const edge  = starting_node.edges[edge_idx];
                 const child = self.nodes.items[edge.child_idx];
-
-                all_scores[edge.str[0]] = child.max_score_below;
-            }
-
-            for (0..starting_node.edge_data.num_edges) |edge_idx| {
-                const edge  = starting_node.edges[edge_idx];
-                const child = self.nodes.items[edge.child_idx];
-
-                if (child.max_score_below <= sorted_array.getMinScore()) continue;
 
                 const new_prefix = try std.mem.concat(
                     self.allocator, 
@@ -1336,11 +1371,12 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                     sorted_array.insert(PruningEntry{
                         .key = new_prefix,
                         .value = child.value,
-                        .score = child.score,
+                        .score = score,
                     });
                 }
 
                 try self.gatherChildrenBFSPruning(&child, new_prefix, sorted_array, debug_count);
+                min_score = sorted_array.getMinScore();
             }
         }
 
@@ -1350,17 +1386,20 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
             matching_nodes: *[]PruningEntry,
             ) !usize {
             comptime if (!is_pruning) {
-                @panic("This function can only be called if is_pruning is true.\n");
+                @compileError("This function can only be called if is_pruning is true.\n");
             };
 
             // TODO: Allocate this at comptime for ~1000 records. Grow if needed or declare max k value.
-            var sorted_array = try SortedArray(PruningEntry).init(self.allocator, matching_nodes.len);
+            // var sorted_array = try SortedArray(PruningEntry).init(self.allocator, matching_nodes.len);
+            var sorted_array = try SortedArray(PruningEntry).init(self.allocator, 1000);
+            sorted_array.capacity = matching_nodes.len;
             defer sorted_array.deinit();
 
             var node = self.nodes.items[0];
             var key_idx: usize = 0;
             var debug_count: usize = 0;
 
+            var current_score = std.math.floatMin(f32);
             while (key_idx < key.len) {
                 if (node.edge_data.num_edges == 0) {
                     return error.ValueNotFound;
@@ -1370,6 +1409,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                 const access_idx: usize = @popCount(
                     node.getMaskU64() & FULL_MASKS[shift_len]
                     );
+                current_score = node.edge_max_scores_below[access_idx];
 
                 if (shift_len > 0) {
                     std.debug.assert(access_idx < node.edge_data.num_edges);
@@ -1386,7 +1426,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                                 sorted_array.insert(PruningEntry{
                                     .key = key,
                                     .value = node.value,
-                                    .score = node.score,
+                                    .score = current_score, // TODO: Fix
                                 });
                             }
 
@@ -1408,7 +1448,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                                 sorted_array.insert(PruningEntry{
                                     .key = key,
                                     .value = node.value,
-                                    .score = node.score,
+                                    .score = current_score, // TODO: Fix
                                 });
                             }
 
@@ -1442,7 +1482,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                                     sorted_array.insert(PruningEntry{
                                         .key = key,
                                         .value = node.value,
-                                        .score = node.score,
+                                        .score = current_score, // TODO: Fix
                                     });
                                 }
 
@@ -1467,7 +1507,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                                 sorted_array.insert(PruningEntry{
                                     .key = key,
                                     .value = node.value,
-                                    .score = node.score,
+                                    .score = current_score, // TODO: Fix
                                 });
                             }
 
@@ -1493,7 +1533,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                     sorted_array.insert(PruningEntry{
                         .key = key,
                         .value = node.value,
-                        .score = node.score,
+                        .score = current_score, // TODO: Fix
                     });
                 }
 
@@ -1514,7 +1554,7 @@ pub fn RadixTrie(comptime T: type, comptime is_pruning: bool) type {
                     sorted_array.insert(PruningEntry{
                         .key = key,
                         .value = node.value,
-                        .score = node.score,
+                        .score = current_score, // TODO: Fix
                     });
                 }
 
@@ -1768,12 +1808,12 @@ test "bench" {
     const limit: usize = 10;
 
     var matching_nodes = try trie.allocator.alloc(RadixTrie(u32, true).PruningEntry, limit);
-    const start_prefix = std.time.microTimestamp();
+    const start_prefix = std.time.nanoTimestamp();
     const nodes_found = try trie.getPrefixNodesPruning("m", &matching_nodes);
-    const end_prefix = std.time.microTimestamp();
+    const end_prefix = std.time.nanoTimestamp();
 
     const elapsed_prefix = end_prefix - start_prefix;
-    print("Prefix search time: {}us\n", .{elapsed_prefix});
+    print("Prefix search time: {}us\n", .{@divFloor(elapsed_prefix, 1000)});
     print("Num nodes found: {d}\n", .{nodes_found});
 
     for (0..@min(nodes_found, 100)) |idx| {

@@ -28,7 +28,7 @@ pub fn SortedScoreArray(comptime T: type) type {
             self.allocator.free(self.items);
         }
 
-        fn cmp(lhs: T, rhs: T) bool {
+        inline fn cmp(lhs: T, rhs: T) bool {
             // For a max heap, we return true if the lhs.score is less than rhs.score
             return lhs.score > rhs.score;
         }
@@ -74,7 +74,7 @@ pub fn SortedScoreArray(comptime T: type) type {
         }
 
         fn search(self: *Self, item: T) usize {
-            if (self.count <= 64) {
+            if (self.count <= 32) {
                 return self.linearSearch(item);
             } else {
                 return self.binarySearch(item);
@@ -115,7 +115,8 @@ pub fn SortedScoreArray(comptime T: type) type {
         }
 
         pub inline fn getMinScore(self: *Self) f32 {
-            return self.items[self.count].score;
+            if (self.count != self.capacity) return std.math.floatMin(f32);
+            return self.items[self.count - 1].score;
         }
 
         pub fn check(self: *Self) void {
@@ -156,6 +157,8 @@ test "sorted_arr" {
     try std.testing.expectEqual(1, arr.items[0].doc_id);
     try std.testing.expectEqual(2, arr.items[1].doc_id);
     try std.testing.expectEqual(3, arr.items[2].doc_id);
+
+    std.debug.print("MIN SCORE: {d}\n", .{arr.getMinScore()});
 
     const item = ScorePair{ .doc_id = 42069, .score = 10000.0 };
     arr.insert(item);
