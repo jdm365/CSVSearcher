@@ -6,6 +6,7 @@ __pycache__/
 bm25_db/
 gen_compile_commands/
 tmp_data_dir/
+data/
 *.csv
 *.zip
 *.json

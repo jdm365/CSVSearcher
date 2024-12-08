@@ -118,6 +118,7 @@ pub fn PruningRadixTrie(comptime T: type) type {
         num_edges: usize,
         num_keys: usize,
 
+        sorted_array: SortedArray(PruningEntry),
 
         pub const PruningEntry = struct {
             key: []const u8,
@@ -144,6 +145,8 @@ pub fn PruningRadixTrie(comptime T: type) type {
                 .num_nodes = 1,
                 .num_edges = 0,
                 .num_keys = 0,
+
+                .sorted_array = try SortedArray(PruningEntry).init(allocator, 1000),
             };
         }
 
@@ -151,6 +154,7 @@ pub fn PruningRadixTrie(comptime T: type) type {
             self.nodes.deinit();
             self.edge_counts.deinit();
             self.is_leaf_bitmask.deinit();
+            self.sorted_array.deinit();
         }
 
         pub fn getMemoryUsage(self: *Self) usize {
@@ -527,16 +531,11 @@ pub fn PruningRadixTrie(comptime T: type) type {
         }
 
         pub fn getPrefixNodesPruning(
-            self: *const Self, 
+            self: *Self, 
             key: []const u8, 
             matching_nodes: *[]PruningEntry,
             ) !usize {
-
-            // TODO: Allocate this at comptime for ~1000 records. Grow if needed or declare max k value.
-            // var sorted_array = try SortedArray(PruningEntry).init(self.allocator, matching_nodes.len);
-            var sorted_array = try SortedArray(PruningEntry).init(self.allocator, 1000);
-            sorted_array.capacity = matching_nodes.len;
-            defer sorted_array.deinit();
+            self.sorted_array.capacity = matching_nodes.len;
 
             var node = self.nodes.items[0];
             var node_idx: usize = 0;
@@ -564,7 +563,7 @@ pub fn PruningRadixTrie(comptime T: type) type {
 
                         if (key_idx == key.len) {
                             if ((self.is_leaf_bitmask.items[node_idx] & 1) == 1) {
-                                sorted_array.insert(PruningEntry{
+                                self.sorted_array.insert(PruningEntry{
                                     .key = key,
                                     .value = node.value,
                                     .score = current_score,
@@ -574,14 +573,13 @@ pub fn PruningRadixTrie(comptime T: type) type {
                             try self.gatherChildrenBFSPruning(
                                 node_idx,
                                 key,
-                                &sorted_array,
+                                &self.sorted_array,
                                 &debug_count,
                                 );
-                            for (0..sorted_array.count) |idx| {
-                                matching_nodes.*[idx] = sorted_array.items[idx];
+                            for (0..self.sorted_array.count) |idx| {
+                                matching_nodes.*[idx] = self.sorted_array.items[idx];
                             }
-                            print("NUM NODES SEARCHED: {d}\n", .{debug_count});
-                            return sorted_array.count;
+                            return self.sorted_array.count;
                         }
                         break;
                     }
@@ -589,7 +587,7 @@ pub fn PruningRadixTrie(comptime T: type) type {
                 if (!matched) {
                     if (key_idx > 0) {
                         if ((self.is_leaf_bitmask.items[node_idx] & 1) == 1) {
-                            sorted_array.insert(PruningEntry{
+                            self.sorted_array.insert(PruningEntry{
                                 .key = key,
                                 .value = node.value,
                                 .score = current_score,
@@ -599,20 +597,19 @@ pub fn PruningRadixTrie(comptime T: type) type {
                         try self.gatherChildrenBFSPruning(
                             node_idx,
                             key,
-                            &sorted_array,
+                            &self.sorted_array,
                             &debug_count,
                             );
-                        for (0..sorted_array.count) |idx| {
-                            matching_nodes.*[idx] = sorted_array.items[idx];
+                        for (0..self.sorted_array.count) |idx| {
+                            matching_nodes.*[idx] = self.sorted_array.items[idx];
                         }
-                        print("NUM NODES SEARCHED: {d}\n", .{debug_count});
-                        return sorted_array.count;
+                        return self.sorted_array.count;
                     }
                     return error.ValueNotFound;
                 }
             }
             if ((self.is_leaf_bitmask.items[node_idx] & 1) == 1) {
-                sorted_array.insert(PruningEntry{
+                self.sorted_array.insert(PruningEntry{
                     .key = key,
                     .value = node.value,
                     .score = current_score,
@@ -621,19 +618,18 @@ pub fn PruningRadixTrie(comptime T: type) type {
                 try self.gatherChildrenBFSPruning(
                     node_idx, 
                     key,
-                    &sorted_array,
+                    &self.sorted_array,
                     &debug_count,
                     );
-                for (0..sorted_array.count) |idx| {
-                    matching_nodes.*[idx] = sorted_array.items[idx];
+                for (0..self.sorted_array.count) |idx| {
+                    matching_nodes.*[idx] = self.sorted_array.items[idx];
                 }
-                print("NUM NODES SEARCHED: {d}\n", .{debug_count});
-                return sorted_array.count;
+                return self.sorted_array.count;
             }
 
             if (key_idx > 0) {
                 if ((self.is_leaf_bitmask.items[node_idx] & 1) == 1) {
-                    sorted_array.insert(PruningEntry{
+                    self.sorted_array.insert(PruningEntry{
                         .key = key,
                         .value = node.value,
                         .score = current_score,
@@ -643,14 +639,13 @@ pub fn PruningRadixTrie(comptime T: type) type {
                 try self.gatherChildrenBFSPruning(
                     node_idx, 
                     key,
-                    &sorted_array,
+                    &self.sorted_array,
                     &debug_count,
                     );
-                for (0..sorted_array.count) |idx| {
-                    matching_nodes.*[idx] = sorted_array.items[idx];
+                for (0..self.sorted_array.count) |idx| {
+                    matching_nodes.*[idx] = self.sorted_array.items[idx];
                 }
-                print("NUM NODES SEARCHED: {d}\n", .{debug_count});
-                return sorted_array.count;
+                return self.sorted_array.count;
             }
             return error.ValueNotFound;
         }
@@ -905,6 +900,12 @@ test "bench" {
     const limit: usize = 10;
 
     var matching_nodes = try trie.allocator.alloc(PruningRadixTrie(u32).PruningEntry, limit);
+
+    // Bench
+    // for (0..10_000_000) |_| {
+        // _ = try trie.getPrefixNodesPruning("m", &matching_nodes);
+    // }
+
     const start_prefix = std.time.nanoTimestamp();
     const nodes_found = try trie.getPrefixNodesPruning("m", &matching_nodes);
     const end_prefix = std.time.nanoTimestamp();
