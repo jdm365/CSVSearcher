@@ -513,7 +513,7 @@ pub fn PruningRadixTrie(comptime T: type) type {
                     &[_][]const u8{current_prefix, edge.str[0..edge.len]},
                     );
 
-                if ((self.is_leaf_bitmask.items[edge.child_idx] & 1) == 1) {
+                if ((child.score > min_score) and ((self.is_leaf_bitmask.items[edge.child_idx] & 1) == 1)) {
                     sorted_array.insert(PruningEntry{
                         .key = new_prefix,
                         .value = child.value,
@@ -536,6 +536,7 @@ pub fn PruningRadixTrie(comptime T: type) type {
             matching_nodes: *[]PruningEntry,
             ) !usize {
             self.sorted_array.capacity = matching_nodes.len;
+            self.sorted_array.clear();
 
             var node = self.nodes.items[0];
             var node_idx: usize = 0;
@@ -555,7 +556,8 @@ pub fn PruningRadixTrie(comptime T: type) type {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
 
-                    if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                    // if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
+                    if (key[key_idx] == current_prefix[0]) {
                         matched = true;
                         node_idx = node.edges[edge_idx].child_idx;
                         node     = self.nodes.items[node_idx];
@@ -906,12 +908,20 @@ test "bench" {
         // _ = try trie.getPrefixNodesPruning("m", &matching_nodes);
     // }
 
+    const num_rounds: usize = 1000_000;
     const start_prefix = std.time.nanoTimestamp();
-    const nodes_found = try trie.getPrefixNodesPruning("m", &matching_nodes);
+    // const nodes_found = try trie.getPrefixNodesPruning("m", &matching_nodes);
+    for (0..num_rounds) |_| {
+        _ = try trie.getPrefixNodesPruning("m", &matching_nodes);
+    }
     const end_prefix = std.time.nanoTimestamp();
 
-    const elapsed_prefix = end_prefix - start_prefix;
+    const nodes_found = try trie.getPrefixNodesPruning("m", &matching_nodes);
+
+    // const elapsed_prefix = end_prefix - start_prefix;
+    const elapsed_prefix = @divFloor((end_prefix - start_prefix), num_rounds);
     print("Prefix search time: {}us\n", .{@divFloor(elapsed_prefix, 1000)});
+    print("Prefix search time: {}ns\n", .{elapsed_prefix});
     print("Num nodes found: {d}\n", .{nodes_found});
 
     for (0..@min(nodes_found, 100)) |idx| {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const vector = std.simd;
 
 const ScorePair = struct {
     doc_id: u32,
@@ -10,6 +11,7 @@ pub fn SortedScoreArray(comptime T: type) type {
     return struct {
         const Self = @This();
 
+        // TODO: Consider MultiArraylist items.
         allocator: std.mem.Allocator,
         items: []T,
         count: usize,
@@ -33,18 +35,18 @@ pub fn SortedScoreArray(comptime T: type) type {
             return lhs.score > rhs.score;
         }
 
-        pub fn clear(self: *Self) void {
+        pub inline fn clear(self: *Self) void {
             self.count = 0;
         }
 
-        pub fn resize(self: *Self, new_size: usize) void {
+        pub inline fn resize(self: *Self, new_size: usize) void {
             if (new_size > self.capacity) {
                 @panic("Cannot grow the array");
             }
             self.capacity = new_size;
         }
 
-        fn binarySearch(self: *Self, item: T) usize {
+        inline fn binarySearch(self: *Self, item: T) usize {
             // TODO: Allow for common case of very many items and place starting
             // needle closer to the end.
             var low: usize = 0;
@@ -64,8 +66,21 @@ pub fn SortedScoreArray(comptime T: type) type {
             return low;
         }
 
-        fn linearSearch(self: *Self, item: T) usize {
+        inline fn linearSearch(self: *Self, item: T) usize {
             for (0.., self.items[0..self.count]) |idx, val| {
+                if (!cmp(val, item)) {
+                    return idx;
+                }
+            }
+            return self.count;
+        }
+
+        inline fn dualSearch(self: *const Self, item: T) usize {
+            const mid = @divFloor(self.count, 2);
+            const min = if (cmp(self.items[0], item)) 0 else mid;
+            const max = min + mid;
+
+            for (min..max, self.items[0..self.count]) |idx, val| {
                 if (!cmp(val, item)) {
                     return idx;
                 }
@@ -81,7 +96,7 @@ pub fn SortedScoreArray(comptime T: type) type {
             }
         }
 
-        pub fn insert(self: *Self, item: T) void {
+        pub inline fn insert(self: *Self, item: T) void {
             const insert_idx = self.search(item);
             if (insert_idx == self.capacity) return;
 
@@ -96,7 +111,7 @@ pub fn SortedScoreArray(comptime T: type) type {
             self.items[insert_idx] = item;
         }
 
-        pub fn insertCheck(self: *Self, item: T) bool {
+        pub inline fn insertCheck(self: *Self, item: T) bool {
             // Returns true if inserted item was inserted, false if not.
             const insert_idx = self.search(item);
             if (insert_idx == self.capacity) return false;
