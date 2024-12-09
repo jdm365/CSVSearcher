@@ -98,7 +98,8 @@ pub fn PruningRadixNode(comptime T: type) type {
             ) void {
             for (0..trie.edge_counts.items[node_idx]) |i| {
                 const edge = self.edges[i];
-                print("{d}: {s}: {b}: {d}\n", .{i, edge.str[0..edge.len], trie.is_leaf_bitmask.items[node_idx], trie.nodes.items[edge.child_idx].max_score_below});
+                // print("{d}: {s}: {b}: {d}\n", .{i, edge.str[0..edge.len], trie.is_leaf_bitmask.items[node_idx], trie.nodes.items[edge.child_idx].max_score_below});
+                print("{d}: {s}: {b}: {d}\n", .{i, edge.str[0..edge.len], trie.is_leaf_bitmask.items[edge.child_idx], trie.nodes.items[edge.child_idx].max_score_below});
             }
             print("\n", .{});
         }
@@ -556,15 +557,15 @@ pub fn PruningRadixTrie(comptime T: type) type {
                     const current_edge   = node.edges[edge_idx];
                     const current_prefix = current_edge.str[0..current_edge.len];
 
-                    // if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
-                    if (key[key_idx] == current_prefix[0]) {
+                    if (std.mem.startsWith(u8, key[key_idx..], current_prefix)) {
                         matched = true;
                         node_idx = node.edges[edge_idx].child_idx;
                         node     = self.nodes.items[node_idx];
                         key_idx += current_prefix.len;
 
                         if (key_idx == key.len) {
-                            if ((self.is_leaf_bitmask.items[node_idx] & 1) == 1) {
+                            if ((self.is_leaf_bitmask.items[current_edge.child_idx] & 1) == 1) {
+                                self.nodes.items[0].printEdges(0, self);
                                 self.sorted_array.insert(PruningEntry{
                                     .key = key,
                                     .value = node.value,
@@ -908,7 +909,8 @@ test "bench" {
         // _ = try trie.getPrefixNodesPruning("m", &matching_nodes);
     // }
 
-    const num_rounds: usize = 1000_000;
+    // const num_rounds: usize = 1000;
+    const num_rounds: usize = 1;
     const start_prefix = std.time.nanoTimestamp();
     // const nodes_found = try trie.getPrefixNodesPruning("m", &matching_nodes);
     for (0..num_rounds) |_| {
