@@ -62,27 +62,27 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&test_cmd.step);
 
 
-    const radix_lib = b.addSharedLibrary(.{
-        .name = "radix_trie",
-        .root_source_file = b.path("src/radix_bindings.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    radix_lib.linkLibC();
-    b.installArtifact(radix_lib);
+    // const radix_lib = b.addSharedLibrary(.{
+        // .name = "radix_trie",
+        // .root_source_file = b.path("src/radix_bindings.zig"),
+        // .target = target,
+        // .optimize = optimize,
+    // });
+    // radix_lib.linkLibC();
+    // b.installArtifact(radix_lib);
     
-    const header_install = b.addInstallFileWithDir(
-        b.path("src/radix.h"),
-        .{ .custom = "include" },
-        "radix.h"
-    );
+    // const header_install = b.addInstallFileWithDir(
+        // b.path("src/radix.h"),
+        // .{ .custom = "include" },
+        // "radix.h"
+    // );
     
-    // Make header installation part of the default install step
-    b.getInstallStep().dependOn(&header_install.step);
+    // // Make header installation part of the default install step
+    // b.getInstallStep().dependOn(&header_install.step);
 
-    const py_install = b.addSystemCommand(&.{
-        "bash",
-        "py_install.sh",
-    });
-    b.getInstallStep().dependOn(&py_install.step);
+    // const py_install = b.addSystemCommand(&.{
+        // "bash",
+        // "py_install.sh",
+    // });
+    // b.getInstallStep().dependOn(&py_install.step);
 }

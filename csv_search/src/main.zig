@@ -5,6 +5,7 @@ const ScorePair = @import("sorted_array.zig");
 const builtin = @import("builtin");
 const TermPos = @import("server.zig").TermPos;
 const csvLineToJson = @import("server.zig").csvLineToJson;
+const csvLineToJsonScore = @import("server.zig").csvLineToJsonScore;
 const zap = @import("zap");
 
 const TOKEN_STREAM_CAPACITY = 1_048_576;
@@ -1657,7 +1658,7 @@ pub const IndexManager = struct {
 
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
             const boost_weighted_idf: f32 = (
-                1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])))
+                1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token] + 1)))
                 ) * boost_factors.items[col_idx];
             idf_remaining += boost_weighted_idf;
             scores_arr[idx] = boost_weighted_idf;
@@ -1682,13 +1683,6 @@ pub const IndexManager = struct {
             const is_high_df_term: bool = (score < IDF_THRESHOLD) or
                                           (score < 0.4 * idf_sum / @as(f32, @floatFromInt(tokens.items.len)));
 
-            // if (is_high_df_term) {
-                // scoreHighDFTerm(
-                // );
-            // } else {
-                // scoreLowDFTerm(
-                // );
-            // }
             var prev_doc_id: u32 = std.math.maxInt(u32);
             for (II.postings[offset..last_offset]) |doc_token| {
                 const doc_id:   u32 = @intCast(doc_token.doc_id);
@@ -1699,11 +1693,11 @@ pub const IndexManager = struct {
 
                 const _result = doc_scores.getPtr(doc_id);
                 if (_result) |result| {
-                    result.*.score += score * @as(f32, @floatFromInt(@intFromBool(!phrase_only)));
+                    // result.*.score += score * @as(f32, @floatFromInt(@intFromBool(!phrase_only)));
 
                     const last_term_pos = result.*.term_pos;
                     if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
-                        result.*.score *= 1.25;
+                        result.*.score *= 1.50;
                     }
                     if (!phrase_only) {
                         result.*.term_pos = term_pos;
@@ -1791,23 +1785,21 @@ pub const IndexManager = struct {
             );
         }
 
-        var results = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, k);
-        defer results.deinit();
-
         for (threads) |thread| {
             thread.join();
         }
 
-        for (self.results_arrays) |*tr| {
-            for (tr.items[0..tr.count]) |r| {
-                results.insert(r);
+        if (self.index_partitions.len > 1) {
+            for (self.results_arrays[1..]) |*tr| {
+                for (tr.items[0..tr.count]) |r| {
+                    self.results_arrays[0].insert(r);
+                }
             }
         }
+        if (self.results_arrays[0].count == 0) return;
 
-        if (results.count == 0) return;
-
-        for (0..results.count) |idx| {
-            const result = results.items[idx];
+        for (0..self.results_arrays[0].count) |idx| {
+            const result = self.results_arrays[0].items[idx];
 
             try self.index_partitions[result.partition_idx].fetchRecords(
                 self.result_positions[idx],
@@ -1815,7 +1807,7 @@ pub const IndexManager = struct {
                 result,
                 @constCast(&self.result_strings[idx]),
             );
-            // std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, results.items[idx].score, results.items[idx].doc_id});
+            std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, self.results_arrays[0].items[idx].score, self.results_arrays[0].items[idx].doc_id});
         }
     }
 };
@@ -1879,11 +1871,13 @@ pub const QueryHandler = struct {
                 );
 
             for (0..10) |idx| {
-                try self.json_objects.append(try csvLineToJson(
+                try self.json_objects.append(try csvLineToJsonScore(
                     self.index_manager.string_arena.allocator(),
                     self.index_manager.result_strings[idx].items,
                     self.index_manager.result_positions[idx],
                     self.index_manager.cols,
+                    self.index_manager.results_arrays[0].items[idx].score,
+                    idx,
                     ));
             }
             const end = std.time.milliTimestamp();
@@ -1956,6 +1950,14 @@ pub const QueryHandler = struct {
 
             cntr += 1;
         }
+        try json_cols.append(std.json.Value{
+            .string = "SCORE",
+        });
+        const csv_idx = json_cols.items.len - 1;
+        const tmp = json_cols.items[csv_idx];
+        json_cols.items[csv_idx] = json_cols.items[cntr];
+        json_cols.items[cntr] = tmp;
+        
 
         try response.object.put(
             "columns",
