@@ -1694,6 +1694,7 @@ pub const IndexManager = struct {
                 const _result = doc_scores.getPtr(doc_id);
                 if (_result) |result| {
                     // result.*.score += score * @as(f32, @floatFromInt(@intFromBool(!phrase_only)));
+                    // TODO: Consider front of record boost.
 
                     const last_term_pos = result.*.term_pos;
                     if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
@@ -2108,7 +2109,7 @@ fn bench(testing: bool) !void {
     try boost_factors.append(1.0);
     try boost_factors.append(1.0);
 
-    const num_queries: usize = if (testing) 1 else 1_000;
+    const num_queries: usize = if (testing) 1 else 1_000_0;
 
     const start_time = std.time.milliTimestamp();
     for (0..num_queries) |_| {
@@ -2268,6 +2269,6 @@ fn main_cli_runner() !void {
 }
 
 pub fn main() !void {
-    try main_cli_runner();
-    // try bench(true);
+    // try main_cli_runner();
+    try bench(true);
 }
