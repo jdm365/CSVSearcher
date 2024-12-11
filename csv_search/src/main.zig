@@ -1648,8 +1648,8 @@ pub const IndexManager = struct {
         defer sorted_scores.deinit();
 
 
-        var scores_arr = try self.allocator.alloc(f32, tokens.items.len);
-        defer self.allocator.free(scores_arr);
+        var token_scores = try self.allocator.alloc(f32, tokens.items.len);
+        defer self.allocator.free(token_scores);
 
         var idf_remaining: f32 = 0.0;
         for (0.., tokens.items) |idx, _token| {
@@ -1661,7 +1661,7 @@ pub const IndexManager = struct {
                 1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token] + 1)))
                 ) * boost_factors.items[col_idx];
             idf_remaining += boost_weighted_idf;
-            scores_arr[idx] = boost_weighted_idf;
+            token_scores[idx] = boost_weighted_idf;
         }
         const idf_sum = idf_remaining;
 
@@ -1669,7 +1669,7 @@ pub const IndexManager = struct {
 
         var last_col_idx: usize = 0;
         for (0..tokens.items.len) |idx| {
-            const score = scores_arr[idx];
+            const score = token_scores[idx];
             const col_score_pair = tokens.items[idx];
 
             const col_idx  = @as(usize, @intCast(col_score_pair.col_idx));
@@ -1688,19 +1688,22 @@ pub const IndexManager = struct {
                 const doc_id:   u32 = @intCast(doc_token.doc_id);
                 const term_pos: u8  = @intCast(doc_token.term_pos);
 
-                const phrase_only = (doc_id == prev_doc_id);
+                const do_phrase_scoring = (doc_id == prev_doc_id);
                 prev_doc_id = doc_id;
 
                 const _result = doc_scores.getPtr(doc_id);
                 if (_result) |result| {
-                    // result.*.score += score * @as(f32, @floatFromInt(@intFromBool(!phrase_only)));
                     // TODO: Consider front of record boost.
 
-                    const last_term_pos = result.*.term_pos;
-                    if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
-                        result.*.score *= 1.50;
-                    }
-                    if (!phrase_only) {
+                    if (do_phrase_scoring) {
+                        const last_term_pos = result.*.term_pos;
+                        if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
+                            result.*.score *= 1.50;
+                        }
+                    } else {
+                        // Does tf scoring effectively.
+                        result.*.score += score;
+
                         result.*.term_pos = term_pos;
 
                         const score_copy = result.*.score;
@@ -1734,13 +1737,13 @@ pub const IndexManager = struct {
                 }
             }
 
-            std.debug.print("TOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
-            std.debug.print("WAS HIGH DF TERM:   {}\n\n", .{is_high_df_term});
+            // std.debug.print("TOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
+            // std.debug.print("WAS HIGH DF TERM:   {}\n\n", .{is_high_df_term});
             idf_remaining -= score;
             last_col_idx = col_idx;
         }
 
-        std.debug.print("\nTOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
+        // std.debug.print("\nTOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
 
         var score_it = doc_scores.iterator();
         while (score_it.next()) |entry| {
@@ -1808,7 +1811,7 @@ pub const IndexManager = struct {
                 result,
                 @constCast(&self.result_strings[idx]),
             );
-            std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, self.results_arrays[0].items[idx].score, self.results_arrays[0].items[idx].doc_id});
+            // std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, self.results_arrays[0].items[idx].score, self.results_arrays[0].items[idx].doc_id});
         }
     }
 };
@@ -2109,7 +2112,7 @@ fn bench(testing: bool) !void {
     try boost_factors.append(1.0);
     try boost_factors.append(1.0);
 
-    const num_queries: usize = if (testing) 1 else 1_000_0;
+    const num_queries: usize = if (testing) 1 else 5_000;
 
     const start_time = std.time.milliTimestamp();
     for (0..num_queries) |_| {
@@ -2269,6 +2272,6 @@ fn main_cli_runner() !void {
 }
 
 pub fn main() !void {
-    // try main_cli_runner();
-    try bench(true);
+    try main_cli_runner();
+    // try bench(false);
 }
