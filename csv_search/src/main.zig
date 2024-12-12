@@ -8,6 +8,8 @@ const csvLineToJson = @import("server.zig").csvLineToJson;
 const csvLineToJsonScore = @import("server.zig").csvLineToJsonScore;
 const zap = @import("zap");
 
+const print = std.debug.print;
+
 const TOKEN_STREAM_CAPACITY = 1_048_576;
 const MAX_LINE_LENGTH       = 1_048_576;
 const MAX_NUM_TERMS         = 4096;
@@ -1658,10 +1660,11 @@ pub const IndexManager = struct {
 
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
             const boost_weighted_idf: f32 = (
-                1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token] + 1)))
+                1.0 + std.math.log2(@as(f32, @floatFromInt(II.num_docs)) / @as(f32, @floatFromInt(II.doc_freqs.items[token])))
                 ) * boost_factors.items[col_idx];
-            idf_remaining += boost_weighted_idf;
             token_scores[idx] = boost_weighted_idf;
+
+            idf_remaining += boost_weighted_idf;
         }
         const idf_sum = idf_remaining;
 
@@ -1672,8 +1675,8 @@ pub const IndexManager = struct {
             const score = token_scores[idx];
             const col_score_pair = tokens.items[idx];
 
-            const col_idx  = @as(usize, @intCast(col_score_pair.col_idx));
-            const token    = @as(usize, @intCast(col_score_pair.token));
+            const col_idx = @as(usize, @intCast(col_score_pair.col_idx));
+            const token   = @as(usize, @intCast(col_score_pair.token));
 
             const II: *InvertedIndex = &self.index_partitions[partition_idx].II[col_idx];
 
@@ -1688,29 +1691,25 @@ pub const IndexManager = struct {
                 const doc_id:   u32 = @intCast(doc_token.doc_id);
                 const term_pos: u8  = @intCast(doc_token.term_pos);
 
-                const do_phrase_scoring = (doc_id == prev_doc_id);
                 prev_doc_id = doc_id;
 
                 const _result = doc_scores.getPtr(doc_id);
                 if (_result) |result| {
                     // TODO: Consider front of record boost.
 
-                    if (do_phrase_scoring) {
-                        const last_term_pos = result.*.term_pos;
-                        if ((term_pos == last_term_pos + 1) and (col_idx == last_col_idx)) {
-                            result.*.score *= 1.50;
-                        }
-                    } else {
-                        // Does tf scoring effectively.
-                        result.*.score += score;
+                    // Phrase boost.
+                    const last_term_pos = result.*.term_pos;
+                    result.*.score += @as(f32, @floatFromInt(@intFromBool((term_pos == last_term_pos + 1) and (col_idx == last_col_idx) and (doc_id == prev_doc_id)))) * score * 0.50;
 
-                        result.*.term_pos = term_pos;
+                    // Does tf scoring effectively.
+                    result.*.score += score;
 
-                        const score_copy = result.*.score;
-                        sorted_scores.insert(score_f32{
-                            .score = score_copy,
-                        });
-                    }
+                    result.*.term_pos = term_pos;
+
+                    const score_copy = result.*.score;
+                    sorted_scores.insert(score_f32{
+                        .score = score_copy,
+                    });
 
                 } else {
                     if (!done and !is_high_df_term) {
