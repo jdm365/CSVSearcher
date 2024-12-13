@@ -1699,7 +1699,7 @@ pub const IndexManager = struct {
 
                     // Phrase boost.
                     const last_term_pos = result.*.term_pos;
-                    result.*.score += @as(f32, @floatFromInt(@intFromBool((term_pos == last_term_pos + 1) and (col_idx == last_col_idx) and (doc_id == prev_doc_id)))) * score * 0.50;
+                    result.*.score += @as(f32, @floatFromInt(@intFromBool((term_pos == last_term_pos + 1) and (col_idx == last_col_idx) and (doc_id == prev_doc_id)))) * score * 0.75;
 
                     // Does tf scoring effectively.
                     result.*.score += score;
