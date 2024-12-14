@@ -90,29 +90,79 @@ pub fn TopKPQ(
     };
 }
 
-pub fn BitVector(comptime num_bits: usize) type {
+pub fn BitVectorArray(
+    comptime bit_w: usize,
+    ) type {
     comptime {
-        assert(@popCount(num_bits) == 1);
+        // Power of 2.
+        assert(@popCount(bit_w) == 1);
     }
 
     return struct {
         const Self = @This();
 
-        data: [@divFloor(num_bits, 8)]u8,
+        allocator: std.mem.allocator,
+        data: []u64,
+        bit_w: usize,
+        vec_w: usize,
+        len: usize,
+        stride: usize,
+        u64_stride: usize,
+        ptr: *u64,
 
-        pub inline fn add(self: *Self, idx: usize) void {
-            self.data[@divFloor(idx, 8) + @mod(idx, 8)] |= 1;
+        // TODO: init with allocator.
+        pub fn init(
+            allocator: std.mem.allocator,
+            vec_w: usize,
+            len: usize,
+        ) !Self {
+            const stride = @divFloor(bit_w * vec_w, 8);
+            const u64_stride = @divFloor(stride, 8);
+
+            // Div by 8 instead of 64 because bit_w is bits not bytes.
+            const data = allocator.alloc(u64, stride * len);
+            @memset(data, 0);
+
+            return Self{
+                .allocator = allocator,
+                .data = data,
+                .bit_w = bit_w,
+                .vec_2 = vec_w,
+                .stride = stride,
+                .u64_stride = u64_stride,
+                .ptr = &data,
+            };
+        }
+
+        pub inline fn add(
+            self: *Self, 
+            row_idx: usize,
+            col_idx: usize,
+            element_idx: usize,
+            ) void {
+            const u64_idx = row_idx * self.u64_stride;
+            const bit_idx = element_idx + (self.bit_w * col_idx);
+            self.data[u64_idx] |= (1 << bit_idx);
         }
 
         pub inline fn clear(self: *Self) void {
             @memset(self.data, 0);
         }
 
-        pub inline fn hamming(self: *const Self, other: *const Self) usize {
+        pub inline fn resetPtr(self: *Self) void {
+            self.ptr = &self.data;
+        }
+
+        pub inline fn hamming(self: *const Self, query_vec: []u64) usize {
+            // Assumes pointer is set correctly.
+
             var _hamming: usize = 0;
-            inline for (0..@divFloor(num_bits, 8)) |byte_idx| {
-                _hamming += @popCount(self.data[byte_idx] & other.data[byte_idx]);
+            inline for (0..self.u64_stride) |u64_idx| {
+                _hamming += @popCount(query_vec[u64_idx] & (self.ptr + 8 * u64_idx).*);
             }
+
+            // Update ptr
+            self.ptr += self.u64_stride;
             return _hamming;
         }
     };
@@ -238,21 +288,20 @@ const CSVStream = struct {
 // LOW ENTROPY RECORDS (OR SMALL DON'T KNOW YET) GET SMALLER BITVECTORS.
 
 const BitVectorIndex = struct {
-    vectors: []BitVector(1024),
+    vectors: BitVectorArray(1024),
     num_docs: u32,
 
     pub fn init(
         allocator: std.mem.Allocator,
+        num_cols: usize,
         num_docs: usize,
         ) !BitVectorIndex {
 
-        var vectors = allocator.alloc(BitVector(1024), num_docs);
-        for (0..num_docs) |idx| {
-            const unroll_size = @min(4, num_docs - idx);
-            inline for (idx..idx+unroll_size) |jdx| {
-                vectors[jdx].clear();
-            }
-        }
+        const vectors = BitVectorArray(1024).init(
+            allocator,
+            num_cols,
+            num_docs,
+        );
 
         const II = BitVectorIndex{
             .vectors = vectors,
@@ -262,11 +311,8 @@ const BitVectorIndex = struct {
         return II;
     }
 
-    pub fn deinit(
-        self: *BitVectorIndex,
-        allocator: std.mem.Allocator,
-        ) void {
-        allocator.free(self.vectors);
+    pub fn deinit(self: *BitVectorIndex) void {
+        self.vectors.deinit();
     }
 };
 
@@ -315,11 +361,35 @@ const BitVectorPartition = struct {
     inline fn hash(
         self: *const BitVectorPartition, 
         term: []u8,
-        target_bitvector: *BitVector(1024),
+        doc_id: usize,
+        col_idx: usize,
         ) void {
         inline for (0..8) |idx| {
-            const insert_idx = @mod(std.hash.Wyhash.hash(self.hash_seeds[idx], term), 128) + 128 * idx;
-            target_bitvector.add(@as(usize, @intCast(insert_idx)));
+            const insert_idx = @mod(
+                std.hash.Wyhash.hash(self.hash_seeds[idx], term), 128
+                ) + 128 * idx;
+
+            self.II[col_idx].vectors.add(
+                doc_id,
+                col_idx,
+                @as(usize, @intCast(insert_idx)),
+                );
+        }
+    }
+
+    inline fn hash_u64(
+        self: *const BitVectorPartition, 
+        term: *[]u64,
+        start_idx: usize,
+        ) void {
+        inline for (0..8) |idx| {
+            const insert_idx = @mod(
+                std.hash.Wyhash.hash(self.hash_seeds[idx], term), 128
+                ) + (128 * idx) + 1024 * start_idx;
+
+            const u64_idx = @divFloor(insert_idx, 64);
+            const bit_idx = @mod(insert_idx, 64);
+            term[u64_idx] |= (1 << bit_idx);
         }
     }
 
@@ -337,7 +407,11 @@ const BitVectorPartition = struct {
             return;
         }
 
-        self.hash(term[0..cntr.*], &self.II[col_idx].vectors[doc_id]);
+        self.hash(
+            term[0..cntr.*], 
+            doc_id,
+            col_idx,
+            );
 
         cntr.* = 0;
         byte_idx.* += 1;
@@ -445,7 +519,11 @@ const BitVectorPartition = struct {
                         ),
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
-                            self.hash(term[0..cntr], &self.II[col_idx].vectors[doc_id]);
+                            self.hash(
+                                term[0..cntr.*], 
+                                doc_id,
+                                col_idx,
+                                );
 
                             cntr = 0;
                             byte_idx.* += 1;
@@ -524,7 +602,11 @@ const BitVectorPartition = struct {
                         ),
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
-                            self.hash(term[0..cntr], &self.II[col_idx].vectors[doc_id]);
+                            self.hash(
+                                term[0..cntr.*], 
+                                doc_id,
+                                col_idx,
+                                );
 
                             cntr = 0;
                             byte_idx.* += 1;
@@ -539,7 +621,11 @@ const BitVectorPartition = struct {
         }
 
         if (cntr > 0) {
-            self.hash(term[0..cntr], &self.II[col_idx].vectors[doc_id]);
+            self.hash(
+                term[0..cntr.*], 
+                doc_id,
+                col_idx,
+                );
         }
 
         byte_idx.* += 1;
@@ -1192,8 +1278,8 @@ pub const IndexManager = struct {
 
         var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
 
-        var query_bitvectors = self.allocator.alloc(BitVector(1024), num_search_cols);
-        defer self.allocator.free(query_bitvectors);
+        var query_bitvector = self.allocator.alloc([]u64, 16 * num_search_cols);
+        defer self.allocator.free(query_bitvector);
 
         var search_cols_mask = self.allocator.alloc(bool, num_search_cols);
         defer self.allocator.free(search_cols_mask);
@@ -1210,10 +1296,11 @@ pub const IndexManager = struct {
                 if (c == ' ') {
                     if (term_len == 0) continue;
 
-                    self.index_partitions[partition_idx].II.hash(
-                        term_buffer[0..term_len],
-                        query_bitvectors[col_idx],
-                    );
+                    self.index_partitions[partition_idx].II.hash_u64(
+                        term_buffer[0..term_len], 
+                        &query_bitvector,
+                        col_idx,
+                        );
                     term_len = 0;
                     search_cols_mask[col_idx] = true;
                     continue;
@@ -1223,20 +1310,22 @@ pub const IndexManager = struct {
                 term_len += 1;
 
                 if (term_len == MAX_TERM_LENGTH) {
-                    self.index_partitions[partition_idx].II.hash(
-                        term_buffer[0..term_len],
-                        query_bitvectors[col_idx],
-                    );
+                    self.index_partitions[partition_idx].II.hash_u64(
+                        term_buffer[0..term_len], 
+                        &query_bitvector,
+                        col_idx,
+                        );
                     search_cols_mask[col_idx] = true;
                     term_len = 0;
                 }
             }
 
             if (term_len > 0) {
-                self.index_partitions[partition_idx].II.hash(
-                    term_buffer[0..term_len],
-                    query_bitvectors[col_idx],
-                );
+                self.index_partitions[partition_idx].II.hash_u64(
+                    term_buffer[0..term_len], 
+                    &query_bitvector,
+                    col_idx,
+                    );
                 search_cols_mask[col_idx] = true;
                 term_len = 0;
             }
@@ -1255,108 +1344,27 @@ pub const IndexManager = struct {
         defer sorted_scores.deinit();
 
 
-        var done = false;
-
         const pq = TopKPQ(usize, void, std.math.order).init(self.allocator).init(
             self.allocator,
             void,
             query_results.capacity,
         );
         defer pq.deinit();
+        // TODO: Make this take a struct with doc_id and modify comparison func accordingly.
 
         for (0..num_search_cols) |col_idx| {
             if (!search_cols_mask[col_idx]) continue;
 
-            const query_vector  = &query_bitvectors[col_idx];
             const index_vectors = &self.index_partitions[partition_idx].II[col_idx].vectors;
+            index_vectors.resetPtr();
 
-            var _hammings: [4]usize = undefined; 
-            for (0..index_vectors.len) |idx| {
-                const unroll_size = @min(4, index_vectors.len - idx);
-                inline for (0..unroll_size) |jdx| {
-                    _hammings[idx] = query_vector.hamming(index_vectors[idx+jdx]);
-                }
-                for (0..unroll_size) |jdx| {
-                    pq.add(_hammings[jdx]);
-                }
+            for (0..index_vectors.len) |_| {
+                const hamming = index_vectors.hamming(query_bitvector);
+                pq.add(hamming);
             }
         }
 
-        var last_col_idx: usize = 0;
-        for (0..tokens.items.len) |idx| {
-            const score = token_scores[idx];
-            const col_score_pair = tokens.items[idx];
-
-            const col_idx = @as(usize, @intCast(col_score_pair.col_idx));
-            const token   = @as(usize, @intCast(col_score_pair.token));
-
-            const II: *BitVectorIndex = &self.index_partitions[partition_idx].II[col_idx];
-
-            const offset      = II.term_offsets[token];
-            const last_offset = II.term_offsets[token + 1];
-
-            const is_high_df_term: bool = (score < IDF_THRESHOLD) or
-                                          (score < 0.4 * idf_sum / @as(f32, @floatFromInt(tokens.items.len)));
-
-            var prev_doc_id: u32 = std.math.maxInt(u32);
-            for (II.postings[offset..last_offset]) |doc_token| {
-                const doc_id:   u32 = @intCast(doc_token.doc_id);
-                const term_pos: u8  = @intCast(doc_token.term_pos);
-
-                prev_doc_id = doc_id;
-
-                const _result = doc_scores.getPtr(doc_id);
-                if (_result) |result| {
-                    // TODO: Consider front of record boost.
-
-                    // Phrase boost.
-                    const last_term_pos = result.*.term_pos;
-                    result.*.score += @as(f32, @floatFromInt(@intFromBool((term_pos == last_term_pos + 1) and (col_idx == last_col_idx) and (doc_id == prev_doc_id)))) * score * 0.75;
-
-                    // Does tf scoring effectively.
-                    result.*.score += score;
-
-                    result.*.term_pos = term_pos;
-
-                    const score_copy = result.*.score;
-                    sorted_scores.insert(score_f32{
-                        .score = score_copy,
-                    });
-
-                } else {
-                    if (!done and !is_high_df_term) {
-
-                        if (sorted_scores.count == sorted_scores.capacity - 1) {
-                            const min_score = sorted_scores.items[sorted_scores.count - 1];
-                            if (min_score.score > idf_remaining) {
-                                done = true;
-                                continue;
-                            }
-                        }
-
-                        try doc_scores.put(
-                            doc_id,
-                            ScoringInfo{
-                                .score = score,
-                                .term_pos = term_pos,
-                            }
-                        );
-                        sorted_scores.insert(score_f32{
-                            .score = score,
-                        });
-                    }
-                }
-            }
-
-            // std.debug.print("TOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
-            // std.debug.print("WAS HIGH DF TERM:   {}\n\n", .{is_high_df_term});
-            idf_remaining -= score;
-            last_col_idx = col_idx;
-        }
-
-        // std.debug.print("\nTOTAL TERMS SCORED: {d}\n", .{doc_scores.count()});
-
-        var score_it = doc_scores.iterator();
+        var score_it = pq.pq.iterator();
         while (score_it.next()) |entry| {
 
             const score_pair = QueryResult{
