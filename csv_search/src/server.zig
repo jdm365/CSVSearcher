@@ -129,6 +129,7 @@ test "csv_parse" {
         result_positions,
         columns,
         3.4,
+        0,
     );
 
     for (0..13) |col_idx| {

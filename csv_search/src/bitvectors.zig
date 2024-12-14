@@ -49,9 +49,10 @@ const ColTokenPair = packed struct {
     token: u32,
 };
 
-const score_f32 = struct {
-    score: f32,
-};
+pub fn topk_score_compare_func(_: void, a: QueryResult, b: QueryResult) std.math.Order {
+    if (a.score > b.score) return std.math.Order.gt;
+    return std.math.Order.lt;
+}
 
 pub fn TopKPQ(
     comptime T: type,
@@ -67,24 +68,24 @@ pub fn TopKPQ(
 
         pub fn init(
             allocator: std.mem.Allocator, 
-            context: Context,
+            context: type,
             k: usize,
             ) Self {
-            const pq = std.PriorityQueue(T, context, compareFn).init(allocator);
+            const pq = std.PriorityQueue(T, context, compareFn).init(allocator, {});
             return Self{
                 .pq = pq,
                 .k = k,
             };
         }
 
-        pub fn deinit(self: *Self) Self {
+        pub fn deinit(self: *Self) void {
             self.pq.deinit();
         }
 
         pub fn add(self: *Self, entry: T) !void {
             try self.pq.add(entry);
             if (self.pq.items.len > self.k) {
-                self.pq.removeIndex(self.k);
+                _ = self.pq.removeIndex(self.k);
             }
         }
     };
@@ -101,37 +102,41 @@ pub fn BitVectorArray(
     return struct {
         const Self = @This();
 
-        allocator: std.mem.allocator,
+        allocator: std.mem.Allocator,
         data: []u64,
         bit_w: usize,
         vec_w: usize,
         len: usize,
-        stride: usize,
+        byte_stride: usize,
         u64_stride: usize,
-        ptr: *u64,
+        ptr: [*]u64,
 
-        // TODO: init with allocator.
         pub fn init(
-            allocator: std.mem.allocator,
+            allocator: std.mem.Allocator,
             vec_w: usize,
             len: usize,
         ) !Self {
-            const stride = @divFloor(bit_w * vec_w, 8);
-            const u64_stride = @divFloor(stride, 8);
+            const byte_stride = @divFloor(bit_w * vec_w, 8);
+            const u64_stride = @divFloor(byte_stride, 8);
 
             // Div by 8 instead of 64 because bit_w is bits not bytes.
-            const data = allocator.alloc(u64, stride * len);
+            const data = try allocator.alloc(u64, u64_stride * len);
             @memset(data, 0);
 
             return Self{
                 .allocator = allocator,
                 .data = data,
                 .bit_w = bit_w,
-                .vec_2 = vec_w,
-                .stride = stride,
+                .vec_w = vec_w,
+                .len = len,
+                .byte_stride = byte_stride,
                 .u64_stride = u64_stride,
-                .ptr = &data,
+                .ptr = data.ptr,
             };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.allocator.free(self.data);
         }
 
         pub inline fn add(
@@ -140,9 +145,9 @@ pub fn BitVectorArray(
             col_idx: usize,
             element_idx: usize,
             ) void {
-            const u64_idx = row_idx * self.u64_stride;
-            const bit_idx = element_idx + (self.bit_w * col_idx);
-            self.data[u64_idx] |= (1 << bit_idx);
+            const u64_idx = (row_idx * self.u64_stride) + @divFloor((self.bit_w * col_idx) + element_idx, 64);
+            const bit_idx = @mod(element_idx, 64);
+            self.data[u64_idx] |= (@as(u64, 1) << @as(u6, @truncate(bit_idx)));
         }
 
         pub inline fn clear(self: *Self) void {
@@ -150,15 +155,19 @@ pub fn BitVectorArray(
         }
 
         pub inline fn resetPtr(self: *Self) void {
-            self.ptr = &self.data;
+            self.ptr = self.data.ptr;
         }
 
-        pub inline fn hamming(self: *const Self, query_vec: []u64) usize {
+        pub inline fn hamming(self: *Self, query_vec: []u64) usize {
             // Assumes pointer is set correctly.
 
             var _hamming: usize = 0;
-            inline for (0..self.u64_stride) |u64_idx| {
-                _hamming += @popCount(query_vec[u64_idx] & (self.ptr + 8 * u64_idx).*);
+            // inline for (0..self.u64_stride) |u64_idx| {
+                // _hamming += @popCount(query_vec[u64_idx] & (self.ptr + 8 * u64_idx).*);
+            // }
+            // Cheating for now. TODO: Make the 1024 a comptime param.
+            inline for (0..16) |u64_idx| {
+                _hamming += @popCount(query_vec[u64_idx] & self.ptr[8 * u64_idx]);
             }
 
             // Update ptr
@@ -297,7 +306,7 @@ const BitVectorIndex = struct {
         num_docs: usize,
         ) !BitVectorIndex {
 
-        const vectors = BitVectorArray(1024).init(
+        const vectors = try BitVectorArray(1024).init(
             allocator,
             num_cols,
             num_docs,
@@ -307,7 +316,6 @@ const BitVectorIndex = struct {
             .vectors = vectors,
             .num_docs = @intCast(num_docs),
         };
-        @memset(II.doc_sizes, 0);
         return II;
     }
 
@@ -334,7 +342,7 @@ const BitVectorPartition = struct {
 
         const partition = BitVectorPartition{
             .II = try allocator.alloc(BitVectorIndex, num_search_cols),
-            .hash_seeds = &[_]usize{0, 1, 2, 3, 4, 5, 6, 7},
+            .hash_seeds = [8]usize{0, 1, 2, 3, 4, 5, 6, 7},
             .line_offsets = line_offsets,
             .allocator = allocator,
             .string_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
@@ -342,7 +350,11 @@ const BitVectorPartition = struct {
         };
 
         for (0..num_search_cols) |idx| {
-            partition.II[idx] = try BitVectorIndex.init(allocator, line_offsets.len - 1);
+            partition.II[idx] = try BitVectorIndex.init(
+                allocator, 
+                num_search_cols,
+                line_offsets.len - 1,
+                );
         }
 
         return partition;
@@ -351,7 +363,7 @@ const BitVectorPartition = struct {
     pub fn deinit(self: *BitVectorPartition) void {
         self.allocator.free(self.line_offsets);
         for (0..self.II.len) |i| {
-            self.II[i].deinit(self.allocator);
+            self.II[i].deinit();
         }
         self.allocator.free(self.II);
         self.string_arena.deinit();
@@ -379,7 +391,8 @@ const BitVectorPartition = struct {
 
     inline fn hash_u64(
         self: *const BitVectorPartition, 
-        term: *[]u64,
+        term: []u8,
+        vec: *[]u64,
         start_idx: usize,
         ) void {
         inline for (0..8) |idx| {
@@ -389,7 +402,7 @@ const BitVectorPartition = struct {
 
             const u64_idx = @divFloor(insert_idx, 64);
             const bit_idx = @mod(insert_idx, 64);
-            term[u64_idx] |= (1 << bit_idx);
+            vec.*[u64_idx] |= (@as(u64, 1) << @as(u6, @truncate(bit_idx)));
         }
     }
 
@@ -428,7 +441,7 @@ const BitVectorPartition = struct {
         term: *[MAX_TERM_LENGTH]u8,
         max_byte: usize,
     ) !void {
-        const start_byte = byte_idx.*;
+        // const start_byte = byte_idx.*;
 
         const is_quoted  = (token_stream.f_data[byte_idx.*] == '"');
         byte_idx.* += @intFromBool(is_quoted);
@@ -439,11 +452,11 @@ const BitVectorPartition = struct {
         if (is_quoted) {
 
             while (true) {
-                if (self.II[col_idx].doc_sizes[doc_id] >= MAX_NUM_TERMS) {
-                    byte_idx.* = start_byte;
-                    try token_stream.iterField(byte_idx);
-                    return;
-                }
+                // if (self.II[col_idx].doc_sizes[doc_id] >= MAX_NUM_TERMS) {
+                    // byte_idx.* = start_byte;
+                    // try token_stream.iterField(byte_idx);
+                    // return;
+                // }
                 std.debug.assert(byte_idx.* < max_byte);
 
                 if (token_stream.f_data[byte_idx.*] == '"') {
@@ -520,7 +533,7 @@ const BitVectorPartition = struct {
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
                             self.hash(
-                                term[0..cntr.*], 
+                                term[0..cntr], 
                                 doc_id,
                                 col_idx,
                                 );
@@ -603,7 +616,7 @@ const BitVectorPartition = struct {
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
                             self.hash(
-                                term[0..cntr.*], 
+                                term[0..cntr], 
                                 doc_id,
                                 col_idx,
                                 );
@@ -622,7 +635,7 @@ const BitVectorPartition = struct {
 
         if (cntr > 0) {
             self.hash(
-                term[0..cntr.*], 
+                term[0..cntr], 
                 doc_id,
                 col_idx,
                 );
@@ -733,7 +746,7 @@ pub const IndexManager = struct {
     tmp_dir: []const u8,
     result_positions: [MAX_NUM_RESULTS][]TermPos,
     result_strings: [MAX_NUM_RESULTS]std.ArrayList(u8),
-    results_arrays: []sorted_array.SortedScoreArray(QueryResult),
+    results_arrays: []TopKPQ(QueryResult, void, topk_score_compare_func),
     header_bytes: usize,
 
     pub fn init(
@@ -825,18 +838,10 @@ pub const IndexManager = struct {
     fn printDebugInfo(self: *const IndexManager) void {
         std.debug.print("\n=====================================================\n", .{});
 
-        var num_terms: usize = 0;
         var num_docs: usize = 0;
-        var avg_doc_size: f32 = 0.0;
 
         for (0..self.index_partitions.len) |idx| {
-
             num_docs += self.index_partitions[idx].II[0].num_docs;
-            for (0..self.index_partitions[idx].II.len) |jdx| {
-                num_terms    += self.index_partitions[idx].II[jdx].num_terms;
-                avg_doc_size += self.index_partitions[idx].II[jdx].avg_doc_size;
-            }
-
         }
 
         std.debug.print("Num Partitions:  {d}\n", .{self.index_partitions.len});
@@ -845,9 +850,7 @@ pub const IndexManager = struct {
         while (col_iterator.next()) |item| {
             std.debug.print("Column:          {s}\n", .{item.key_ptr.*});
             std.debug.print("---------------------------------------------\n", .{});
-            std.debug.print("Num terms:       {d}\n", .{num_terms});
             std.debug.print("Num docs:        {d}\n", .{num_docs});
-            std.debug.print("Avg doc size:    {d}\n\n", .{avg_doc_size / @as(f32, @floatFromInt(self.index_partitions.len))});
         }
 
         std.debug.print("=====================================================\n\n\n\n", .{});
@@ -1031,11 +1034,7 @@ pub const IndexManager = struct {
                 );
             defer self.allocator.free(output_filename);
 
-            token_streams[col_idx] = try CSVStream.init(
-                self.input_filename,
-                output_filename,
-                self.allocator,
-            );
+            token_streams[col_idx] = try CSVStream.init(self.input_filename);
         }
         defer {
             for (0..num_search_cols) |col_idx| {
@@ -1100,7 +1099,7 @@ pub const IndexManager = struct {
         _ = total_docs_read.fetchAdd(end_doc - (start_doc + last_doc_id), .monotonic);
 
         // Construct II
-        try self.index_partitions[partition_idx].constructFromCSVStream(&token_streams);
+        // try self.index_partitions[partition_idx].constructFromCSVStream(&token_streams);
     }
 
 
@@ -1173,10 +1172,14 @@ pub const IndexManager = struct {
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BitVectorPartition, num_partitions);
-        self.results_arrays = try self.allocator.alloc(sorted_array.SortedScoreArray(QueryResult), num_partitions);
+        self.results_arrays = try self.allocator.alloc(TopKPQ(QueryResult, void, topk_score_compare_func), num_partitions);
         for (0..num_partitions) |idx| {
             self.file_handles[idx] = try std.fs.cwd().openFile(self.input_filename, .{});
-            self.results_arrays[idx] = try sorted_array.SortedScoreArray(QueryResult).init(self.allocator, MAX_NUM_RESULTS);
+            self.results_arrays[idx] = TopKPQ(QueryResult, void, topk_score_compare_func).init(
+                self.allocator, 
+                void, 
+                MAX_NUM_RESULTS,
+                );
         }
 
         std.debug.print("Writing {d} partitions\n", .{num_partitions});
@@ -1271,17 +1274,21 @@ pub const IndexManager = struct {
         queries: std.StringHashMap([]const u8),
         boost_factors: std.ArrayList(f32),
         partition_idx: usize,
-        query_results: *sorted_array.SortedScoreArray(QueryResult),
+        query_results: *TopKPQ(QueryResult, void, topk_score_compare_func),
+        k: usize,
     ) !void {
+        query_results.k = k;
+        query_results.pq.items.len = 0;
+
         const num_search_cols = self.search_cols.count();
         std.debug.assert(num_search_cols > 0);
 
         var term_buffer: [MAX_TERM_LENGTH]u8 = undefined;
 
-        var query_bitvector = self.allocator.alloc([]u64, 16 * num_search_cols);
+        var query_bitvector = try self.allocator.alloc(u64, 16 * num_search_cols);
         defer self.allocator.free(query_bitvector);
 
-        var search_cols_mask = self.allocator.alloc(bool, num_search_cols);
+        var search_cols_mask = try self.allocator.alloc(bool, num_search_cols);
         defer self.allocator.free(search_cols_mask);
 
         var query_it = queries.iterator();
@@ -1296,7 +1303,7 @@ pub const IndexManager = struct {
                 if (c == ' ') {
                     if (term_len == 0) continue;
 
-                    self.index_partitions[partition_idx].II.hash_u64(
+                    self.index_partitions[partition_idx].hash_u64(
                         term_buffer[0..term_len], 
                         &query_bitvector,
                         col_idx,
@@ -1310,7 +1317,7 @@ pub const IndexManager = struct {
                 term_len += 1;
 
                 if (term_len == MAX_TERM_LENGTH) {
-                    self.index_partitions[partition_idx].II.hash_u64(
+                    self.index_partitions[partition_idx].hash_u64(
                         term_buffer[0..term_len], 
                         &query_bitvector,
                         col_idx,
@@ -1321,7 +1328,7 @@ pub const IndexManager = struct {
             }
 
             if (term_len > 0) {
-                self.index_partitions[partition_idx].II.hash_u64(
+                self.index_partitions[partition_idx].hash_u64(
                     term_buffer[0..term_len], 
                     &query_bitvector,
                     col_idx,
@@ -1337,42 +1344,22 @@ pub const IndexManager = struct {
         var doc_scores: *std.AutoHashMap(u32, ScoringInfo) = &self.index_partitions[partition_idx].doc_score_map;
         doc_scores.clearRetainingCapacity();
 
-        var sorted_scores = try sorted_array.SortedScoreArray(score_f32).init(
-            self.allocator, 
-            query_results.capacity,
-            );
-        defer sorted_scores.deinit();
-
-
-        const pq = TopKPQ(usize, void, std.math.order).init(self.allocator).init(
-            self.allocator,
-            void,
-            query_results.capacity,
-        );
-        defer pq.deinit();
-        // TODO: Make this take a struct with doc_id and modify comparison func accordingly.
-
         for (0..num_search_cols) |col_idx| {
             if (!search_cols_mask[col_idx]) continue;
 
             const index_vectors = &self.index_partitions[partition_idx].II[col_idx].vectors;
             index_vectors.resetPtr();
 
-            for (0..index_vectors.len) |_| {
-                const hamming = index_vectors.hamming(query_bitvector);
-                pq.add(hamming);
+            const norm_factor: f32 = boost_factors.items[col_idx] / @as(f32, @floatFromInt(index_vectors.byte_stride * 8));
+            for (0..index_vectors.len) |doc_id| {
+                const hamming: f32 = @as(f32, @floatFromInt(index_vectors.hamming(query_bitvector))) * norm_factor;
+                const query_result = QueryResult{
+                    .score = hamming,
+                    .doc_id = @intCast(doc_id),
+                    .partition_idx = partition_idx,
+                };
+                try query_results.add(query_result);
             }
-        }
-
-        var score_it = pq.pq.iterator();
-        while (score_it.next()) |entry| {
-
-            const score_pair = QueryResult{
-                .doc_id = entry.key_ptr.*,
-                .score = entry.value_ptr.*.score,
-                .partition_idx = partition_idx,
-            };
-            query_results.insert(score_pair);
         }
     }
 
@@ -1387,14 +1374,21 @@ pub const IndexManager = struct {
             return error.InvalidArgument;
         }
 
+        // Normalize boost factors.
+        var sum: f32 = 0.0;
+        for (boost_factors.items) |val| {
+            sum += val;
+        }
+        for (boost_factors.items) |*val| {
+            val.* /= sum;
+        }
+
         // Init num_partitions threads.
         const num_partitions = self.index_partitions.len;
         var threads = try self.allocator.alloc(std.Thread, num_partitions);
         defer self.allocator.free(threads);
 
         for (0..num_partitions) |partition_idx| {
-            self.results_arrays[partition_idx].clear();
-            self.results_arrays[partition_idx].resize(k);
             threads[partition_idx] = try std.Thread.spawn(
                 .{},
                 queryPartitionOrdered,
@@ -1404,6 +1398,7 @@ pub const IndexManager = struct {
                     boost_factors,
                     partition_idx,
                     &self.results_arrays[partition_idx],
+                    k,
                 },
             );
         }
@@ -1414,15 +1409,18 @@ pub const IndexManager = struct {
 
         if (self.index_partitions.len > 1) {
             for (self.results_arrays[1..]) |*tr| {
-                for (tr.items[0..tr.count]) |r| {
-                    self.results_arrays[0].insert(r);
+                var tr_iterator = tr.pq.iterator();
+
+                while (tr_iterator.next()) |r| {
+                    try self.results_arrays[0].add(r);
                 }
             }
         }
-        if (self.results_arrays[0].count == 0) return;
+        if (self.results_arrays[0].pq.count() == 0) return;
 
-        for (0..self.results_arrays[0].count) |idx| {
-            const result = self.results_arrays[0].items[idx];
+        var idx: usize = 0;
+        var iterator = self.results_arrays[0].pq.iterator();
+        while (iterator.next()) |result| {
 
             try self.index_partitions[result.partition_idx].fetchRecords(
                 self.result_positions[idx],
@@ -1430,6 +1428,8 @@ pub const IndexManager = struct {
                 result,
                 @constCast(&self.result_strings[idx]),
             );
+            idx += 1;
+
             // std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, self.results_arrays[0].items[idx].score, self.results_arrays[0].items[idx].doc_id});
         }
     }
