@@ -165,16 +165,16 @@ pub fn BitVectorArray(
             // Assumes pointer is set correctly.
 
             var _hamming: usize = 0;
-            // Cheating for now. TODO: Make the 1024 a comptime param.
             inline for (0..16) |u64_idx| {
                 HAMMING_RESULTS[u64_idx] = @popCount(query_vec[u64_idx] & self.ptr[u64_idx]);
             }
-            for (0..16) |idx| {
+            inline for (0..16) |idx| {
                 _hamming += HAMMING_RESULTS[idx];
             }
 
             // Update ptr
-            self.ptr += self.byte_stride;
+            // self.ptr += self.byte_stride;
+            self.ptr += self.u64_stride;
             return _hamming;
         }
     };
@@ -301,6 +301,7 @@ const CSVStream = struct {
 
 const BitVectorIndex = struct {
     vectors: BitVectorArray(1024),
+    num_cols: u32,
     num_docs: u32,
 
     pub fn init(
@@ -317,6 +318,7 @@ const BitVectorIndex = struct {
 
         const II = BitVectorIndex{
             .vectors = vectors,
+            .num_cols = @intCast(num_cols),
             .num_docs = @intCast(num_docs),
         };
         return II;
@@ -328,7 +330,7 @@ const BitVectorIndex = struct {
 };
 
 const BitVectorPartition = struct {
-    II: []BitVectorIndex,
+    II: BitVectorIndex,
     hash_seeds: [8]u64,
     line_offsets: []usize,
     allocator: std.mem.Allocator,
@@ -344,7 +346,11 @@ const BitVectorPartition = struct {
         try doc_score_map.ensureTotalCapacity(50_000);
 
         const partition = BitVectorPartition{
-            .II = try allocator.alloc(BitVectorIndex, num_search_cols),
+            .II = try BitVectorIndex.init(
+                allocator, 
+                num_search_cols,
+                line_offsets.len - 1,
+                ),
             .hash_seeds = [8]usize{0, 1, 2, 3, 4, 5, 6, 7},
             .line_offsets = line_offsets,
             .allocator = allocator,
@@ -352,29 +358,18 @@ const BitVectorPartition = struct {
             .doc_score_map = doc_score_map,
         };
 
-        for (0..num_search_cols) |idx| {
-            partition.II[idx] = try BitVectorIndex.init(
-                allocator, 
-                num_search_cols,
-                line_offsets.len - 1,
-                );
-        }
-
         return partition;
     }
 
     pub fn deinit(self: *BitVectorPartition) void {
         self.allocator.free(self.line_offsets);
-        for (0..self.II.len) |i| {
-            self.II[i].deinit();
-        }
-        self.allocator.free(self.II);
+        self.II.deinit();
         self.string_arena.deinit();
         self.doc_score_map.deinit();
     }
 
     inline fn hash(
-        self: *const BitVectorPartition, 
+        self: *BitVectorPartition, 
         term: []u8,
         doc_id: usize,
         col_idx: usize,
@@ -382,7 +377,7 @@ const BitVectorPartition = struct {
 
         const base_hash = std.hash.Wyhash.hash(0, term);
         var insert_idx = @mod(base_hash, 128);
-        self.II[col_idx].vectors.add(
+        self.II.vectors.add(
             doc_id,
             col_idx,
             0,
@@ -394,7 +389,7 @@ const BitVectorPartition = struct {
             const u64_offset = idx * 2;
             insert_idx = @mod(derived_hash, 128);
 
-            self.II[col_idx].vectors.add(
+            self.II.vectors.add(
                 doc_id,
                 col_idx,
                 u64_offset,
@@ -407,16 +402,23 @@ const BitVectorPartition = struct {
         self: *const BitVectorPartition, 
         term: []u8,
         vec: *[]u64,
-        start_idx: usize,
+        col_idx: usize,
         ) void {
-        // TODO: Make like hash above.
-        inline for (0..8) |idx| {
-            const insert_idx = @mod(
-                std.hash.Wyhash.hash(self.hash_seeds[idx], term), 128
-                ) + (128 * idx) + 1024 * start_idx;
+        const base_hash = std.hash.Wyhash.hash(0, term);
+        var insert_idx = @mod(base_hash, 128);
 
-            const u64_idx = @divFloor(insert_idx, 64);
-            const bit_idx = @mod(insert_idx, 64);
+        const u64_offset = 16 * col_idx;
+        var u64_idx = @divFloor(insert_idx, 64) + u64_offset;
+        var bit_idx = @mod(insert_idx, 64);
+
+        vec.*[u64_idx] |= (@as(u64, 1) << @as(u6, @truncate(bit_idx)));
+
+        inline for (1..8) |idx| {
+            const derived_hash = base_hash ^ self.hash_seeds[idx];
+            insert_idx = @mod(derived_hash, 128);
+
+            u64_idx = @divFloor(insert_idx, 64) + u64_offset;
+            bit_idx = @mod(insert_idx, 64);
             vec.*[u64_idx] |= (@as(u64, 1) << @as(u6, @truncate(bit_idx)));
         }
     }
@@ -833,7 +835,7 @@ pub const IndexManager = struct {
         var num_docs: usize = 0;
 
         for (0..self.index_partitions.len) |idx| {
-            num_docs += self.index_partitions[idx].II[0].num_docs;
+            num_docs += self.index_partitions[idx].II.num_docs;
         }
 
         std.debug.print("Num Partitions:  {d}\n", .{self.index_partitions.len});
@@ -1264,7 +1266,8 @@ pub const IndexManager = struct {
     pub fn queryPartitionOrdered(
         self: *const IndexManager,
         queries: std.StringHashMap([]const u8),
-        boost_factors: std.ArrayList(f32),
+        // boost_factors: std.ArrayList(f32),
+        _: std.ArrayList(f32),
         partition_idx: usize,
         query_results: *TopKPQ(QueryResult, void, topk_score_compare_func),
         k: usize,
@@ -1336,22 +1339,22 @@ pub const IndexManager = struct {
         var doc_scores: *std.AutoHashMap(u32, ScoringInfo) = &self.index_partitions[partition_idx].doc_score_map;
         doc_scores.clearRetainingCapacity();
 
-        for (0..num_search_cols) |col_idx| {
-            if (!search_cols_mask[col_idx]) continue;
 
-            const index_vectors = &self.index_partitions[partition_idx].II[col_idx].vectors;
-            index_vectors.resetPtr();
+        const index_vectors = &self.index_partitions[partition_idx].II.vectors;
+        index_vectors.resetPtr();
 
-            const norm_factor: f32 = boost_factors.items[col_idx] / @as(f32, @floatFromInt(index_vectors.byte_stride * 8));
-            for (0..index_vectors.len) |doc_id| {
-                const hamming: f32 = @as(f32, @floatFromInt(index_vectors.hamming(query_bitvector))) * norm_factor;
-                const query_result = QueryResult{
-                    .score = hamming,
-                    .doc_id = @intCast(doc_id),
-                    .partition_idx = partition_idx,
-                };
-                try query_results.add(query_result);
-            }
+        // const norm_factor: f32 = boost_factors.items[col_idx] / @as(f32, @floatFromInt(index_vectors.byte_stride * 8));
+        for (0..index_vectors.len) |doc_id| {
+            const hamming: f32 = @as(
+                f32, 
+                @floatFromInt(index_vectors.hamming(query_bitvector)),
+                );
+            const query_result = QueryResult{
+                .score = hamming,
+                .doc_id = @intCast(doc_id),
+                .partition_idx = partition_idx,
+            };
+            try query_results.add(query_result);
         }
     }
 
@@ -1674,8 +1677,8 @@ pub const QueryHandler = struct {
 
 
 test "bench" {
-    // const filename: []const u8 = "../tests/mb_small.csv";
-    const filename: []const u8 = "../tests/mb.csv";
+    const filename: []const u8 = "../tests/mb_small.csv";
+    // const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -1718,10 +1721,11 @@ test "bench" {
     try boost_factors.append(1.0);
     try boost_factors.append(1.0);
 
-    const num_queries: usize = 5_00;
+    const num_queries: usize = 500;
 
     const start_time = std.time.milliTimestamp();
     for (0..num_queries) |_| {
+        print("Querying...\n", .{});
         try index_manager.query(
             query_map,
             10,
