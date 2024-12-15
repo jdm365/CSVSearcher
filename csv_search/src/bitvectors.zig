@@ -17,6 +17,8 @@ const MAX_NUM_TERMS         = 4096;
 const MAX_TERM_LENGTH       = 64;
 const MAX_NUM_RESULTS       = 1000;
 
+var HAMMING_RESULTS: [16]usize = undefined;
+
 
 inline fn sumBool(slice: []bool) usize {
     var sum: usize = 0;
@@ -143,9 +145,10 @@ pub fn BitVectorArray(
             self: *Self, 
             row_idx: usize,
             col_idx: usize,
+            u64_offset: usize,
             element_idx: usize,
             ) void {
-            const u64_idx = (row_idx * self.u64_stride) + @divFloor((self.bit_w * col_idx) + element_idx, 64);
+            const u64_idx = (row_idx * self.u64_stride) + u64_offset + @divFloor(self.bit_w * col_idx, 64) + @divFloor(element_idx, 64);
             const bit_idx = @mod(element_idx, 64);
             self.data[u64_idx] |= (@as(u64, 1) << @as(u6, @truncate(bit_idx)));
         }
@@ -162,16 +165,16 @@ pub fn BitVectorArray(
             // Assumes pointer is set correctly.
 
             var _hamming: usize = 0;
-            // inline for (0..self.u64_stride) |u64_idx| {
-                // _hamming += @popCount(query_vec[u64_idx] & (self.ptr + 8 * u64_idx).*);
-            // }
             // Cheating for now. TODO: Make the 1024 a comptime param.
             inline for (0..16) |u64_idx| {
-                _hamming += @popCount(query_vec[u64_idx] & self.ptr[8 * u64_idx]);
+                HAMMING_RESULTS[u64_idx] = @popCount(query_vec[u64_idx] & self.ptr[u64_idx]);
+            }
+            for (0..16) |idx| {
+                _hamming += HAMMING_RESULTS[idx];
             }
 
             // Update ptr
-            self.ptr += self.u64_stride;
+            self.ptr += self.byte_stride;
             return _hamming;
         }
     };
@@ -376,14 +379,25 @@ const BitVectorPartition = struct {
         doc_id: usize,
         col_idx: usize,
         ) void {
-        inline for (0..8) |idx| {
-            const insert_idx = @mod(
-                std.hash.Wyhash.hash(self.hash_seeds[idx], term), 128
-                ) + 128 * idx;
+
+        const base_hash = std.hash.Wyhash.hash(0, term);
+        var insert_idx = @mod(base_hash, 128);
+        self.II[col_idx].vectors.add(
+            doc_id,
+            col_idx,
+            0,
+            @as(usize, @intCast(insert_idx)),
+            );
+
+        inline for (1..8) |idx| {
+            const derived_hash = base_hash ^ self.hash_seeds[idx];
+            const u64_offset = idx * 2;
+            insert_idx = @mod(derived_hash, 128);
 
             self.II[col_idx].vectors.add(
                 doc_id,
                 col_idx,
+                u64_offset,
                 @as(usize, @intCast(insert_idx)),
                 );
         }
@@ -395,6 +409,7 @@ const BitVectorPartition = struct {
         vec: *[]u64,
         start_idx: usize,
         ) void {
+        // TODO: Make like hash above.
         inline for (0..8) |idx| {
             const insert_idx = @mod(
                 std.hash.Wyhash.hash(self.hash_seeds[idx], term), 128
@@ -406,19 +421,15 @@ const BitVectorPartition = struct {
         }
     }
 
-    fn addToken(
+    inline fn addToken(
         self: *BitVectorPartition,
         term: *[MAX_TERM_LENGTH]u8,
         cntr: *usize,
         doc_id: u32,
         col_idx: usize,
         new_doc: *bool,
-        byte_idx: *usize,
-    ) !void {
-        if (cntr.* == 0) {
-            byte_idx.* += 1;
-            return;
-        }
+    ) void {
+        if (cntr.* == 0) return;
 
         self.hash(
             term[0..cntr.*], 
@@ -427,7 +438,6 @@ const BitVectorPartition = struct {
             );
 
         cntr.* = 0;
-        byte_idx.* += 1;
         new_doc.* = false;
     }
 
@@ -441,94 +451,83 @@ const BitVectorPartition = struct {
         term: *[MAX_TERM_LENGTH]u8,
         max_byte: usize,
     ) !void {
-        // const start_byte = byte_idx.*;
+        const start_byte = byte_idx.*;
+        var bytes_read: usize = 0;
 
-        const is_quoted  = (token_stream.f_data[byte_idx.*] == '"');
-        byte_idx.* += @intFromBool(is_quoted);
+        const is_quoted  = (token_stream.f_data[start_byte] == '"');
+        bytes_read += @intFromBool(is_quoted);
 
         var cntr: usize = 0;
         var new_doc: bool = (doc_id != 0);
 
         if (is_quoted) {
 
-            while (true) {
-                // if (self.II[col_idx].doc_sizes[doc_id] >= MAX_NUM_TERMS) {
-                    // byte_idx.* = start_byte;
-                    // try token_stream.iterField(byte_idx);
-                    // return;
-                // }
-                std.debug.assert(byte_idx.* < max_byte);
+            // Consider making for loop.
+            while (start_byte + bytes_read < max_byte) {
 
-                if (token_stream.f_data[byte_idx.*] == '"') {
-                    byte_idx.* += 1;
+                if (token_stream.f_data[start_byte + bytes_read] == '"') {
+                    bytes_read += 1;
 
-                    if ((token_stream.f_data[byte_idx.*] == ',') or (token_stream.f_data[byte_idx.*] == '\n')) {
+                    if ((token_stream.f_data[start_byte + bytes_read] == ',') or (token_stream.f_data[start_byte + bytes_read] == '\n')) {
                         break;
                     }
 
                     // Double quote means escaped quote. Opt not to include in token for now.
-                    if (token_stream.f_data[byte_idx.*] == '"') {
-                        byte_idx.* += 1;
+                    if (token_stream.f_data[start_byte + bytes_read] == '"') {
+                        bytes_read += 1;
                         continue;
                     }
                 }
 
-                switch (token_stream.f_data[byte_idx.*]) {
-                    ' ' => try self.addToken(
+                switch (token_stream.f_data[start_byte + bytes_read]) {
+                    ' ' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '.' => try self.addToken(
+                    '.' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '-' => try self.addToken(
+                    '-' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '/' => try self.addToken(
+                    '/' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '+' => try self.addToken(
+                    '+' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '=' => try self.addToken(
+                    '=' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '&' => try self.addToken(
+                    '&' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
@@ -539,79 +538,70 @@ const BitVectorPartition = struct {
                                 );
 
                             cntr = 0;
-                            byte_idx.* += 1;
+                            bytes_read += 1;
                             continue;
                         }
-                        term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
+                        term[cntr] = std.ascii.toUpper(token_stream.f_data[start_byte + bytes_read]);
                         cntr += 1;
-                        byte_idx.* += 1;
                     }
                 }
+                bytes_read += 1;
             }
 
         } else {
 
-            while (true) {
-                std.debug.assert(byte_idx.* < max_byte);
-
-                switch (token_stream.f_data[byte_idx.*]) {
+            while (start_byte + bytes_read < max_byte) {
+                switch (token_stream.f_data[start_byte + bytes_read]) {
                     ',' => break,
                     '\n' => break,
-                    ' ' => try self.addToken(
+                    ' ' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '.' => try self.addToken(
+                    '.' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '-' => try self.addToken(
+                    '-' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '/' => try self.addToken(
+                    '/' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '+' => try self.addToken(
+                    '+' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '=' => try self.addToken(
+                    '=' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
-                    '&' => try self.addToken(
+                    '&' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
                         col_idx, 
                         &new_doc,
-                        byte_idx,
                         ),
                     else => {
                         if (cntr == MAX_TERM_LENGTH - 1) {
@@ -622,14 +612,14 @@ const BitVectorPartition = struct {
                                 );
 
                             cntr = 0;
-                            byte_idx.* += 1;
+                            bytes_read += 1;
                             continue;
                         }
-                        term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
+                        term[cntr] = std.ascii.toUpper(token_stream.f_data[start_byte + bytes_read]);
                         cntr += 1;
-                        byte_idx.* += 1;
                     }
                 }
+                bytes_read += 1;
             }
         }
 
@@ -641,7 +631,9 @@ const BitVectorPartition = struct {
                 );
         }
 
-        byte_idx.* += 1;
+        bytes_read += 1;
+
+        byte_idx.* += bytes_read;
     }
 
 
@@ -1726,7 +1718,7 @@ test "bench" {
     try boost_factors.append(1.0);
     try boost_factors.append(1.0);
 
-    const num_queries: usize = 5_000;
+    const num_queries: usize = 5_00;
 
     const start_time = std.time.milliTimestamp();
     for (0..num_queries) |_| {

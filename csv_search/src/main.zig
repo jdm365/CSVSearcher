@@ -530,8 +530,8 @@ const BM25Partition = struct {
         new_doc: *bool,
         byte_idx: *usize,
     ) !void {
+        byte_idx.* += 1;
         if (cntr.* == 0) {
-            byte_idx.* += 1;
             return;
         }
 
@@ -548,7 +548,6 @@ const BM25Partition = struct {
 
         term_pos.* += @intFromBool(term_pos.* != 255);
         cntr.* = 0;
-        byte_idx.* += 1;
     }
 
 
@@ -2271,6 +2270,6 @@ fn main_cli_runner() !void {
 }
 
 pub fn main() !void {
-    try main_cli_runner();
-    // try bench(false);
+    // try main_cli_runner();
+    try bench(false);
 }
