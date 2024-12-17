@@ -4,6 +4,10 @@
 const std = @import("std");
 const IndexManager = @import("main.zig").IndexManager;
 
+pub const progress = @import("progress.zig");
+pub const sorted_array = @import("sorted_array.zig");
+pub const server = @import("server.zig");
+
 
 test "build_index" {
     const filename: []const u8 = "../tests/mb_small.csv";

@@ -1,11 +1,14 @@
 const std = @import("std");
-const progress = @import("progress.zig");
-const sorted_array = @import("sorted_array.zig");
-const ScorePair = @import("sorted_array.zig");
 const builtin = @import("builtin");
-const TermPos = @import("server.zig").TermPos;
-const csvLineToJson = @import("server.zig").csvLineToJson;
-const csvLineToJsonScore = @import("server.zig").csvLineToJsonScore;
+
+const root = @import("../root.zig");
+
+const progress = root.progress;
+const sorted_array = root.sorted_array;
+const ScorePair = root.sorted_array.ScorePair;
+const TermPos = root.server.TermPos;
+const csvLineToJson = root.server.csvLineToJson;
+const csvLineToJsonScore = root.server.csvLineToJsonScore;
 const zap = @import("zap");
 
 const print = std.debug.print;
@@ -1161,8 +1164,8 @@ pub const IndexManager = struct {
 
         const num_lines = line_offsets.items.len - 1;
 
-        // const num_partitions = try std.Thread.getCpuCount();
-        const num_partitions = 1;
+        const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BitVectorPartition, num_partitions);
@@ -1677,8 +1680,8 @@ pub const QueryHandler = struct {
 
 
 test "bench" {
-    const filename: []const u8 = "../tests/mb_small.csv";
-    // const filename: []const u8 = "../tests/mb.csv";
+    // const filename: []const u8 = "../tests/mb_small.csv";
+    const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
