@@ -2,6 +2,8 @@ const std = @import("std");
 const parseRecordCSV = @import("main.zig").parseRecordCSV;
 const zap = @import("zap");
 
+const IndexManager    = @import("index_manager.zig").IndexManager;
+const MAX_NUM_RESULTS = @import("index_manager.zig").MAX_NUM_RESULTS;
 
 var float_buf: [1000][64]u8 = undefined;
 
@@ -73,6 +75,257 @@ pub fn csvLineToJsonScore(
 }
 
 
+pub const QueryHandler = struct {
+    index_manager: *IndexManager,
+    boost_factors: std.ArrayList(f32),
+    query_map: std.StringHashMap([]const u8),
+    allocator: std.mem.Allocator,
+    json_objects: std.ArrayList(std.json.Value),
+    output_buffer: std.ArrayList(u8),
+
+    pub fn init(
+        index_manager: *IndexManager,
+        boost_factors: std.ArrayList(f32),
+        query_map: std.StringHashMap([]const u8),
+        allocator: std.mem.Allocator,
+    ) !QueryHandler {
+        return QueryHandler{
+            .index_manager = index_manager,
+            .boost_factors = boost_factors,
+            .query_map = query_map,
+            .allocator = allocator,
+            .json_objects = try std.ArrayList(std.json.Value).initCapacity(allocator, MAX_NUM_RESULTS),
+            .output_buffer = try std.ArrayList(u8).initCapacity(allocator, 16384),
+        };
+    }
+
+    pub fn deinit(self: *QueryHandler) void {
+        for (self.json_objects.items) |*json| {
+            json.object.deinit();
+        }
+        self.json_objects.deinit();
+        self.output_buffer.deinit();
+    }
+
+    fn on_request(
+        self: *QueryHandler,
+        r: zap.Request,
+        ) !void {
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+
+        self.output_buffer.clearRetainingCapacity();
+        self.json_objects.clearRetainingCapacity();
+
+        const start = std.time.milliTimestamp();
+
+        if (r.query) |query| {
+            try parse_keys(
+                query,
+                self.query_map,
+                self.index_manager.string_arena.allocator(),
+            );
+
+            // Do search.
+            try self.index_manager.query(
+                self.query_map,
+                10,
+                self.boost_factors,
+                );
+
+            for (0..10) |idx| {
+                try self.json_objects.append(try csvLineToJsonScore(
+                    self.index_manager.string_arena.allocator(),
+                    self.index_manager.result_strings[idx].items,
+                    self.index_manager.result_positions[idx],
+                    self.index_manager.cols,
+                    self.index_manager.results_arrays[0].items[idx].score,
+                    idx,
+                    ));
+            }
+            const end = std.time.milliTimestamp();
+            const time_taken_ms = end - start;
+
+            var response = std.json.Value{
+                .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
+            };
+            defer response.object.deinit();
+
+            try response.object.put(
+                "results",
+                std.json.Value{ .array = self.json_objects },
+            );
+            try response.object.put(
+                "time_taken_ms",
+                std.json.Value{ .integer = time_taken_ms },
+            );
+
+            std.json.stringify(
+                response,
+                .{},
+                self.output_buffer.writer(),
+            ) catch unreachable;
+
+            r.sendJson(self.output_buffer.items) catch return;
+        }
+    }
+
+    fn get_columns(
+        self: *QueryHandler,
+        r: zap.Request,
+    ) !void {
+        if (r.path == null) {
+            std.debug.print("Request is null\n", .{});
+            return;
+        }
+
+        r.setHeader("Access-Control-Allow-Origin", "*") catch |err| {
+            std.debug.print("Error setting header: {?}\n", .{err});
+        };
+
+        self.output_buffer.clearRetainingCapacity();
+
+        var response = std.json.Value{
+            .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
+        };
+
+        var json_cols = try std.ArrayList(std.json.Value).initCapacity(
+            self.allocator, 
+            self.index_manager.cols.items.len
+            );
+        defer json_cols.deinit();
+
+        for (self.index_manager.cols.items) |col| {
+            try json_cols.append(std.json.Value{
+                .string = col,
+            });
+        }
+
+        // Swap search_cols to be first.
+        var cntr: usize = 0;
+        var iterator = self.index_manager.search_cols.iterator();
+        while (iterator.next()) |item| {
+            const csv_idx = item.value_ptr.*.csv_idx;
+
+            const tmp = json_cols.items[csv_idx];
+            json_cols.items[csv_idx] = json_cols.items[cntr];
+            json_cols.items[cntr] = tmp;
+
+            cntr += 1;
+        }
+        try json_cols.append(std.json.Value{
+            .string = "SCORE",
+        });
+        const csv_idx = json_cols.items.len - 1;
+        const tmp = json_cols.items[csv_idx];
+        json_cols.items[csv_idx] = json_cols.items[cntr];
+        json_cols.items[cntr] = tmp;
+        
+
+        try response.object.put(
+            "columns",
+            std.json.Value{ .array = json_cols },
+        );
+
+        std.json.stringify(
+            response,
+            .{},
+            self.output_buffer.writer(),
+        ) catch unreachable;
+
+        r.sendJson(self.output_buffer.items) catch return;
+    }
+
+    fn get_search_columns(
+        self: *QueryHandler,
+        r: zap.Request,
+    ) !void {
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+
+        self.output_buffer.clearRetainingCapacity();
+
+        var response = std.json.Value{
+            .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
+        };
+
+        var json_cols = try std.ArrayList(std.json.Value).initCapacity(
+            self.allocator, 
+            self.index_manager.search_cols.count(),
+            );
+        defer json_cols.deinit();
+
+        var iterator = self.index_manager.search_cols.iterator();
+        while (iterator.next()) |item| {
+            try json_cols.append(std.json.Value{
+                .string = item.key_ptr.*,
+            });
+        }
+
+
+        try response.object.put(
+            "columns",
+            std.json.Value{ .array = json_cols },
+        );
+
+        std.json.stringify(
+            response,
+            .{},
+            self.output_buffer.writer(),
+        ) catch unreachable;
+
+        r.sendJson(self.output_buffer.items) catch return;
+    }
+
+    fn healthcheck(r: zap.Request) void {
+        r.setStatus(zap.StatusCode.ok);
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        // r.markAsFinished(true);
+        r.sendBody("") catch {};
+    }
+
+    fn parse_keys(
+        raw_string: []const u8,
+        query_map: std.StringHashMap([]const u8),
+        allocator: std.mem.Allocator,
+    ) !void {
+        // Format key=value&key=value
+        var scratch_buffer: [4096]u8 = undefined;
+        var count: usize = 0;
+        var idx: usize = 0;
+
+        while (idx < raw_string.len) {
+            if (raw_string[idx] == '=') {
+                idx += 1;
+
+                const result = query_map.getPtr(scratch_buffer[0..count]);
+
+                count = 0;
+                while ((idx < raw_string.len) and (raw_string[idx] != '&')) {
+                    if (raw_string[idx] == '+') {
+                        scratch_buffer[count] = ' ';
+                        count += 1;
+                        idx += 1;
+                        continue;
+                    }
+                    scratch_buffer[count] = std.ascii.toUpper(raw_string[idx]);
+                    count += 1;
+                    idx   += 1;
+                }
+                if (result != null) {
+                    const value_copy = try allocator.dupe(u8, scratch_buffer[0..count]);
+                    result.?.* = value_copy;
+                }
+                count = 0;
+                idx += 1;
+                continue;
+            }
+            scratch_buffer[count] = std.ascii.toUpper(raw_string[idx]);
+            count += 1;
+            idx   += 1;
+        }
+    }
+};
+
+
 test "csv_parse" {
     const csv_line = "26859,13859,1,1,WoM27813813,006,Under My Skin (You Go To My Head (Set One)),02:44,David McAlmont,You_Go_To_My_Head_(Set_One),2005,,";
 
@@ -138,31 +391,3 @@ test "csv_parse" {
         std.debug.print("Column: {s}, Value: {s}\n\n", .{column_name, field_value});
     }
 }
-
-// fn on_request(r: zap.Request) void {
-//     if (r.path) |the_path| {
-//         std.debug.print("PATH: {s}\n", .{the_path});
-//     }
-// 
-//     if (r.query) |the_query| {
-//         std.debug.print("QUERY: {s}\n", .{the_query});
-//     }
-//     r.sendBody("<html><body><h1>Hello from ZAP!!!</h1></body></html>") catch return;
-// }
-// 
-// test "client" {
-//     var listener = zap.HttpListener.init(.{
-//         .port = 5000,
-//         .on_request = on_request,
-//         .log = true,
-//     });
-//     try listener.listen();
-// 
-//     std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
-// 
-//     // start worker threads
-//     zap.start(.{
-//         .threads = 1,
-//         .workers = 1,
-//     });
-// }
