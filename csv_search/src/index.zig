@@ -211,6 +211,15 @@ pub const BM25Partition = struct {
         max_byte: usize,
         terms_seen: *StaticIntegerSet(MAX_NUM_TERMS),
     ) !void {
+        if (byte_idx.* == max_byte) {
+            try token_stream.addToken(
+                true,
+                std.math.maxInt(u7),
+                std.math.maxInt(u24),
+            );
+            return;
+        }
+
         const start_byte = byte_idx.*;
 
         var term_pos: u8 = 0;
@@ -231,7 +240,11 @@ pub const BM25Partition = struct {
                     try token_stream.iterFieldCSV(byte_idx);
                     return;
                 }
-                std.debug.assert(byte_idx.* < max_byte);
+                // std.debug.assert(byte_idx.* <= max_byte);
+                if (byte_idx.* > max_byte) {
+                    std.debug.print("Byte idx: {d} | Max byte: {d}\n", .{byte_idx.*, max_byte});
+                    @panic("byte_idx.* > max_byte");
+                }
 
                 if (token_stream.f_data[byte_idx.*] > 127) {
                     var local_cntr: usize = 0;
@@ -306,7 +319,11 @@ pub const BM25Partition = struct {
 
             while (true) {
                 std.debug.assert(self.II[col_idx].doc_sizes[doc_id] < MAX_NUM_TERMS);
-                std.debug.assert(byte_idx.* < max_byte);
+                // std.debug.assert(byte_idx.* <= max_byte);
+                if (byte_idx.* > max_byte) {
+                    std.debug.print("Byte idx: {d} | Max byte: {d}\n", .{byte_idx.*, max_byte});
+                    @panic("byte_idx.* > max_byte");
+                }
 
                 if (token_stream.f_data[byte_idx.*] > 127) {
                     var local_cntr: usize = 0;

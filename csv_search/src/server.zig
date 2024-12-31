@@ -107,7 +107,7 @@ pub const QueryHandler = struct {
         self.output_buffer.deinit();
     }
 
-    fn on_request(
+    pub fn on_request(
         self: *QueryHandler,
         r: zap.Request,
         ) !void {
@@ -169,7 +169,7 @@ pub const QueryHandler = struct {
         }
     }
 
-    fn get_columns(
+    pub fn get_columns(
         self: *QueryHandler,
         r: zap.Request,
     ) !void {
@@ -235,7 +235,7 @@ pub const QueryHandler = struct {
         r.sendJson(self.output_buffer.items) catch return;
     }
 
-    fn get_search_columns(
+    pub fn get_search_columns(
         self: *QueryHandler,
         r: zap.Request,
     ) !void {
@@ -275,14 +275,14 @@ pub const QueryHandler = struct {
         r.sendJson(self.output_buffer.items) catch return;
     }
 
-    fn healthcheck(r: zap.Request) void {
+    pub fn healthcheck(r: zap.Request) void {
         r.setStatus(zap.StatusCode.ok);
         r.setHeader("Access-Control-Allow-Origin", "*") catch {};
         // r.markAsFinished(true);
         r.sendBody("") catch {};
     }
 
-    fn parse_keys(
+    pub fn parse_keys(
         raw_string: []const u8,
         query_map: std.StringHashMap([]const u8),
         allocator: std.mem.Allocator,

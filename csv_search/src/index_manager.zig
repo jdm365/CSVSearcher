@@ -21,7 +21,7 @@ const ScorePair        = @import("sorted_array.zig").ScorePair;
 
 const AtomicCounter = std.atomic.Value(u64);
 
-const MAX_NUM_RESULTS     = 1000;
+pub const MAX_NUM_RESULTS     = 1000;
 const IDF_THRESHOLD: f32  = 1.0 + std.math.log2(100);  // If term occurs in more than 1% of documents don't create new docs for it.
 
 const Column = struct {
@@ -404,7 +404,7 @@ pub const IndexManager = struct {
                     try token_streams[0].iterFieldCSV(&line_offset);
                 }
 
-                std.debug.assert(line_offset < next_line_offset);
+                std.debug.assert(line_offset <= next_line_offset);
                 try self.index_partitions[partition_idx].processDocRfc4180(
                     &token_streams[search_col_idx],
                     @intCast(doc_id), 
@@ -458,6 +458,13 @@ pub const IndexManager = struct {
 
         try line_offsets.append(file_pos);
         while (file_pos < file_size - 1) {
+            if (f_data[file_pos] > 127) {
+                while (f_data[file_pos] > 127) {
+                    file_pos += 1;
+                }
+                file_pos += 1;
+                continue;
+            }
 
             switch (f_data[file_pos]) {
                 '"' => {
@@ -465,6 +472,18 @@ pub const IndexManager = struct {
                     file_pos += 1;
 
                     while (true) {
+                        if (f_data[file_pos] > 127) {
+                            var local_cntr: usize = 0;
+                            while (f_data[file_pos] > 127) {
+                                file_pos += 1;
+                                local_cntr += 1;
+                                if (local_cntr > 100) {
+                                    std.debug.print("Error: {d}\n", .{f_data[file_pos]});
+                                }
+                            }
+                            file_pos += 1;
+                            continue;
+                        }
 
                         if (f_data[file_pos] == '"') {
                             // Escape quote. Continue to next character.
@@ -484,11 +503,13 @@ pub const IndexManager = struct {
                 '\n' => {
                     file_pos += 1;
                     try line_offsets.append(file_pos);
+                    std.debug.assert(line_offsets.items[line_offsets.items.len - 1] > line_offsets.items[line_offsets.items.len - 2]);
                 },
                 else => file_pos += 1,
             }
         }
         try line_offsets.append(file_size);
+        std.debug.assert(line_offsets.items[line_offsets.items.len - 1] > line_offsets.items[line_offsets.items.len - 2]);
 
         const end_time = std.time.milliTimestamp();
         const execution_time_ms = end_time - start_time;

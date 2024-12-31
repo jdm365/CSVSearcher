@@ -15,6 +15,16 @@ pub fn iterFieldCSV(buffer: []const u8, byte_pos: *usize) !void {
     byte_pos.* += @intFromBool(is_quoted);
 
     while (true) {
+
+        if (buffer[byte_pos.*] > 127) {
+            while (buffer[byte_pos.*] > 127) {
+                byte_pos.* += 1;
+            }
+
+            byte_pos.* += 1;
+            continue;
+        }
+
         if (is_quoted) {
 
             if (buffer[byte_pos.*] == '"') {
@@ -141,6 +151,15 @@ pub const TokenStream = struct {
         byte_pos.* += @intFromBool(is_quoted);
         
         while (true) {
+            if (self.f_data[byte_pos.*] > 127) {
+                while (self.f_data[byte_pos.*] > 127) {
+                    byte_pos.* += 1;
+                }
+
+                byte_pos.* += 1;
+                continue;
+            }
+
             if (is_quoted) {
 
                 if (self.f_data[byte_pos.*] == '"') {

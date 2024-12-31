@@ -229,6 +229,6 @@ fn main_cli_runner() !void {
 }
 
 pub fn main() !void {
-    // try main_cli_runner();
-    try bench(false);
+    try main_cli_runner();
+    // try bench(false);
 }
