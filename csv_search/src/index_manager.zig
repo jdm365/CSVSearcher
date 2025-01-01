@@ -216,17 +216,17 @@ pub const IndexManager = struct {
         }
 
 
-        var byte_pos: usize = 0;
+        var byte_idx: usize = 0;
         line: while (true) {
-            const is_quoted = f_data[byte_pos] == '"';
-            byte_pos += @intFromBool(is_quoted);
+            const is_quoted = f_data[byte_idx] == '"';
+            byte_idx += @intFromBool(is_quoted);
 
             while (true) {
                 if (is_quoted) {
 
-                    if (f_data[byte_pos] == '"') {
-                        byte_pos += 2;
-                        if (f_data[byte_pos - 1] != '"') {
+                    if (f_data[byte_idx] == '"') {
+                        byte_idx += 2;
+                        if (f_data[byte_idx - 1] != '"') {
                             // ADD TERM
                             try cols.append(
                                 try string_arena.dupe(u8, term[0..cntr])
@@ -247,20 +247,20 @@ pub const IndexManager = struct {
                                 }
                             }
                             cntr = 0;
-                            byte_pos += 1;
+                            byte_idx += 1;
                             col_idx += 1;
                             continue :line;
                         }
                     } else {
                         // Add char.
-                        term[cntr] = std.ascii.toUpper(f_data[byte_pos]);
+                        term[cntr] = std.ascii.toUpper(f_data[byte_idx]);
                         cntr += 1;
-                        byte_pos += 1;
+                        byte_idx += 1;
                     }
 
                 } else {
 
-                    switch (f_data[byte_pos]) {
+                    switch (f_data[byte_idx]) {
                         ',' => {
                             // ADD TERM.
                             try cols.append(
@@ -282,7 +282,7 @@ pub const IndexManager = struct {
                                 }
                             }
                             cntr = 0;
-                            byte_pos += 1;
+                            byte_idx += 1;
                             col_idx += 1;
                             continue :line;
                         },
@@ -305,14 +305,14 @@ pub const IndexManager = struct {
                                     break;
                                 }
                             }
-                            num_bytes.* = byte_pos + 1;
+                            num_bytes.* = byte_idx + 1;
                             return col_map;
                         },
                         else => {
                             // Add char
-                            term[cntr] = std.ascii.toUpper(f_data[byte_pos]);
+                            term[cntr] = std.ascii.toUpper(f_data[byte_idx]);
                             cntr += 1;
-                            byte_pos += 1;
+                            byte_idx += 1;
                         }
                     }
                 }
@@ -321,7 +321,7 @@ pub const IndexManager = struct {
             col_idx += 1;
         }
 
-        num_bytes.* = byte_pos;
+        num_bytes.* = byte_idx;
     }
         
 
@@ -401,10 +401,10 @@ pub const IndexManager = struct {
             while (search_col_idx < num_search_cols) {
 
                 for (prev_col..search_col_idxs[search_col_idx]) |_| {
-                    try token_streams[0].iterFieldCSV(&line_offset);
+                    token_streams[0].iterFieldCSV(&line_offset);
                 }
 
-                std.debug.assert(line_offset <= next_line_offset);
+                std.debug.assert(line_offset < next_line_offset);
                 try self.index_partitions[partition_idx].processDocRfc4180(
                     &token_streams[search_col_idx],
                     @intCast(doc_id), 
@@ -458,66 +458,19 @@ pub const IndexManager = struct {
 
         try line_offsets.append(file_pos);
         while (file_pos < file_size - 1) {
-            if (f_data[file_pos] > 127) {
-                while (f_data[file_pos] > 127) {
-                    file_pos += 1;
-                }
-                file_pos += 1;
-                continue;
-            }
-
-            switch (f_data[file_pos]) {
-                '"' => {
-                    // Iter over quote
-                    file_pos += 1;
-
-                    while (true) {
-                        if (f_data[file_pos] > 127) {
-                            var local_cntr: usize = 0;
-                            while (f_data[file_pos] > 127) {
-                                file_pos += 1;
-                                local_cntr += 1;
-                                if (local_cntr > 100) {
-                                    std.debug.print("Error: {d}\n", .{f_data[file_pos]});
-                                }
-                            }
-                            file_pos += 1;
-                            continue;
-                        }
-
-                        if (f_data[file_pos] == '"') {
-                            // Escape quote. Continue to next character.
-                            if (f_data[file_pos + 1] == '"') {
-                                file_pos += 2;
-                                continue;
-                            }
-
-                            // Iter over quote.
-                            file_pos += 1;
-                            break;
-                        }
-
-                        file_pos += 1;
-                    }
-                },
-                '\n' => {
-                    file_pos += 1;
-                    try line_offsets.append(file_pos);
-                    std.debug.assert(line_offsets.items[line_offsets.items.len - 1] > line_offsets.items[line_offsets.items.len - 2]);
-                },
-                else => file_pos += 1,
-            }
+            csv.iterLineCSV(f_data, &file_pos);
+            try line_offsets.append(file_pos);
         }
         try line_offsets.append(file_size);
-        std.debug.assert(line_offsets.items[line_offsets.items.len - 1] > line_offsets.items[line_offsets.items.len - 2]);
 
         const end_time = std.time.milliTimestamp();
         const execution_time_ms = end_time - start_time;
         const mb_s: usize = @as(usize, @intFromFloat(0.001 * @as(f32, @floatFromInt(file_size)) / @as(f32, @floatFromInt(execution_time_ms))));
 
-        const num_lines = line_offsets.items.len - 1;
+        const num_lines = line_offsets.items.len - 2;
 
         const num_partitions = try std.Thread.getCpuCount();
+        // const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BM25Partition, num_partitions);
@@ -606,7 +559,7 @@ pub const IndexManager = struct {
         }
 
         const _total_docs_read = total_docs_read.load(.acquire);
-        std.debug.assert(_total_docs_read == line_offsets.items.len - 1);
+        std.debug.assert(_total_docs_read == num_lines);
         progress_bar.update(_total_docs_read);
 
         const time_end = std.time.milliTimestamp();

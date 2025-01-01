@@ -485,49 +485,7 @@ const BitVectorPartition = struct {
                 }
 
                 switch (token_stream.f_data[start_byte + bytes_read]) {
-                    ' ' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '.' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '-' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '/' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '+' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '=' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '&' => self.addToken(
+                    ' ', '.', '-', '/', '+', '=', '&' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
@@ -557,51 +515,8 @@ const BitVectorPartition = struct {
 
             while (start_byte + bytes_read < max_byte) {
                 switch (token_stream.f_data[start_byte + bytes_read]) {
-                    ',' => break,
-                    '\n' => break,
-                    ' ' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '.' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '-' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '/' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '+' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '=' => self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        col_idx, 
-                        &new_doc,
-                        ),
-                    '&' => self.addToken(
+                    ',', '\n', => break,
+                    ' ', '.', '-', '/', '+', '=', '&' => self.addToken(
                         term, 
                         &cntr, 
                         doc_id, 
@@ -1164,8 +1079,8 @@ pub const IndexManager = struct {
 
         const num_lines = line_offsets.items.len - 1;
 
-        const num_partitions = try std.Thread.getCpuCount();
-        // const num_partitions = 1;
+        // const num_partitions = try std.Thread.getCpuCount();
+        const num_partitions = 1;
 
         self.file_handles = try self.allocator.alloc(std.fs.File, num_partitions);
         self.index_partitions = try self.allocator.alloc(BitVectorPartition, num_partitions);

@@ -111,7 +111,7 @@ pub const QueryHandler = struct {
         self: *QueryHandler,
         r: zap.Request,
         ) !void {
-        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        // r.setHeader("Access-Control-Allow-Origin", "*") catch {};
 
         self.output_buffer.clearRetainingCapacity();
         self.json_objects.clearRetainingCapacity();
@@ -178,9 +178,9 @@ pub const QueryHandler = struct {
             return;
         }
 
-        r.setHeader("Access-Control-Allow-Origin", "*") catch |err| {
-            std.debug.print("Error setting header: {?}\n", .{err});
-        };
+        // r.setHeader("Access-Control-Allow-Origin", "*") catch |err| {
+            // std.debug.print("Error setting header: {?}\n", .{err});
+        // };
 
         self.output_buffer.clearRetainingCapacity();
 
@@ -239,7 +239,7 @@ pub const QueryHandler = struct {
         self: *QueryHandler,
         r: zap.Request,
     ) !void {
-        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        // r.setHeader("Access-Control-Allow-Origin", "*") catch {};
 
         self.output_buffer.clearRetainingCapacity();
 
@@ -277,7 +277,7 @@ pub const QueryHandler = struct {
 
     pub fn healthcheck(r: zap.Request) void {
         r.setStatus(zap.StatusCode.ok);
-        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        // r.setHeader("Access-Control-Allow-Origin", "*") catch {};
         // r.markAsFinished(true);
         r.sendBody("") catch {};
     }
