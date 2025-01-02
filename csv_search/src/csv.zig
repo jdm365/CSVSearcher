@@ -85,6 +85,34 @@ pub inline fn _iterFieldCSV(buffer: []const u8, byte_idx: *usize) void {
 }
 
 
+// pub inline fn iterLineCSV(buffer: []const u8, byte_idx: *usize) void {
+    // // Iterate to next line in compliance with RFC 4180.
+    // while (true) {
+        // // switch (iterUTF8(buffer, byte_idx)) {
+        // byte_idx.* += 1;
+// 
+        // switch (buffer[byte_idx.* - 1]) {
+            // '"' => {
+                // while (true) {
+                    // // if (iterUTF8(buffer, byte_idx) == '"') {
+                    // byte_idx.* += 1;
+                    // if (buffer[byte_idx.* - 1] == '"') {
+                        // if (buffer[byte_idx.*] == '"') {
+                            // byte_idx.* += 1;
+                            // continue;
+                        // }
+                        // break;
+                    // }
+                // }
+            // },
+            // '\n' => {
+                // return;
+            // },
+            // else => {},
+        // }
+    // }
+// }
+
 pub inline fn iterLineCSV(buffer: []const u8, byte_idx: *usize) void {
     // Iterate to next line in compliance with RFC 4180.
     while (true) {
