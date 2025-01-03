@@ -3,27 +3,9 @@ const builtin = @import("builtin");
 
 const zap = @import("zap");
 
-const progress = @import("progress.zig");
+const QueryHandler = @import("server.zig").QueryHandler;
 
-const SortedScoreArray = @import("sorted_array.zig").SortedScoreArray;
-const ScorePair        = @import("sorted_array.zig").ScorePair;
-
-const TermPos            = @import("server.zig").TermPos;
-const csvLineToJson      = @import("server.zig").csvLineToJson;
-const csvLineToJsonScore = @import("server.zig").csvLineToJsonScore;
-const QueryHandler       = @import("server.zig").QueryHandler;
-
-const InvertedIndex    = @import("index.zig").InvertedIndex;
-const BM25Partition    = @import("index.zig").BM25Partition;
-const QueryResult      = @import("index.zig").QueryResult;
-const ScoringInfo      = @import("index.zig").ScoringInfo;
-const MAX_TERM_LENGTH  = @import("index.zig").MAX_TERM_LENGTH;
-const MAX_NUM_TERMS    = @import("index.zig").MAX_NUM_TERMS;
-
-const IndexManager    = @import("index_manager.zig").IndexManager;
-const MAX_NUM_RESULTS = @import("index_manager.zig").MAX_NUM_RESULTS;
-
-const StaticIntegerSet = @import("static_integer_set.zig").StaticIntegerSet;
+const IndexManager = @import("index_manager.zig").IndexManager;
 
 
 fn bench(testing: bool) !void {
@@ -228,18 +210,35 @@ fn main_cli_runner() !void {
     });
 }
 
+fn not_found(req: zap.Request) void {
+    std.debug.print("not found handler", .{});
+    req.sendBody("Not found") catch return;
+}
+
+fn on_request_verbose(r: zap.Request) void {
+    if (r.path) |the_path| {
+        std.debug.print("PATH: {s}\n", .{the_path});
+    }
+
+    if (r.query) |the_query| {
+        std.debug.print("QUERY: {s}\n", .{the_query});
+    }
+    r.sendBody("<html><body><h1>Hello from ZAP!!!</h1></body></html>") catch return;
+}
+
 fn server_test() !void {
     // Embed files
     const index_html = @embedFile("index.html");
     const style_css = @embedFile("style.css");
     const table_js = @embedFile("table.js");
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{.thread_safe = true}){};
     const allocator = gpa.allocator();
 
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
+    // const filename: []const u8 = "../tests/mb.csv";
     const filename: []const u8 = "../tests/mb_small.csv";
 
     var search_cols = std.ArrayList([]u8).init(allocator);
@@ -308,9 +307,10 @@ fn server_test() !void {
 
     var simple_router = zap.Router.init(
         allocator, 
-        .{},
+        .{.not_found = not_found},
         );
 
+    try simple_router.handle_func_unbound("/", on_request_verbose);
     try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
     try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
     try simple_router.handle_func("/get_search_columns", &query_handler, &QueryHandler.get_search_columns);
@@ -357,6 +357,7 @@ fn server_test() !void {
         .threads = 1,
         .workers = 1,
     });
+
 }
 
 pub fn main() !void {

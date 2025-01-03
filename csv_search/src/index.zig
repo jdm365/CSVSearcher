@@ -280,7 +280,7 @@ pub const BM25Partition = struct {
                 }
 
                 // switch (csv.readUTF8(token_stream.f_data, term, byte_idx, &cntr, true)) {
-                term[cntr] = token_stream.f_data[byte_idx.*];
+                term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
                 cntr += 1;
                 byte_idx.* += 1;
                 switch (term[cntr - 1]) {
@@ -293,16 +293,19 @@ pub const BM25Partition = struct {
                             else => return error.UnexpectedQuote,
                         }
                     },
-                    0...33, 35...47, 58...64, 91...96, 123...126 => try self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        &term_pos, 
-                        col_idx, 
-                        token_stream, 
-                        terms_seen,
-                        &new_doc,
-                        ),
+                    0...33, 35...47, 58...64, 91...96, 123...126 => {
+                        cntr -= 1;
+                        try self.addToken(
+                            term, 
+                            &cntr, 
+                            doc_id, 
+                            &term_pos, 
+                            col_idx, 
+                            token_stream, 
+                            terms_seen,
+                            &new_doc,
+                            );
+                    },
                     else => {},
                 }
             }
@@ -328,21 +331,24 @@ pub const BM25Partition = struct {
                 }
 
                 // switch (csv.readUTF8(token_stream.f_data, term, byte_idx, &cntr, true)) {
-                term[cntr] = token_stream.f_data[byte_idx.*];
+                term[cntr] = std.ascii.toUpper(token_stream.f_data[byte_idx.*]);
                 cntr += 1;
                 byte_idx.* += 1;
                 switch (term[cntr - 1]) {
                     ',', '\n' => break :outer_loop,
-                    0...9, 11...43, 45...47, 58...64, 91...96, 123...126 => try self.addToken(
-                        term, 
-                        &cntr, 
-                        doc_id, 
-                        &term_pos, 
-                        col_idx, 
-                        token_stream, 
-                        terms_seen,
-                        &new_doc,
-                        ),
+                    0...9, 11...43, 45...47, 58...64, 91...96, 123...126 => {
+                        cntr -= 1;
+                        try self.addToken(
+                            term, 
+                            &cntr, 
+                            doc_id, 
+                            &term_pos, 
+                            col_idx, 
+                            token_stream, 
+                            terms_seen,
+                            &new_doc,
+                            );
+                    },
                     else => {},
                 }
             }

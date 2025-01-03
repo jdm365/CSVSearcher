@@ -650,7 +650,10 @@ pub const IndexManager = struct {
             }
         }
 
-        if (empty_query) return;
+        if (empty_query) {
+            std.debug.print("EMPTY QUERY\n", .{}); 
+            return;
+        }
 
         // For each token in each II, get relevant docs and add to score.
         var doc_scores: *std.AutoHashMap(u32, ScoringInfo) = &self.index_partitions[partition_idx].doc_score_map;

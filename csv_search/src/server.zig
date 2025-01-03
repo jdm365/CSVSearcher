@@ -1,5 +1,5 @@
 const std = @import("std");
-const parseRecordCSV = @import("main.zig").parseRecordCSV;
+const parseRecordCSV = @import("csv.zig").parseRecordCSV;
 const zap = @import("zap");
 
 const IndexManager    = @import("index_manager.zig").IndexManager;
@@ -110,8 +110,8 @@ pub const QueryHandler = struct {
     pub fn on_request(
         self: *QueryHandler,
         r: zap.Request,
-        ) !void {
-        // r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        ) void {
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
 
         self.output_buffer.clearRetainingCapacity();
         self.json_objects.clearRetainingCapacity();
@@ -119,28 +119,33 @@ pub const QueryHandler = struct {
         const start = std.time.milliTimestamp();
 
         if (r.query) |query| {
-            try parse_keys(
+            // try parse_keys(
+                // query,
+                // self.query_map,
+                // self.index_manager.string_arena.allocator(),
+            // );
+            parse_keys(
                 query,
                 self.query_map,
                 self.index_manager.string_arena.allocator(),
-            );
+            ) catch return;
 
             // Do search.
-            try self.index_manager.query(
+            self.index_manager.query(
                 self.query_map,
                 10,
                 self.boost_factors,
-                );
+                ) catch return;
 
             for (0..10) |idx| {
-                try self.json_objects.append(try csvLineToJsonScore(
+                self.json_objects.append(csvLineToJsonScore(
                     self.index_manager.string_arena.allocator(),
                     self.index_manager.result_strings[idx].items,
                     self.index_manager.result_positions[idx],
                     self.index_manager.cols,
                     self.index_manager.results_arrays[0].items[idx].score,
                     idx,
-                    ));
+                    ) catch return) catch return;
             }
             const end = std.time.milliTimestamp();
             const time_taken_ms = end - start;
@@ -150,14 +155,14 @@ pub const QueryHandler = struct {
             };
             defer response.object.deinit();
 
-            try response.object.put(
+            response.object.put(
                 "results",
                 std.json.Value{ .array = self.json_objects },
-            );
-            try response.object.put(
+            ) catch return;
+            response.object.put(
                 "time_taken_ms",
                 std.json.Value{ .integer = time_taken_ms },
-            );
+            ) catch return;
 
             std.json.stringify(
                 response,
@@ -172,15 +177,10 @@ pub const QueryHandler = struct {
     pub fn get_columns(
         self: *QueryHandler,
         r: zap.Request,
-    ) !void {
-        if (r.path == null) {
-            std.debug.print("Request is null\n", .{});
-            return;
-        }
-
-        // r.setHeader("Access-Control-Allow-Origin", "*") catch |err| {
-            // std.debug.print("Error setting header: {?}\n", .{err});
-        // };
+    ) void {
+        r.setHeader("Access-Control-Allow-Origin", "*") catch |err| {
+            std.debug.print("Error setting header: {?}\n", .{err});
+        };
 
         self.output_buffer.clearRetainingCapacity();
 
@@ -188,16 +188,16 @@ pub const QueryHandler = struct {
             .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
         };
 
-        var json_cols = try std.ArrayList(std.json.Value).initCapacity(
+        var json_cols = std.ArrayList(std.json.Value).initCapacity(
             self.allocator, 
             self.index_manager.cols.items.len
-            );
+            ) catch return;
         defer json_cols.deinit();
 
         for (self.index_manager.cols.items) |col| {
-            try json_cols.append(std.json.Value{
+            json_cols.append(std.json.Value{
                 .string = col,
-            });
+            }) catch return;
         }
 
         // Swap search_cols to be first.
@@ -212,19 +212,19 @@ pub const QueryHandler = struct {
 
             cntr += 1;
         }
-        try json_cols.append(std.json.Value{
+        json_cols.append(std.json.Value{
             .string = "SCORE",
-        });
+        }) catch return;
         const csv_idx = json_cols.items.len - 1;
         const tmp = json_cols.items[csv_idx];
         json_cols.items[csv_idx] = json_cols.items[cntr];
         json_cols.items[cntr] = tmp;
         
 
-        try response.object.put(
+        response.object.put(
             "columns",
             std.json.Value{ .array = json_cols },
-        );
+        ) catch return;
 
         std.json.stringify(
             response,
@@ -238,8 +238,10 @@ pub const QueryHandler = struct {
     pub fn get_search_columns(
         self: *QueryHandler,
         r: zap.Request,
-    ) !void {
-        // r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+    ) void {
+        r.setHeader("Access-Control-Allow-Origin", "*") catch |err| {
+            std.debug.print("Error setting header: {?}\n", .{err});
+        };
 
         self.output_buffer.clearRetainingCapacity();
 
@@ -247,24 +249,24 @@ pub const QueryHandler = struct {
             .object = std.StringArrayHashMap(std.json.Value).init(self.allocator),
         };
 
-        var json_cols = try std.ArrayList(std.json.Value).initCapacity(
+        var json_cols = std.ArrayList(std.json.Value).initCapacity(
             self.allocator, 
             self.index_manager.search_cols.count(),
-            );
+            ) catch unreachable;
         defer json_cols.deinit();
 
         var iterator = self.index_manager.search_cols.iterator();
         while (iterator.next()) |item| {
-            try json_cols.append(std.json.Value{
+            json_cols.append(std.json.Value{
                 .string = item.key_ptr.*,
-            });
+            }) catch @panic("This part failed\n");
         }
 
 
-        try response.object.put(
+        response.object.put(
             "columns",
             std.json.Value{ .array = json_cols },
-        );
+        ) catch @panic("put failed");
 
         std.json.stringify(
             response,
@@ -272,13 +274,13 @@ pub const QueryHandler = struct {
             self.output_buffer.writer(),
         ) catch unreachable;
 
-        r.sendJson(self.output_buffer.items) catch return;
+        r.sendJson(self.output_buffer.items) catch unreachable;
     }
 
-    pub fn healthcheck(r: zap.Request) void {
+    pub fn healthcheck(_: *QueryHandler, r: zap.Request) void {
         r.setStatus(zap.StatusCode.ok);
-        // r.setHeader("Access-Control-Allow-Origin", "*") catch {};
-        // r.markAsFinished(true);
+        r.setHeader("Access-Control-Allow-Origin", "*") catch {};
+        r.markAsFinished(true);
         r.sendBody("") catch {};
     }
 
