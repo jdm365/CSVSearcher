@@ -651,7 +651,7 @@ pub const IndexManager = struct {
         }
 
         if (empty_query) {
-            std.debug.print("EMPTY QUERY\n", .{}); 
+            // std.debug.print("EMPTY QUERY\n", .{}); 
             return;
         }
 
@@ -826,7 +826,8 @@ pub const IndexManager = struct {
                 result,
                 @constCast(&self.result_strings[idx]),
             );
-            // std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, self.results_arrays[0].items[idx].score, self.results_arrays[0].items[idx].doc_id});
+            std.debug.print("Score {d}: {d} - Doc id: {d}\n", .{idx, self.results_arrays[0].items[idx].score, self.results_arrays[0].items[idx].doc_id});
         }
+        std.debug.print("\n", .{});
     }
 };
