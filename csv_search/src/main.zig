@@ -27,8 +27,8 @@ const StaticIntegerSet = @import("static_integer_set.zig").StaticIntegerSet;
 
 
 fn bench(testing: bool) !void {
-    // const filename: []const u8 = "../tests/mb_small.csv";
-    const filename: []const u8 = "../tests/mb.csv";
+    const filename: []const u8 = "../tests/mb_small.csv";
+    // const filename: []const u8 = "../tests/mb.csv";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -228,7 +228,139 @@ fn main_cli_runner() !void {
     });
 }
 
+fn server_test() !void {
+    // Embed files
+    const index_html = @embedFile("index.html");
+    const style_css = @embedFile("style.css");
+    const table_js = @embedFile("table.js");
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    const filename: []const u8 = "../tests/mb_small.csv";
+
+    var search_cols = std.ArrayList([]u8).init(allocator);
+    try search_cols.append(try allocator.dupe(u8, "TITLE"));
+    try search_cols.append(try allocator.dupe(u8, "ARTIST"));
+    try search_cols.append(try allocator.dupe(u8, "ALBUM"));
+    defer {
+        for (search_cols.items) |col| {
+            allocator.free(col);
+        }
+        search_cols.deinit();
+    }
+
+    var index_manager = try IndexManager.init(filename, &search_cols, allocator);
+    try index_manager.readFile();
+
+    // Write files to disk
+    var output_filename = try std.fmt.allocPrint(
+        index_manager.allocator, 
+        "{s}/index.html", 
+        .{index_manager.tmp_dir}
+        );
+    var output_file = try std.fs.cwd().createFile(
+        output_filename, 
+        .{ .read = true },
+        );
+    _ = try output_file.write(index_html);
+
+    output_filename = try std.fmt.allocPrint(
+        index_manager.allocator, 
+        "{s}/style.css",
+        .{index_manager.tmp_dir}
+        );
+    output_file = try std.fs.cwd().createFile(
+        output_filename, 
+        .{ .read = true },
+        );
+    _ = try output_file.write(style_css);
+
+    output_filename = try std.fmt.allocPrint(
+        index_manager.allocator, 
+        "{s}/table.js",
+        .{index_manager.tmp_dir}
+        );
+    output_file = try std.fs.cwd().createFile(
+        output_filename, 
+        .{ .read = true },
+        );
+    _ = try output_file.write(table_js);
+
+    var query_map = std.StringHashMap([]const u8).init(allocator);
+    var boost_factors = std.ArrayList(f32).init(allocator);
+
+    for (search_cols.items) |col| {
+        try query_map.put(col, "");
+        try boost_factors.append(1.0);
+    }
+
+    var query_handler = try QueryHandler.init(
+        &index_manager,
+        boost_factors,
+        query_map,
+        allocator,
+    );
+
+
+    var simple_router = zap.Router.init(
+        allocator, 
+        .{},
+        );
+
+    try simple_router.handle_func("/search", &query_handler, &QueryHandler.on_request);
+    try simple_router.handle_func("/get_columns", &query_handler, &QueryHandler.get_columns);
+    try simple_router.handle_func("/get_search_columns", &query_handler, &QueryHandler.get_search_columns);
+    try simple_router.handle_func("/healthcheck", &query_handler, &QueryHandler.healthcheck);
+
+    var listener = zap.HttpListener.init(.{
+        .port = 5000,
+        .on_request = simple_router.on_request_handler(),
+        .log = true,
+    });
+    try listener.listen();
+
+    const full_path = try std.mem.concat(
+        index_manager.string_arena.allocator(),
+        u8, 
+        &[_][]const u8{index_manager.tmp_dir, "/index.html"}
+        );
+
+    var cmd = std.process.Child.init(&[_][]const u8{"open", full_path}, allocator);
+    try cmd.spawn();
+    _ = try cmd.wait();
+
+    defer {
+        for (search_cols.items) |col| {
+            allocator.free(col);
+        }
+
+        search_cols.deinit();
+        query_map.deinit();
+        boost_factors.deinit();
+
+        query_handler.deinit();
+        simple_router.deinit();
+
+        index_manager.deinit() catch {};
+        _ = gpa.deinit();
+    }
+
+
+    std.debug.print("\n\n\nListening on 0.0.0.0:5000\n", .{});
+
+    // start worker threads
+    zap.start(.{
+        .threads = 1,
+        .workers = 1,
+    });
+}
+
 pub fn main() !void {
     // try main_cli_runner();
-    try bench(false);
+    try server_test();
+    // try bench(false);
 }

@@ -21,8 +21,8 @@ const ScorePair        = @import("sorted_array.zig").ScorePair;
 
 const AtomicCounter = std.atomic.Value(u64);
 
-pub const MAX_NUM_RESULTS     = 1000;
-const IDF_THRESHOLD: f32  = 1.0 + std.math.log2(100);  // If term occurs in more than 1% of documents don't create new docs for it.
+pub const MAX_NUM_RESULTS = 1000;
+const IDF_THRESHOLD: f32  = 1.0 + std.math.log2(100);
 
 const Column = struct {
     csv_idx: usize,
